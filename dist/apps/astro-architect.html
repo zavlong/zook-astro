@@ -1,0 +1,2409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Galactic Astro-Architect & Stellar Cartographer</title>
+<style>
+  :root {
+    --bg-dark: #07090e;
+    --panel-bg: #10141d;
+    --border: #1f2737;
+    --accent: #4fa3ff;
+    --accent-hover: #70b5ff;
+    --text: #e2e8f0;
+    --text-muted: #8391a5;
+    --code-bg: #05070a;
+    --danger: #ff5555;
+    --danger-hover: #ff7777;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+    background: var(--bg-dark);
+    color: var(--text);
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+  #sidebar {
+    width: 580px;
+    background: var(--panel-bg);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+  }
+  .header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .header h1 { font-size: 1.0rem; font-weight: 600; letter-spacing: 0.5px; white-space: nowrap; }
+  .header-actions { display: flex; gap: 6px; align-items: center; }
+  .tabs {
+    display: flex;
+    background: #0b0d13;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 10px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-family: inherit;
+    border-bottom: 2px solid transparent;
+  }
+  .tab-btn.active {
+    color: var(--accent);
+    border-bottom: 2px solid var(--accent);
+    background: var(--panel-bg);
+  }
+  .tab-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: none;
+  }
+  .tab-content.active { display: block; }
+  .form-group { margin-bottom: 8px; }
+  label { display: block; font-size: 0.68rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 3px; font-weight: 600; }
+  input, select, textarea {
+    width: 100%;
+    background: #080a0e;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 0.80rem;
+    font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: none; }
+  .card {
+    background: #0c0f16;
+    border: 1px solid var(--border);
+    padding: 10px 12px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .card.star-card { border-left: 3px solid #ffaa00; }
+  .card.scaling-card { border-left: 3px solid var(--accent); background: #0e131d; }
+  .card-top-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    position: absolute;
+    top: 6px;
+    right: 6px;
+  }
+  .order-btn {
+    background: #141b29;
+    border: 1px solid var(--border);
+    color: #9cb3d6;
+    padding: 2px 7px;
+    font-size: 0.70rem;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .order-btn:hover { background: #202b3f; color: #fff; }
+  .del-btn {
+    background: none;
+    border: none;
+    color: var(--danger);
+    cursor: pointer;
+    font-size: 1.05rem;
+    line-height: 1;
+    margin-left: 4px;
+  }
+  .del-btn:hover { color: var(--danger-hover); }
+  .moon-container {
+    margin-top: 8px;
+    padding-left: 10px;
+    border-left: 2px dashed #2a354b;
+  }
+  .submoon-container {
+    margin-top: 6px;
+    padding-left: 8px;
+    border-left: 2px dotted #435472;
+  }
+  .moon-card {
+    background: #090c12;
+    border: 1px solid #1a2233;
+    padding: 6px 8px;
+    border-radius: 4px;
+    margin-bottom: 6px;
+    position: relative;
+  }
+  .submoon-card {
+    background: #06080d;
+    border: 1px solid #161e2e;
+    padding: 5px 7px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    position: relative;
+  }
+  button.action-btn {
+    background: var(--accent);
+    color: #000;
+    font-weight: 600;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  button.action-btn:hover { background: var(--accent-hover); }
+  button.danger-btn {
+    background: #36171a;
+    color: #ff7777;
+    border: 1px solid #66222a;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.73rem;
+    font-weight: 600;
+  }
+  button.danger-btn:hover { background: #4a1f24; color: #ff9999; }
+  button.secondary-btn {
+    background: #19202f;
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.73rem;
+  }
+  button.secondary-btn:hover { background: #232d42; }
+  button.rand-btn {
+    background: #202b3d;
+    color: #8ac0ff;
+    border: 1px solid #334460;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  button.rand-btn:hover { background: #2b3b55; color: #fff; }
+  pre code {
+    display: block;
+    white-space: pre;
+    background: var(--code-bg);
+    padding: 12px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    border: 1px solid var(--border);
+    overflow-x: auto;
+    color: #a5d6ff;
+  }
+  #canvas-container {
+    flex: 1;
+    position: relative;
+    background: radial-gradient(circle at center, #0a0d17 0%, #030406 100%);
+    overflow: hidden;
+  }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+
+  .canvas-controls-bar {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(16, 20, 29, 0.92);
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    font-size: 0.76rem;
+    backdrop-filter: blur(6px);
+    z-index: 5;
+  }
+  .view-toggle-group {
+    display: flex;
+    background: #080a0e;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .view-toggle-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .view-toggle-btn.active {
+    background: var(--accent);
+    color: #000;
+    font-weight: bold;
+  }
+  .nav-btn {
+    background: #1f293d;
+    border: 1px solid #334460;
+    color: #8ac0ff;
+    padding: 4px 10px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 0.72rem;
+    font-family: inherit;
+    font-weight: bold;
+  }
+  .nav-btn:hover { background: #2d3b55; color: #fff; }
+  .slider-container {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+  }
+  .slider-container input[type=range] {
+    width: 70px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .canvas-overlay {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    display: flex;
+    gap: 8px;
+    background: rgba(16, 20, 29, 0.85);
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+  }
+  #importModal {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(0, 0, 0, 0.75);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-box {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    width: 600px;
+    max-width: 90vw;
+    padding: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+  }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <div class="header">
+    <h1>Astro-Architect</h1>
+    <div class="header-actions">
+      <button class="secondary-btn" onclick="openImportModal()">📥 Import</button>
+      <button class="secondary-btn" onclick="exportJSON()">📤 Export</button>
+      <button class="rand-btn" onclick="renderAll()" title="Refresh">&#x21bb;</button>
+      <button class="rand-btn" onclick="randomizeSystem()">&#x2684; Rand</button>
+      <select id="presetSelect" style="width: auto;" onchange="loadPreset(this.value)">
+        <option value="sol">Preset: Sol</option>
+        <option value="alphacentauri">Preset: &alpha; Centauri</option>
+        <option value="sirius">Preset: Sirius</option>
+        <option value="procyon">Preset: Procyon</option>
+        <option value="epsiloneridani">Preset: &epsilon; Eridani</option>
+        <option value="gliese667">Preset: Gliese 667</option>
+        <option value="castor">Preset: Castor (Sextuple)</option>
+        <option value="arcturus">Preset: Arcturus</option>
+        <option value="kepler90">Preset: Kepler-90</option>
+        <option value="trappist1">Preset: TRAPPIST-1</option>
+        <option value="sgra">Preset: Sgr A*</option>
+        <option value="blank">Preset: [ Custom / Current ]</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('design')">Layout</button>
+    <button class="tab-btn" onclick="switchTab('export')">Stellaris Script</button>
+  </div>
+
+  <div id="tab-design" class="tab-content active">
+    <div class="card" style="padding: 8px 10px; margin-bottom: 8px;">
+      <div style="font-size: 0.70rem; font-weight: bold; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase;">
+        RANDOM GENERATION CONVENTIONS
+      </div>
+      <div style="display: flex; gap: 12px; font-size: 0.78rem;">
+        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; text-transform: none; margin: 0;">
+          <input type="checkbox" id="optAllowGreek" checked style="width: auto;"> Greek (&alpha;–&omega;)
+        </label>
+        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; text-transform: none; margin: 0;">
+          <input type="checkbox" id="optAllowLatin" checked style="width: auto;"> Latin (A–z)
+        </label>
+        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; text-transform: none; margin: 0;">
+          <input type="checkbox" id="optAllowNumbers" checked style="width: auto;"> Numbers (1–200)
+        </label>
+      </div>
+    </div>
+
+    <div class="card scaling-card">
+      <div style="font-size: 0.72rem; font-weight: bold; color: var(--accent); margin-bottom: 6px;">
+        CONVERSION MODEL: Dist = (Scale &times; AU<sup>Exponent</sup>) + Offset
+      </div>
+      <div style="display:flex; gap:8px;">
+        <div class="form-group" style="flex:1;">
+          <label>Scale (k)</label>
+          <input type="number" id="scaleFactor" step="1" value="50" oninput="currentSystem.scaling.scale=parseFloat(this.value)||50; persistCurrentSystem(); renderAll();">
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label>Exponent (p)</label>
+          <input type="number" id="exponent" step="0.001" value="0.667" oninput="currentSystem.scaling.exponent=parseFloat(this.value)||0.667; persistCurrentSystem(); renderAll();">
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label>Offset (c)</label>
+          <input type="number" id="offset" step="1" value="0" oninput="currentSystem.scaling.offset=parseFloat(this.value)||0; persistCurrentSystem(); renderAll();">
+        </div>
+      </div>
+    </div>
+
+    <div class="card star-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+        <div style="font-size: 0.72rem; font-weight: bold; color: #ffaa00;">STELLAR CONFIGURATION</div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <button class="danger-btn" onclick="deleteCurrentSystemFromSidebar()" title="Delete this star system and remove from galaxy">🗑 Delete System</button>
+          <select id="stellarHierarchy" style="width:auto; padding:2px 6px; font-size:0.75rem;" onchange="currentSystem.hierarchy=this.value; toggleHierarchyUI(); syncSystemToGalaxyNode(); persistCurrentSystem(); renderAll();">
+            <option value="single">Single Star</option>
+            <option value="circumbinary">Circumbinary Pair (P-Type)</option>
+            <option value="s_type_binary">Distant Companion (S-Type Binary)</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px;">
+        <div class="form-group" style="flex:2;">
+          <label>Primary Host Name</label>
+          <input type="text" id="starName" value="Sol" oninput="currentSystem.star.name=this.value; syncSystemToGalaxyNode(); persistCurrentSystem(); updateScript();">
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label>Size</label>
+          <input type="number" id="starSize" value="30" oninput="currentSystem.star.size=parseFloat(this.value)||20; persistCurrentSystem(); updateScript();">
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:4px;">
+        <label>Primary Spectral Class</label>
+        <select id="starClass" onchange="currentSystem.star.class=this.value; syncSystemToGalaxyNode(); persistCurrentSystem(); updateScript();">
+          <option value="pc_g_star">G-Type Star (Sol)</option>
+          <option value="pc_a_star">A-Type Star (Sirius, Denebola, Castor)</option>
+          <option value="pc_b_star">B-Type Blue Star</option>
+          <option value="pc_m_star">M-Type Red Dwarf (TRAPPIST-1)</option>
+          <option value="pc_k_star">K-Type Orange Dwarf (Epsilon Eridani, Arcturus)</option>
+          <option value="pc_f_star">F-Type Star (Procyon)</option>
+          <option value="pc_white_dwarf">White Dwarf</option>
+          <option value="pc_black_hole">Black Hole (Sgr A*)</option>
+          <option value="pc_neutron_star">Neutron Star</option>
+        </select>
+      </div>
+
+      <div id="closeBinaryBlock" style="display:none; border-top:1px dashed #334; padding-top:8px; margin-top:6px;">
+        <div style="display:flex; gap:8px;">
+          <div class="form-group" style="flex:2;">
+            <label>Close Companion Name</label>
+            <input type="text" id="star2Name" value="Companion B" oninput="currentSystem.star2.name=this.value; persistCurrentSystem(); updateScript();">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label>Size</label>
+            <input type="number" id="star2Size" value="22" oninput="currentSystem.star2.size=parseFloat(this.value)||16; persistCurrentSystem(); updateScript();">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label>&Delta;r Dist</label>
+            <input type="number" id="star2Dist" value="14" oninput="currentSystem.star2.dist=parseFloat(this.value)||14; persistCurrentSystem(); updateScript();">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Companion Spectral Class</label>
+          <select id="star2Class" onchange="currentSystem.star2.class=this.value; syncSystemToGalaxyNode(); persistCurrentSystem(); updateScript();">
+            <option value="pc_k_star">K-Type Orange Dwarf</option>
+            <option value="pc_m_star">M-Type Red Dwarf</option>
+            <option value="pc_g_star">G-Type Star</option>
+            <option value="pc_f_star">F-Type Star</option>
+            <option value="pc_a_star">A-Type Star</option>
+            <option value="pc_b_star">B-Type Blue Star</option>
+            <option value="pc_white_dwarf">White Dwarf</option>
+            <option value="pc_black_hole">Black Hole</option>
+            <option value="pc_neutron_star">Neutron Star</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin: 12px 0 8px;">
+      <label style="margin:0;">SYSTEM BODIES & S-TYPE COMPANIONS</label>
+      <div style="display:flex; gap:6px;">
+        <button class="secondary-btn" onclick="sortByDistance()">Sort by AU</button>
+        <button class="secondary-btn" onclick="addBody()">+ Add Body</button>
+      </div>
+    </div>
+
+    <div id="bodiesList"></div>
+  </div>
+
+  <div id="tab-export" class="tab-content">
+    <button class="action-btn" style="margin-bottom: 12px; width: 100%;" onclick="copyScript()">Copy Script to Clipboard</button>
+    <pre><code id="scriptOutput"></code></pre>
+  </div>
+</div>
+
+<div id="canvas-container">
+  <canvas id="viewport"></canvas>
+
+  <div class="canvas-controls-bar">
+    <button id="btnGalaxyNav" class="nav-btn" onclick="toggleGalaxyView()">🌌 Galaxy Map</button>
+    
+    <div class="view-toggle-group" id="galaxyEditTools" style="display:none;">
+      <button id="btnToolSelect" class="view-toggle-btn active" onclick="setGalaxyTool('select')">Select</button>
+      <button id="btnToolAdd" class="view-toggle-btn" onclick="setGalaxyTool('add')">+ Add Star</button>
+    </div>
+
+    <div class="view-toggle-group" id="systemViewToggles">
+      <button id="btnViewOrrery" class="view-toggle-btn active" onclick="setViewMode('orrery')">Orrery</button>
+      <button id="btnViewLinear" class="view-toggle-btn" onclick="setViewMode('linear')">Linear</button>
+    </div>
+
+    <div class="slider-container" id="speedContainer">
+      <span style="font-size:0.70rem; font-weight:bold;">Speed:</span>
+      <input type="range" id="speedSlider" min="0" max="5" step="0.1" value="1.0" oninput="simSpeed = parseFloat(this.value); document.getElementById('speedVal').textContent = simSpeed.toFixed(1) + 'x';">
+      <span id="speedVal" style="font-size:0.70rem; min-width:26px; color:var(--accent);">1.0x</span>
+    </div>
+  </div>
+
+  <div class="canvas-overlay">
+    <span id="overlayHints">Milky Way Galaxy | Double-click or use (+Add Star) to plant system | Shift+Drag to reposition | Alt+Click to Delete</span>
+  </div>
+</div>
+
+<div id="importModal">
+  <div class="modal-box">
+    <h2 style="font-size: 1.0rem; margin-bottom: 8px;">Import System JSON</h2>
+    <p style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 8px;">
+      Paste an AI-generated system configuration object or preset JSON below:
+    </p>
+    <textarea id="importInput" rows="12" style="font-family: monospace; font-size: 0.75rem;" placeholder="Paste JSON here..."></textarea>
+    <div style="display:flex; justify-content: flex-end; gap: 8px; margin-top: 10px;">
+      <button class="secondary-btn" onclick="closeImportModal()">Cancel</button>
+      <button class="action-btn" onclick="processImportJSON()">Load System</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const GREEK_ALPHABET = [
+  "Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta",
+  "Iota", "Kappa", "Lambda", "Mu", "Nu", "Xi", "Omicron", "Pi",
+  "Rho", "Sigma", "Tau", "Upsilon", "Phi", "Chi", "Psi", "Omega"
+];
+
+const LATIN_LETTERS = [
+  "a", "b", "c", "d", "e", "f", "g", "h", "i", "k", "l", "m", 
+  "n", "o", "p", "q", "r", "s", "t", "u", "w", "x", "y", "z",
+  "A", "B", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "O", "P", "Q"
+];
+
+const CONSTELLATIONS_GENITIVE = [
+  "Andromedae", "Aquilae", "Aquarii", "Arietis", "Aurigae", "Bootis",
+  "Cancri", "Canis_Majoris", "Canis_Minoris", "Capricorni", "Cassiopeiae",
+  "Centauri", "Cephei", "Ceti", "Coronae_Borealis", "Corvi", "Crateris",
+  "Cygni", "Delphini", "Draconis", "Equulei", "Eridani", "Geminorum",
+  "Herculis", "Hydrae", "Leonis", "Leporis", "Librae", "Lupi", "Lyrae",
+  "Ophiuchi", "Orionis", "Pegasi", "Persei", "Piscium", "Piscis_Austrini",
+  "Sagittae", "Sagittarii", "Scorpii", "Serpentis", "Tauri", "Trianguli",
+  "Ursae_Majoris", "Ursae_Minoris", "Virginis", "Apidis", "Chamaeleontis",
+  "Doradus", "Grus", "Hydri", "Indi", "Muscae", "Phaenicis", "Piscis_Volantis",
+  "Tucanae", "Volantis", "Canum_Venaticorum", "Camelopardalis", "Comae_Berenices",
+  "Lacertae", "Leonis_Minoris", "Lyncis", "Monocerotis", "Scuti", "Sextantis",
+  "Trianguli_Australis", "Vulpeculae", "Antliae", "Caeli", "Circini", "Fornacis",
+  "Horologii", "Mensae", "Microscopii", "Normae", "Octantis", "Pictoris",
+  "Pyxidis", "Reticuli", "Sculptoris", "Telescopii", "Carinae", "Puppis",
+  "Velorum", "Columbae", "Coronae_Australis"
+];
+
+const CLASS_COLORS = {
+  pc_continental: '#2f6fa3',
+  pc_ocean: '#1e5f8a',
+  pc_gaia: '#2ecc71',
+  pc_desert: '#c99655',
+  pc_tropical: '#2e995a',
+  pc_arid: '#b87c4a',
+  pc_tundra: '#5d828e',
+  pc_arctic: '#95b8d1',
+  pc_alpine: '#4a6f78',
+  pc_savannah: '#a38f4d',
+  pc_barren: '#8c7e6d',
+  pc_barren_cold: '#888f99',
+  pc_molten: '#d46b38',
+  pc_frozen: '#7bbcd4',
+  pc_toxic: '#d9b343',
+  pc_gas_giant: '#c49666',
+  pc_ice_giant: '#4b70dd',
+  pc_g_star: '#ffcc33',
+  pc_a_star: '#e0ecff',
+  pc_b_star: '#89b6ff',
+  pc_m_star: '#ff5533',
+  pc_k_star: '#ffaa44',
+  pc_f_star: '#fff6e0',
+  pc_white_dwarf: '#ffffff',
+  pc_t_star: '#773322',
+  pc_black_hole: '#111111',
+  pc_neutron_star: '#88ffff',
+  belt: '#666666',
+  rl_habitable_normal: '#38a3a5',
+  rl_unhabitable_planets: '#a77f54',
+  rl_gas_giants: '#d4a373',
+  random: '#7e6db0'
+};
+
+const SPECTRAL_LUMINOSITY_ORDER = {
+  'o': 0, 'b': 1, 'a': 2, 'f': 3, 'g': 4, 'k': 5, 'm': 6,
+  'd': 7, 'ns': 8, 'bh': 9
+};
+
+// -------------------------------------------------------------
+// HOISTED HELPER FUNCTIONS (Declared first to avoid runtime crashes)
+// -------------------------------------------------------------
+function isStarClass(cls) {
+  if (!cls) return false;
+  return cls.includes('_star') || cls === 'pc_black_hole' || cls === 'pc_neutron_star' || cls === 'pc_white_dwarf';
+}
+
+function calculatePlanetSize(r_earth, m_earth) {
+  const R_JUP = 11.209;
+  const SQRT_M_JUP = 17.828;
+  let x = null;
+  let isFromRadius = true;
+
+  if (r_earth !== null && !isNaN(r_earth) && r_earth > 0) {
+    x = r_earth;
+    isFromRadius = true;
+  } else if (m_earth !== null && !isNaN(m_earth) && m_earth > 0) {
+    x = Math.sqrt(m_earth);
+    isFromRadius = false;
+  }
+
+  if (!x) return 14;
+  const threshold = isFromRadius ? R_JUP : SQRT_M_JUP;
+  let calculatedSize;
+
+  if (x < threshold) {
+    calculatedSize = 18 * Math.pow(x, 0.3);
+  } else {
+    calculatedSize = 40 * Math.pow(x / threshold, 0.3);
+  }
+
+  return Math.max(6, Math.min(45, Math.round(calculatedSize)));
+}
+
+function computeClusterGeometry(starClasses) {
+  const count = starClasses.length;
+  if (count <= 1) {
+    return [{ dx: 0, dy: 0, class: starClasses[0], size: 3.2 }];
+  }
+  if (count === 2) {
+    return [
+      { dx: -2.6, dy: 0, class: starClasses[0], size: 3.0 },
+      { dx: 2.6, dy: 0, class: starClasses[1], size: 2.4 }
+    ];
+  }
+  if (count === 3) {
+    const r = 3.6;
+    return [
+      { dx: 0, dy: -r, class: starClasses[0], size: 3.0 },
+      { dx: -r * 0.866, dy: r * 0.5, class: starClasses[1], size: 2.5 },
+      { dx: r * 0.866, dy: r * 0.5, class: starClasses[2], size: 2.2 }
+    ];
+  }
+  if (count === 4) {
+    const d = 3.8;
+    return [
+      { dx: 0, dy: -d, class: starClasses[0], size: 2.8 },
+      { dx: d, dy: 0, class: starClasses[1], size: 2.6 },
+      { dx: 0, dy: d, class: starClasses[2], size: 2.3 },
+      { dx: -d, dy: 0, class: starClasses[3], size: 2.1 }
+    ];
+  }
+
+  // 5+: Primary star in center, remainder in regular polygon ring
+  const outerCount = count - 1;
+  const ringRadius = 5.0;
+  const result = [{ dx: 0, dy: 0, class: starClasses[0], size: 3.2, isCenter: true }];
+
+  for (let i = 0; i < outerCount; i++) {
+    const theta = (i * Math.PI * 2) / outerCount - Math.PI / 2;
+    result.push({
+      dx: Math.cos(theta) * ringRadius,
+      dy: Math.sin(theta) * ringRadius,
+      class: starClasses[i + 1],
+      size: Math.max(1.6, 2.6 - (i * 0.12)),
+      isCenter: false
+    });
+  }
+
+  return result;
+}
+
+function getMultiplicityName(count) {
+  switch (count) {
+    case 1: return 'Single Star';
+    case 2: return 'Binary System';
+    case 3: return 'Trinary System';
+    case 4: return 'Quadruple System';
+    case 5: return 'Quintuple System (Square + Center)';
+    case 6: return 'Sextuple System (Pentagon + Center)';
+    case 7: return 'Septuple System (Hexagon + Center)';
+    default: return `${count}-Star Multiple System`;
+  }
+}
+
+const canvas = document.getElementById('viewport');
+const ctx = canvas.getContext('2d');
+
+let camera = { x: 0, y: 0, zoom: 1.0 };
+let isDragging = false;
+let isDraggingStar = false;
+let dragTargetStar = null;
+let dragStart = { x: 0, y: 0 };
+let animTime = 0;
+let simSpeed = 1.0;
+let currentViewMode = 'galaxy';
+let galaxyTool = 'select';
+let hoveredGalaxyNode = null;
+
+let currentSystem = null;
+const SYSTEM_REGISTRY = {};
+
+function persistCurrentSystem() {
+  if (currentSystem && currentSystem._galaxyId) {
+    SYSTEM_REGISTRY[currentSystem._galaxyId] = JSON.parse(JSON.stringify(currentSystem));
+  }
+}
+
+function getSystemStarClasses(system) {
+  if (!system) return ['pc_g_star'];
+  const starClasses = [];
+
+  if (system.star && isStarClass(system.star.class)) {
+    starClasses.push(system.star.class);
+  }
+
+  if (system.hierarchy === 'circumbinary' && system.star2 && isStarClass(system.star2.class)) {
+    starClasses.push(system.star2.class);
+  }
+
+  if (system.bodies) {
+    system.bodies.forEach(b => {
+      if (isStarClass(b.type)) starClasses.push(b.type);
+      if (b.moons) {
+        b.moons.forEach(m => {
+          if (isStarClass(m.type)) starClasses.push(m.type);
+          if (m.moons) {
+            m.moons.forEach(sm => {
+              if (isStarClass(sm.type)) starClasses.push(sm.type);
+            });
+          }
+        });
+      }
+    });
+  }
+
+  return starClasses.length ? starClasses : ['pc_g_star'];
+}
+
+function getSystemStarClassTag(system) {
+  const starClasses = getSystemStarClasses(system);
+
+  const getCode = (cls) => {
+    if (cls === 'pc_black_hole') return 'bh';
+    if (cls === 'pc_neutron_star') return 'ns';
+    if (cls === 'pc_white_dwarf') return 'd';
+    return cls.replace('pc_', '').replace('_star', '')[0] || 'g';
+  };
+
+  const codes = starClasses.map(getCode);
+  codes.sort((a, b) => (SPECTRAL_LUMINOSITY_ORDER[a] ?? 99) - (SPECTRAL_LUMINOSITY_ORDER[b] ?? 99));
+
+  if (codes.length === 1) return "sc_system";
+  if (codes.length === 2) return `sc_binary_${codes.join('')}`;
+  return `sc_trinary_${codes.slice(0, 3).join('')}`;
+}
+
+function syncSystemToGalaxyNode() {
+  if (!currentSystem || !currentSystem._galaxyId) return;
+  const node = GALAXY_SYSTEMS.find(s => s.id === currentSystem._galaxyId);
+  if (!node) return;
+
+  node.name = currentSystem.star.name;
+  node.desc = `${currentSystem.star.class} | ${currentSystem.bodies.length} bodies`;
+
+  const starClasses = getSystemStarClasses(currentSystem);
+  node.stars = computeClusterGeometry(starClasses);
+}
+
+// Built-in presets dictionary
+const PRESETS = {
+  sol: {
+    id: "sol_system_initializer",
+    hierarchy: "single",
+    scaling: { scale: 50, exponent: 0.667, offset: 0 },
+    star: { name: "Sol", class: "pc_g_star", size: 30 },
+    star2: { name: "Companion B", class: "pc_k_star", size: 20, dist: 14 },
+    bodies: [
+      { name: "Mercury", sma: 0.387, type: "pc_molten", size: 13, speed: 1.6, randMode: false, moons: [] },
+      { name: "Venus", sma: 0.723, type: "pc_toxic", size: 18, speed: 1.1, randMode: false, moons: [] },
+      { name: "Earth", sma: 1.000, type: "pc_continental", size: 18, speed: 1.0, randMode: false, moons: [{ name: "Luna", type: "pc_barren_cold", size: 8, dist: 6, randMode: false, moons: [] }] },
+      { name: "Mars", sma: 1.524, type: "pc_barren", size: 15, speed: 0.8, randMode: false, moons: [] },
+      { name: "Ceres (Belt)", sma: 2.767, type: "belt", size: 5, speed: 0.5, randMode: false, moons: [] },
+      { name: "Jupiter", sma: 5.204, type: "pc_gas_giant", size: 40, speed: 0.4, randMode: false, moons: [
+        { name: "Io", type: "pc_molten", size: 7, dist: 5, randMode: false, moons: [] },
+        { name: "Europa", type: "pc_frozen", size: 7, dist: 3, randMode: false, moons: [] },
+        { name: "Ganymede", type: "pc_frozen", size: 9, dist: 3, randMode: false, moons: [] },
+        { name: "Callisto", type: "pc_barren_cold", size: 8, dist: 3, randMode: false, moons: [] }
+      ]},
+      { name: "Saturn", sma: 9.582, type: "pc_gas_giant", size: 38, speed: 0.3, ring: true, randMode: false, moons: [
+        { name: "Titan", type: "pc_toxic", size: 9, dist: 6, randMode: false, moons: [] }
+      ]},
+      { name: "Uranus", sma: 19.201, type: "pc_ice_giant", size: 27, speed: 0.2, ring: true, randMode: false, moons: [] },
+      { name: "Neptune", sma: 30.070, type: "pc_ice_giant", size: 27, speed: 0.15, ring: true, randMode: false, moons: [] },
+      { name: "Pluto (Kuiper)", sma: 39.482, type: "belt", size: 6, speed: 0.1, randMode: false, moons: [] }
+    ]
+  },
+  alphacentauri: {
+    id: "alpha_centauri_initializer",
+    hierarchy: "s_type_binary",
+    scaling: { scale: 45, exponent: 0.667, offset: 0 },
+    star: { name: "Rigil Kentaurus (A)", class: "pc_g_star", size: 30 },
+    star2: { name: "Toliman (B)", class: "pc_k_star", size: 24, dist: 14 },
+    bodies: [
+      { name: "Rigil Kentaurus b", sma: 0.52, type: "pc_molten", size: 14, speed: 1.4, randMode: false, moons: [] },
+      { name: "Chiron", sma: 1.15, type: "pc_continental", size: 19, speed: 0.95, randMode: false, moons: [{ name: "Chiron I", type: "pc_barren_cold", size: 7, dist: 5, randMode: false, moons: [] }] },
+      { name: "Asteroid Debris", sma: 2.80, type: "belt", size: 4, speed: 0.5, randMode: false, moons: [] },
+      { 
+        name: "Toliman (B)", sma: 23.5, type: "pc_k_star", size: 24, speed: 0.18, randMode: false,
+        moons: [
+          { name: "Toliman b", type: "pc_molten", size: 14, dist: 6, randMode: false, moons: [] },
+          { 
+            name: "Toliman c", type: "pc_continental", size: 18, dist: 6, randMode: false,
+            moons: [{ name: "Toliman c I", type: "pc_barren_cold", size: 6, dist: 4, randMode: false }]
+          }
+        ]
+      },
+      { 
+        name: "Proxima Centauri (C)", sma: 48.0, type: "pc_m_star", size: 15, speed: 0.08, randMode: false,
+        moons: [
+          { name: "Proxima b", type: "pc_continental", size: 19, dist: 5, randMode: false, moons: [] },
+          { name: "Proxima d", type: "pc_barren", size: 12, dist: 3, randMode: false, moons: [] }
+        ]
+      }
+    ]
+  },
+  sirius: {
+    id: "sirius_system_initializer",
+    hierarchy: "s_type_binary",
+    scaling: { scale: 50, exponent: 0.667, offset: 0 },
+    star: { name: "Sirius A", class: "pc_a_star", size: 34 },
+    star2: { name: "Sirius B", class: "pc_white_dwarf", size: 14, dist: 14 },
+    bodies: [
+      { name: "Inner Ash Belt", sma: 0.85, type: "belt", size: 4, speed: 1.4, randMode: false, moons: [] },
+      { name: "Sirius Ab", sma: 1.85, type: "pc_desert", size: 17, speed: 1.1, randMode: false, moons: [] },
+      { name: "Sirius Ac", sma: 3.10, type: "pc_continental", size: 20, speed: 0.85, randMode: false, moons: [{ name: "Sirius Ac I", type: "pc_barren_cold", size: 7, dist: 5, randMode: false, moons: [] }] },
+      { name: "Sirius Ad", sma: 4.90, type: "pc_barren", size: 14, speed: 0.65, randMode: false, moons: [] },
+      { name: "Sirius B (The Pup)", sma: 19.8, type: "pc_white_dwarf", size: 16, speed: 0.28, randMode: false, moons: [{ name: "Graveyard Remnants", type: "pc_barren_cold", size: 6, dist: 4, randMode: false, moons: [] }] },
+      { name: "Outer Circumbinary Debris", sma: 44.0, type: "belt", size: 5, speed: 0.15, randMode: false, moons: [] }
+    ]
+  },
+  procyon: {
+    id: "procyon_system_initializer",
+    hierarchy: "s_type_binary",
+    scaling: { scale: 50, exponent: 0.667, offset: 0 },
+    star: { name: "Procyon A", class: "pc_f_star", size: 32 },
+    star2: { name: "Procyon B", class: "pc_white_dwarf", size: 13, dist: 14 },
+    bodies: [
+      { name: "Procyon Ab", sma: 0.42, type: "pc_molten", size: 14, speed: 1.55, randMode: false, moons: [] },
+      { name: "Procyon Ac", sma: 0.88, type: "pc_barren", size: 17, speed: 1.15, randMode: false, moons: [] },
+      { name: "Procyon Ad", sma: 1.65, type: "pc_toxic", size: 19, speed: 0.85, randMode: false, moons: [] },
+      { name: "Procyon B", sma: 15.0, type: "pc_white_dwarf", size: 14, speed: 0.30, randMode: false, moons: [] }
+    ]
+  },
+  epsiloneridani: {
+    id: "epsilon_eridani_initializer",
+    hierarchy: "single",
+    scaling: { scale: 50, exponent: 0.667, offset: 0 },
+    star: { name: "Epsilon Eridani", class: "pc_k_star", size: 26 },
+    star2: { name: "Companion B", class: "pc_k_star", size: 20, dist: 14 },
+    bodies: [
+      { name: "Epsilon Eridani I", sma: 0.28, type: "pc_molten", size: 13, speed: 1.75, randMode: false, moons: [] },
+      { name: "Epsilon Eridani II", sma: 0.58, type: "pc_arid", size: 17, speed: 1.25, randMode: false, moons: [] },
+      { name: "Inner Warm Asteroid Belt", sma: 3.00, type: "belt", size: 4, speed: 0.60, randMode: false, moons: [] },
+      { name: "AEgir (b)", sma: 3.48, type: "pc_gas_giant", size: 38, speed: 0.52, ring: true, randMode: false, moons: [] }
+    ]
+  },
+  gliese667: {
+    id: "gliese_667_initializer",
+    hierarchy: "circumbinary",
+    scaling: { scale: 50, exponent: 0.667, offset: 0 },
+    star: { name: "Gliese 667 A", class: "pc_k_star", size: 25 },
+    star2: { name: "Gliese 667 B", class: "pc_k_star", size: 23, dist: 14 },
+    bodies: [
+      { name: "Circumbinary Dust Belt", sma: 22.0, type: "belt", size: 4, speed: 0.22, randMode: false, moons: [] },
+      { 
+        name: "Gliese 667 C", sma: 52.0, type: "pc_m_star", size: 16, speed: 0.08, randMode: false,
+        moons: [
+          { name: "Gliese 667 Cb", type: "pc_molten", size: 14, dist: 4.5, randMode: false, moons: [] },
+          { name: "Gliese 667 Cc", type: "pc_continental", size: 18, dist: 3.0, randMode: false, moons: [] }
+        ]
+      }
+    ]
+  },
+  castor: {
+    id: "castor_system_initializer",
+    hierarchy: "single",
+    scaling: { scale: 45, exponent: 0.667, offset: 0 },
+    star: { name: "Castor Aa", class: "pc_a_star", size: 32 },
+    star2: { name: "Companion B", class: "pc_k_star", size: 20, dist: 14 },
+    bodies: [
+      { name: "Castor Ab", sma: 0.12, type: "pc_m_star", size: 12, speed: 2.8, randMode: false, moons: [] },
+      { 
+        name: "Castor B", sma: 24.5, type: "pc_a_star", size: 30, speed: 0.20, randMode: false,
+        moons: [{ name: "Castor Bb", type: "pc_m_star", size: 11, dist: 4.0, randMode: false, moons: [] }]
+      },
+      { 
+        name: "Castor C (YY Gem)", sma: 56.0, type: "pc_m_star", size: 15, speed: 0.07, randMode: false,
+        moons: [{ name: "YY Geminorum B", type: "pc_m_star", size: 14, dist: 3.5, randMode: false, moons: [] }]
+      }
+    ]
+  },
+  arcturus: {
+    id: "arcturus_system_initializer",
+    hierarchy: "single",
+    scaling: { scale: 45, exponent: 0.667, offset: 0 },
+    star: { name: "Arcturus", class: "pc_k_star", size: 42 },
+    star2: { name: "Companion B", class: "pc_k_star", size: 20, dist: 14 },
+    bodies: [
+      { name: "Engulfment Rim", sma: 0.35, type: "belt", size: 4, speed: 2.2, randMode: false, moons: [] },
+      { name: "Arcturus b", sma: 1.10, type: "pc_molten", size: 12, speed: 1.4, randMode: false, moons: [] },
+      { name: "Arcturus e (Sanctuary)", sma: 13.2, type: "pc_continental", size: 22, speed: 0.42, randMode: false, moons: [] }
+    ]
+  },
+  kepler90: {
+    id: "kepler_90_initializer",
+    hierarchy: "single",
+    scaling: { scale: 80, exponent: 0.75, offset: 5 },
+    star: { name: "Kepler-90", class: "pc_g_star", size: 30 },
+    star2: { name: "Companion B", class: "pc_k_star", size: 20, dist: 14 },
+    bodies: [
+      { name: "Kepler-90b", sma: 0.074, type: "pc_molten", size: 16, speed: 2.5, randMode: false, moons: [] },
+      { name: "Kepler-90c", sma: 0.089, type: "pc_molten", size: 16, speed: 2.3, randMode: false, moons: [] },
+      { name: "Kepler-90i", sma: 0.123, type: "pc_toxic", size: 16, speed: 2.0, randMode: false, moons: [] },
+      { name: "Kepler-90d", sma: 0.320, type: "pc_continental", size: 23, speed: 1.4, randMode: false, moons: [] },
+      { name: "Kepler-90e", sma: 0.420, type: "pc_continental", size: 22, speed: 1.2, randMode: false, moons: [] },
+      { name: "Kepler-90f", sma: 0.480, type: "pc_ocean", size: 23, speed: 1.1, randMode: false, moons: [] },
+      { name: "Kepler-90g", sma: 0.710, type: "pc_gas_giant", size: 36, speed: 0.9, ring: true, randMode: false, moons: [] },
+      { name: "Kepler-90h", sma: 1.010, type: "pc_gas_giant", size: 42, speed: 0.7, ring: false, randMode: false, moons: [] }
+    ]
+  },
+  denebola: {
+    id: "denebola_system_initializer",
+    hierarchy: "single",
+    scaling: { scale: 50, exponent: 0.667, offset: 0 },
+    star: { name: "Denebola", class: "pc_a_star", size: 32 },
+    star2: { name: "Denebola B", class: "pc_k_star", size: 20, dist: 14 },
+    bodies: [
+      { name: "Scorched Dust Ring", sma: 0.60, type: "belt", size: 4, speed: 1.5, randMode: false, moons: [] },
+      { name: "Unity", sma: 2.65, type: "pc_continental", size: 20, speed: 0.7, randMode: false, moons: [] },
+      { name: "Debris Belt", sma: 8.00, type: "belt", size: 5, speed: 0.4, randMode: false, moons: [] },
+      { name: "Outer Giant", sma: 18.00, type: "pc_gas_giant", size: 36, speed: 0.2, randMode: false, moons: [] }
+    ]
+  },
+  trappist1: {
+    id: "trappist1_system_initializer",
+    hierarchy: "single",
+    scaling: { scale: 200, exponent: 1.0, offset: 10 },
+    star: { name: "TRAPPIST-1", class: "pc_m_star", size: 14 },
+    star2: { name: "Companion", class: "pc_m_star", size: 12, dist: 10 },
+    bodies: [
+      { name: "TRAPPIST-1b", sma: 0.0115, type: "pc_molten", size: 19, speed: 2.2, randMode: false, moons: [] },
+      { name: "TRAPPIST-1c", sma: 0.0158, type: "pc_barren", size: 19, speed: 1.8, randMode: false, moons: [] },
+      { name: "TRAPPIST-1d", sma: 0.0223, type: "pc_continental", size: 17, speed: 1.4, randMode: false, moons: [] },
+      { name: "TRAPPIST-1e", sma: 0.0293, type: "pc_continental", size: 18, speed: 1.1, randMode: false, moons: [] },
+      { name: "TRAPPIST-1f", sma: 0.0385, type: "pc_frozen", size: 18, speed: 0.9, randMode: false, moons: [] },
+      { name: "TRAPPIST-1g", sma: 0.0469, type: "pc_frozen", size: 19, speed: 0.7, randMode: false, moons: [] }
+    ]
+  },
+  sgra: {
+    id: "sgr_a_star_initializer",
+    hierarchy: "single",
+    scaling: { scale: 20, exponent: 0.6, offset: 30 },
+    star: { name: "Sagittarius A*", class: "pc_black_hole", size: 40 },
+    star2: { name: "Sgr A* B", class: "pc_black_hole", size: 20, dist: 15 },
+    bodies: [
+      { name: "Accretion Stream", sma: 0.5, type: "belt", size: 5, speed: 3.5, randMode: false, moons: [] },
+      { name: "S4716", sma: 1.5, type: "pc_b_star", size: 12, speed: 2.8, randMode: false, moons: [] },
+      { name: "S2 (S0-2)", sma: 5.0, type: "pc_b_star", size: 15, speed: 1.9, randMode: false, moons: [] },
+      { name: "Minispiral Gas Belt", sma: 12.0, type: "belt", size: 5, speed: 0.9, randMode: false, moons: [] },
+      { 
+        name: "IRS 13E", sma: 22.0, type: "pc_a_star", size: 20, speed: 0.7, randMode: false,
+        moons: [{ name: "IRS 13E Companion", type: "pc_black_hole", size: 8, dist: 6, randMode: false, moons: [] }]
+      },
+      { name: "Circum-Nuclear Disk", sma: 45.0, type: "belt", size: 6, speed: 0.2, randMode: false, moons: [] }
+    ]
+  },
+  blank: {
+    id: "custom_system_initializer",
+    hierarchy: "single",
+    scaling: { scale: 50, exponent: 0.667, offset: 0 },
+    star: { name: "Primary Star", class: "pc_g_star", size: 25 },
+    star2: { name: "Companion B", class: "pc_k_star", size: 20, dist: 14 },
+    bodies: []
+  }
+};
+
+for (const [key, val] of Object.entries(PRESETS)) {
+  SYSTEM_REGISTRY[key] = JSON.parse(JSON.stringify(val));
+  SYSTEM_REGISTRY[key]._galaxyId = key;
+}
+
+let GALAXY_SYSTEMS = [
+  { 
+    id: 'sgra', name: 'Sagittarius A*', x: 0, y: 0, presetKey: 'sgra', desc: 'Galactic Center Supermassive Core',
+    stars: [{ dx: 0, dy: 0, class: 'pc_black_hole', size: 4.8 }]
+  },
+  { 
+    id: 'sol', name: 'Sol', x: -160, y: 190, presetKey: 'sol', desc: 'Solar Core System (8 Planets)',
+    stars: [{ dx: 0, dy: 0, class: 'pc_g_star', size: 3.2 }]
+  },
+  { 
+    id: 'alphacentauri', name: 'α Centauri', x: -148, y: 202, presetKey: 'alphacentauri', desc: 'Trinary System (G2V + K1V + M5.5V)',
+    stars: computeClusterGeometry(['pc_g_star', 'pc_k_star', 'pc_m_star'])
+  },
+  { 
+    id: 'sirius', name: 'Sirius', x: -178, y: 172, presetKey: 'sirius', desc: 'Binary Star (A0V + DA2 White Dwarf)',
+    stars: computeClusterGeometry(['pc_a_star', 'pc_white_dwarf'])
+  },
+  { 
+    id: 'procyon', name: 'Procyon', x: -136, y: 176, presetKey: 'procyon', desc: 'Binary Star (F5IV Subgiant + White Dwarf)',
+    stars: computeClusterGeometry(['pc_f_star', 'pc_white_dwarf'])
+  },
+  { 
+    id: 'epsiloneridani', name: 'ε Eridani', x: -190, y: 215, presetKey: 'epsiloneridani', desc: 'Active K2V Orange Dwarf + Asteroid Rings',
+    stars: computeClusterGeometry(['pc_k_star'])
+  },
+  { 
+    id: 'gliese667', name: 'Gliese 667', x: -110, y: 130, presetKey: 'gliese667', desc: 'Trinary System (K3V + K5V + M1.5V)',
+    stars: computeClusterGeometry(['pc_k_star', 'pc_k_star', 'pc_m_star'])
+  },
+  { 
+    id: 'castor', name: 'Castor', x: -210, y: 140, presetKey: 'castor', desc: 'Sextuple System (Pentagon + Center)',
+    stars: computeClusterGeometry(['pc_a_star', 'pc_a_star', 'pc_m_star', 'pc_m_star', 'pc_m_star', 'pc_m_star'])
+  },
+  { 
+    id: 'arcturus', name: 'Arcturus', x: -90, y: 250, presetKey: 'arcturus', desc: 'K1.5III Swollen Orange Giant',
+    stars: computeClusterGeometry(['pc_k_star'])
+  },
+  { 
+    id: 'kepler90', name: 'Kepler-90', x: -260, y: 70, presetKey: 'kepler90', desc: '8-Planet Resonant Solar Analog',
+    stars: computeClusterGeometry(['pc_g_star'])
+  },
+  { 
+    id: 'trappist1', name: 'TRAPPIST-1', x: -230, y: 260, presetKey: 'trappist1', desc: 'Ultra-Cool M-Dwarf (7 Terrestrial Worlds)',
+    stars: computeClusterGeometry(['pc_m_star'])
+  },
+  { 
+    id: 'denebola', name: 'Denebola', x: -60, y: 290, presetKey: 'denebola', desc: 'A3V Debris Disk Star',
+    stars: computeClusterGeometry(['pc_a_star'])
+  },
+  { 
+    id: 'vega', name: 'Vega', x: -30, y: 190, presetKey: null, desc: 'Luminous A0V Standard Star',
+    stars: computeClusterGeometry(['pc_a_star'])
+  },
+  { 
+    id: 'altair', name: 'Altair', x: 20, y: 160, presetKey: null, desc: 'Rapid Rotator (A7V)',
+    stars: computeClusterGeometry(['pc_a_star'])
+  },
+  { 
+    id: 'barnard', name: "Barnard's Star", x: -164, y: 197, presetKey: null, desc: 'High Proper Motion M4V Red Dwarf',
+    stars: computeClusterGeometry(['pc_m_star'])
+  },
+  { 
+    id: 'alnitak', name: 'Alnitak', x: -280, y: 310, presetKey: null, desc: 'O9.7Ib Massive Blue Supergiant Binary',
+    stars: computeClusterGeometry(['pc_b_star', 'pc_b_star'])
+  }
+];
+
+let HYPERLANES = [
+  ['sol', 'alphacentauri'],
+  ['sol', 'sirius'],
+  ['sol', 'procyon'],
+  ['sol', 'epsiloneridani'],
+  ['alphacentauri', 'barnard'],
+  ['barnard', 'sol'],
+  ['sirius', 'castor'],
+  ['procyon', 'arcturus'],
+  ['arcturus', 'denebola'],
+  ['epsiloneridani', 'trappist1'],
+  ['castor', 'kepler90'],
+  ['kepler90', 'alnitak'],
+  ['trappist1', 'alnitak'],
+  ['gliese667', 'vega'],
+  ['vega', 'altair'],
+  ['gliese667', 'sgra'],
+  ['procyon', 'gliese667']
+];
+
+const GALAXY_DUST = [];
+(function initGalaxyBackground() {
+  const armCount = 2;
+  const starsPerArm = 900;
+  for (let a = 0; a < armCount; a++) {
+    const armOffset = (a * Math.PI * 2) / armCount;
+    for (let i = 0; i < starsPerArm; i++) {
+      const dist = 30 + Math.pow(Math.random(), 1.6) * 380;
+      const angle = armOffset + (dist * 0.015) + (Math.random() - 0.5) * 0.6;
+      const x = Math.cos(angle) * dist + (Math.random() - 0.5) * 20;
+      const y = Math.sin(angle) * dist + (Math.random() - 0.5) * 20;
+      const brightness = Math.random() * 0.7 + 0.1;
+      const size = Math.random() < 0.05 ? 1.4 : (Math.random() < 0.2 ? 0.9 : 0.5);
+      GALAXY_DUST.push({ x, y, size, brightness });
+    }
+  }
+  for (let i = 0; i < 400; i++) {
+    const r = Math.pow(Math.random(), 2) * 80;
+    const theta = Math.random() * Math.PI * 2;
+    GALAXY_DUST.push({
+      x: Math.cos(theta) * r,
+      y: Math.sin(theta) * r,
+      size: Math.random() * 1.0 + 0.4,
+      brightness: Math.random() * 0.9 + 0.1
+    });
+  }
+})();
+
+function resize() {
+  canvas.width = canvas.parentElement.clientWidth;
+  canvas.height = canvas.parentElement.clientHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+function setGalaxyTool(tool) {
+  galaxyTool = tool;
+  document.getElementById('btnToolSelect').classList.toggle('active', tool === 'select');
+  document.getElementById('btnToolAdd').classList.toggle('active', tool === 'add');
+  canvas.style.cursor = (tool === 'add') ? 'crosshair' : 'grab';
+}
+
+function calculateSystemPositions() {
+  if (!currentSystem) return;
+  const { scale, exponent, offset } = currentSystem.scaling;
+  let previousTotalDist = 0;
+
+  currentSystem.bodies.forEach(b => {
+    b.totalDist = Math.round((scale * Math.pow(Math.max(0.0001, b.sma), exponent)) + offset);
+    b.stepDelta = Math.max(1, b.totalDist - previousTotalDist);
+    previousTotalDist = b.totalDist;
+
+    if (!b.moons) b.moons = [];
+    if (b.randMode === undefined) b.randMode = false;
+    if (b.sizeMin === undefined) b.sizeMin = Math.max(8, (b.size || 14) - 3);
+    if (b.sizeMax === undefined) b.sizeMax = (b.size || 14) + 3;
+    if (!b.randClass) b.randClass = b.type;
+
+    b.moons.forEach(m => {
+      if (!m.moons) m.moons = [];
+      if (m.randMode === undefined) m.randMode = false;
+      if (m.sizeMin === undefined) m.sizeMin = Math.max(4, (m.size || 6) - 2);
+      if (m.sizeMax === undefined) m.sizeMax = (m.size || 6) + 2;
+      if (!m.randClass) m.randClass = m.type;
+
+      m.moons.forEach(sm => {
+        if (sm.randMode === undefined) sm.randMode = false;
+        if (sm.sizeMin === undefined) sm.sizeMin = Math.max(3, (sm.size || 5) - 2);
+        if (sm.sizeMax === undefined) sm.sizeMax = (sm.size || 5) + 2;
+        if (!sm.randClass) sm.randClass = sm.type;
+      });
+    });
+  });
+}
+
+function toggleHierarchyUI() {
+  const isCircum = (currentSystem?.hierarchy === 'circumbinary');
+  document.getElementById('closeBinaryBlock').style.display = isCircum ? 'block' : 'none';
+}
+
+function syncInputsFromState() {
+  if (!currentSystem) return;
+  document.getElementById('scaleFactor').value = currentSystem.scaling.scale;
+  document.getElementById('exponent').value = currentSystem.scaling.exponent;
+  document.getElementById('offset').value = currentSystem.scaling.offset;
+  
+  document.getElementById('stellarHierarchy').value = currentSystem.hierarchy || 'single';
+  document.getElementById('starName').value = currentSystem.star.name;
+  document.getElementById('starSize').value = currentSystem.star.size;
+  document.getElementById('starClass').value = currentSystem.star.class;
+
+  if (currentSystem.star2) {
+    document.getElementById('star2Name').value = currentSystem.star2.name;
+    document.getElementById('star2Size').value = currentSystem.star2.size;
+    document.getElementById('star2Dist').value = currentSystem.star2.dist;
+    document.getElementById('star2Class').value = currentSystem.star2.class;
+  }
+
+  toggleHierarchyUI();
+}
+
+function renderAll() {
+  calculateSystemPositions();
+  renderUI();
+  updateScript();
+}
+
+function loadPreset(key) {
+  persistCurrentSystem();
+  if (SYSTEM_REGISTRY[key]) {
+    currentSystem = JSON.parse(JSON.stringify(SYSTEM_REGISTRY[key]));
+  } else if (PRESETS[key]) {
+    currentSystem = JSON.parse(JSON.stringify(PRESETS[key]));
+    currentSystem._galaxyId = key;
+    SYSTEM_REGISTRY[key] = JSON.parse(JSON.stringify(currentSystem));
+  }
+  if (currentSystem && !currentSystem.star2) {
+    currentSystem.star2 = { name: "Companion B", class: "pc_k_star", size: 20, dist: 14 };
+  }
+  document.getElementById('presetSelect').value = PRESETS[key] ? key : 'blank';
+  syncInputsFromState();
+  renderAll();
+}
+
+function buildRandomSystem(customId = null, customName = null) {
+  const STAR_PROFILES = [
+    { class: "pc_m_star", name: "M-Type Dwarf", size: 16, scale: 120, exp: 0.85, off: 5, innerSMA: 0.05, habSMA: 0.15 },
+    { class: "pc_k_star", name: "K-Type Orange Dwarf", size: 22, scale: 55, exp: 0.667, off: 0, innerSMA: 0.25, habSMA: 0.65 },
+    { class: "pc_g_star", name: "G-Type Solar Analog", size: 26, scale: 50, exp: 0.667, off: 0, innerSMA: 0.35, habSMA: 1.0 },
+    { class: "pc_f_star", name: "F-Type Star", size: 28, scale: 45, exp: 0.667, off: 0, innerSMA: 0.5, habSMA: 1.6 },
+    { class: "pc_a_star", name: "A-Type Luminous Star", size: 32, scale: 40, exp: 0.667, off: 0, innerSMA: 0.8, habSMA: 2.5 }
+  ];
+
+  const starProfile = STAR_PROFILES[Math.floor(Math.random() * STAR_PROFILES.length)];
+  const rawSysName = customName || generateConstellationName();
+  const baseName = rawSysName.replace(/_/g, ' ');
+  const sysId = customId || `sys_${Date.now()}`;
+
+  const roll = Math.random();
+  const hierarchy = roll < 0.55 ? "single" : (roll < 0.8 ? "circumbinary" : "s_type_binary");
+
+  const system = {
+    id: `${sysId}_initializer`,
+    _galaxyId: sysId,
+    hierarchy: hierarchy,
+    scaling: {
+      scale: starProfile.scale,
+      exponent: starProfile.exp,
+      offset: (hierarchy === "circumbinary" ? starProfile.off + 15 : starProfile.off)
+    },
+    star: {
+      name: hierarchy === "single" ? baseName : `${baseName} A`,
+      class: starProfile.class,
+      size: starProfile.size
+    },
+    star2: {
+      name: `${baseName} B`,
+      class: "pc_k_star",
+      size: Math.round(starProfile.size * 0.75),
+      dist: 14
+    },
+    bodies: []
+  };
+
+  const bodyCount = Math.floor(Math.random() * 5) + 4;
+  let currentSMA = (hierarchy === "circumbinary" ? starProfile.innerSMA * 1.8 : starProfile.innerSMA) * (0.8 + Math.random() * 0.4);
+
+  for (let i = 0; i < bodyCount; i++) {
+    const isBelt = (i > 1 && i < bodyCount - 2 && Math.random() < 0.25);
+    const romanNumeral = ["b", "c", "d", "e", "f", "g", "h"][i] || `p${i+1}`;
+    let type = "pc_barren";
+    let size = 15;
+    let hasRing = false;
+    let generatedMoons = [];
+
+    if (isBelt) {
+      type = "belt";
+      size = 5;
+    } else {
+      const relSMA = currentSMA / starProfile.habSMA;
+      if (relSMA < 0.65) {
+        type = Math.random() < 0.5 ? "pc_molten" : "pc_barren";
+        const estimatedRadius = 0.5 + Math.random() * 0.9;
+        size = calculatePlanetSize(estimatedRadius, null);
+      } else if (relSMA >= 0.65 && relSMA <= 1.4) {
+        type = Math.random() < 0.7 ? "pc_continental" : "pc_toxic";
+        const estimatedRadius = 0.8 + Math.random() * 1.2;
+        size = calculatePlanetSize(estimatedRadius, null);
+        if (Math.random() < 0.4) {
+          generatedMoons.push({
+            name: `${system.star.name} ${romanNumeral} I`,
+            type: "pc_barren_cold",
+            size: 8,
+            dist: 6,
+            randMode: false,
+            moons: []
+          });
+        }
+      } else {
+        type = Math.random() < 0.6 ? "pc_gas_giant" : "pc_ice_giant";
+        const estimatedRadius = (type === 'pc_gas_giant') ? (8 + Math.random() * 5) : (3 + Math.random() * 2);
+        size = calculatePlanetSize(estimatedRadius, null);
+        hasRing = Math.random() < 0.35;
+        generatedMoons.push({
+          name: `${system.star.name} ${romanNumeral} I`,
+          type: "pc_frozen",
+          size: 7,
+          dist: 5,
+          randMode: false,
+          moons: []
+        });
+      }
+    }
+
+    system.bodies.push({
+      name: isBelt ? `Debris Belt ${i+1}` : `${system.star.name} ${romanNumeral}`,
+      sma: +(currentSMA.toFixed(currentSMA < 0.1 ? 4 : 3)),
+      type: type,
+      size: size,
+      speed: +(0.3 + Math.random() * 1.5).toFixed(2),
+      ring: hasRing,
+      randMode: false,
+      moons: generatedMoons
+    });
+
+    currentSMA *= (1.45 + Math.random() * 0.5);
+  }
+
+  if (hierarchy === "s_type_binary") {
+    const distantSMA = +(currentSMA * 1.8).toFixed(2);
+    system.bodies.push({
+      name: `${baseName} B`,
+      sma: distantSMA,
+      type: "pc_k_star",
+      size: 22,
+      speed: 0.2,
+      ring: false,
+      randMode: false,
+      moons: [
+        { name: `${baseName} Bb`, type: "pc_molten", size: 14, dist: 5, randMode: false, moons: [] },
+        { 
+          name: `${baseName} Bc`, type: "pc_continental", size: 18, dist: 5, randMode: false,
+          moons: [{ name: `${baseName} Bc I`, type: "pc_barren_cold", size: 6, dist: 3, randMode: false }]
+        }
+      ]
+    });
+  }
+
+  return system;
+}
+
+function createNewSystemAt(gx, gy) {
+  persistCurrentSystem();
+
+  const newId = `sys_${Date.now()}`;
+  const generatedSystem = buildRandomSystem(newId);
+
+  SYSTEM_REGISTRY[newId] = JSON.parse(JSON.stringify(generatedSystem));
+
+  const starClasses = getSystemStarClasses(generatedSystem);
+  const nodeStars = computeClusterGeometry(starClasses);
+
+  const galaxyNode = {
+    id: newId,
+    name: generatedSystem.star.name.replace(/\s+A$/, ''),
+    x: Math.round(gx),
+    y: Math.round(gy),
+    presetKey: null,
+    desc: `${generatedSystem.star.class} | ${generatedSystem.bodies.length} bodies`,
+    stars: nodeStars
+  };
+
+  let nearest = null;
+  let minDist = Infinity;
+  GALAXY_SYSTEMS.forEach(s => {
+    const d = Math.hypot(s.x - gx, s.y - gy);
+    if (d < minDist) {
+      minDist = d;
+      nearest = s;
+    }
+  });
+
+  GALAXY_SYSTEMS.push(galaxyNode);
+  if (nearest && minDist < 150) {
+    HYPERLANES.push([newId, nearest.id]);
+  }
+
+  currentSystem = generatedSystem;
+  document.getElementById('presetSelect').value = "blank";
+  syncInputsFromState();
+  renderAll();
+}
+
+function randomizeSystem() {
+  persistCurrentSystem();
+  const sysId = currentSystem?._galaxyId || `sys_${Date.now()}`;
+  currentSystem = buildRandomSystem(sysId);
+  SYSTEM_REGISTRY[sysId] = JSON.parse(JSON.stringify(currentSystem));
+
+  document.getElementById('presetSelect').value = "blank";
+  syncInputsFromState();
+  syncSystemToGalaxyNode();
+  if (currentViewMode === 'galaxy') setViewMode('orrery');
+  renderAll();
+}
+
+function deleteGalaxySystem(sysId) {
+  const idx = GALAXY_SYSTEMS.findIndex(s => s.id === sysId);
+  if (idx === -1) return;
+
+  GALAXY_SYSTEMS.splice(idx, 1);
+  HYPERLANES = HYPERLANES.filter(([a, b]) => a !== sysId && b !== sysId);
+  delete SYSTEM_REGISTRY[sysId];
+
+  if (currentSystem?._galaxyId === sysId) {
+    if (GALAXY_SYSTEMS.length > 0) {
+      const fallback = GALAXY_SYSTEMS[0];
+      enterSystemFromGalaxy(fallback);
+    } else {
+      currentSystem = null;
+    }
+  }
+
+  hoveredGalaxyNode = null;
+  if (currentViewMode !== 'galaxy') {
+    setViewMode('galaxy');
+  }
+}
+
+function deleteCurrentSystemFromSidebar() {
+  if (!currentSystem?._galaxyId) {
+    alert("This system is not bound to a galactic map node.");
+    return;
+  }
+  if (confirm(`Are you sure you want to delete ${currentSystem.star.name} from the galaxy?`)) {
+    deleteGalaxySystem(currentSystem._galaxyId);
+  }
+}
+
+function enterSystemFromGalaxy(sysNode) {
+  persistCurrentSystem();
+
+  if (SYSTEM_REGISTRY[sysNode.id]) {
+    currentSystem = JSON.parse(JSON.stringify(SYSTEM_REGISTRY[sysNode.id]));
+  } else if (sysNode.presetKey && PRESETS[sysNode.presetKey]) {
+    currentSystem = JSON.parse(JSON.stringify(PRESETS[sysNode.presetKey]));
+    currentSystem._galaxyId = sysNode.id;
+    SYSTEM_REGISTRY[sysNode.id] = JSON.parse(JSON.stringify(currentSystem));
+  } else {
+    currentSystem = buildRandomSystem(sysNode.id, sysNode.name);
+    SYSTEM_REGISTRY[sysNode.id] = JSON.parse(JSON.stringify(currentSystem));
+  }
+
+  document.getElementById('presetSelect').value = PRESETS[sysNode.presetKey] ? sysNode.presetKey : "blank";
+  syncInputsFromState();
+  renderAll();
+  setViewMode('orrery');
+}
+
+function toggleGalaxyView() {
+  if (currentViewMode === 'galaxy') {
+    setViewMode('orrery');
+  } else {
+    setViewMode('galaxy');
+  }
+}
+
+function setViewMode(mode) {
+  currentViewMode = mode;
+  const isGalaxy = (mode === 'galaxy');
+
+  document.getElementById('btnGalaxyNav').textContent = isGalaxy ? '🪐 System View' : '🌌 Galaxy Map';
+  document.getElementById('btnGalaxyNav').style.background = isGalaxy ? '#1f3d2f' : '#1f293d';
+  document.getElementById('btnGalaxyNav').style.color = isGalaxy ? '#6eff9f' : '#8ac0ff';
+
+  document.getElementById('galaxyEditTools').style.display = isGalaxy ? 'flex' : 'none';
+  document.getElementById('systemViewToggles').style.display = isGalaxy ? 'none' : 'flex';
+  document.getElementById('speedContainer').style.display = isGalaxy ? 'none' : 'flex';
+
+  const hintEl = document.getElementById('overlayHints');
+  if (isGalaxy) {
+    hintEl.textContent = 'Milky Way Galaxy | Double-click or use (+Add Star) to plant system | Shift+Drag to reposition | Alt+Click to Delete';
+    camera.x = canvas.width / 2;
+    camera.y = canvas.height / 2;
+    camera.zoom = 1.0;
+  } else if (mode === 'linear') {
+    hintEl.textContent = 'Linear Architecture View | Moons Dropped Below | Drag to Pan';
+    camera.x = 80;
+    camera.y = canvas.height / 2;
+    camera.zoom = 0.85;
+  } else {
+    hintEl.textContent = 'Orrery View | Concentric Orbits | Scroll to Zoom | Drag to Pan';
+    camera.x = canvas.width / 2;
+    camera.y = canvas.height / 2;
+    camera.zoom = 1.1;
+  }
+}
+
+function openImportModal() {
+  document.getElementById('importInput').value = '';
+  document.getElementById('importModal').style.display = 'flex';
+}
+
+function closeImportModal() {
+  document.getElementById('importModal').style.display = 'none';
+}
+
+function exportJSON() {
+  persistCurrentSystem();
+  const bundle = {
+    activeSystem: currentSystem,
+    systemRegistry: SYSTEM_REGISTRY,
+    galaxySystems: GALAXY_SYSTEMS,
+    hyperlanes: HYPERLANES
+  };
+  navigator.clipboard.writeText(JSON.stringify(bundle, null, 2));
+  alert('System & Galaxy JSON configuration copied to clipboard.');
+}
+
+function processImportJSON() {
+  const raw = document.getElementById('importInput').value.trim();
+  if (!raw) return;
+
+  try {
+    let parsed = JSON.parse(raw);
+
+    if (parsed.galaxySystems && parsed.activeSystem) {
+      GALAXY_SYSTEMS = parsed.galaxySystems;
+      HYPERLANES = parsed.hyperlanes || [];
+      if (parsed.systemRegistry) {
+        Object.assign(SYSTEM_REGISTRY, parsed.systemRegistry);
+      }
+      currentSystem = parsed.activeSystem;
+    } else {
+      const keys = Object.keys(parsed);
+      if (keys.length === 1 && typeof parsed[keys[0]] === 'object' && parsed[keys[0]].star) {
+        parsed = parsed[keys[0]];
+      }
+
+      if (!parsed.star || !parsed.bodies) {
+        throw new Error("Invalid structure: missing 'star' or 'bodies' properties.");
+      }
+
+      currentSystem = {
+        id: parsed.id || "imported_system_initializer",
+        _galaxyId: parsed._galaxyId || `sys_${Date.now()}`,
+        hierarchy: parsed.hierarchy || "single",
+        scaling: parsed.scaling || { scale: 50, exponent: 0.667, offset: 0 },
+        star: parsed.star,
+        star2: parsed.star2 || { name: "Companion B", class: "pc_k_star", size: 20, dist: 14 },
+        bodies: parsed.bodies
+      };
+      SYSTEM_REGISTRY[currentSystem._galaxyId] = JSON.parse(JSON.stringify(currentSystem));
+    }
+
+    closeImportModal();
+    syncInputsFromState();
+    setViewMode('orrery');
+    renderAll();
+  } catch (err) {
+    alert(`Could not parse JSON configuration: ${err.message}`);
+  }
+}
+
+function moveBody(index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= currentSystem.bodies.length) return;
+  const temp = currentSystem.bodies[index];
+  currentSystem.bodies[index] = currentSystem.bodies[target];
+  currentSystem.bodies[target] = temp;
+  persistCurrentSystem();
+  renderAll();
+}
+
+function sortByDistance() {
+  currentSystem.bodies.sort((a, b) => a.sma - b.sma);
+  persistCurrentSystem();
+  renderAll();
+}
+
+function generateConstellationName() {
+  const allowGreek = document.getElementById('optAllowGreek')?.checked ?? true;
+  const allowLatin = document.getElementById('optAllowLatin')?.checked ?? true;
+  const allowNum = document.getElementById('optAllowNumbers')?.checked ?? true;
+
+  const constellation = CONSTELLATIONS_GENITIVE[Math.floor(Math.random() * CONSTELLATIONS_GENITIVE.length)];
+  const eligibleStyles = [];
+
+  if (allowGreek) eligibleStyles.push(() => `${GREEK_ALPHABET[Math.floor(Math.random() * GREEK_ALPHABET.length)]}_${constellation}`);
+  if (allowLatin) eligibleStyles.push(() => `${LATIN_LETTERS[Math.floor(Math.random() * LATIN_LETTERS.length)]}_${constellation}`);
+  if (allowNum) eligibleStyles.push(() => `${Math.floor(1 + Math.random() * 200)}_${constellation}`);
+
+  if (eligibleStyles.length === 0) return `${Math.floor(1 + Math.random() * 200)}_${constellation}`;
+  return eligibleStyles[Math.floor(Math.random() * eligibleStyles.length)]();
+}
+
+function renderUI() {
+  const container = document.getElementById('bodiesList');
+  container.innerHTML = '';
+  if (!currentSystem) return;
+
+  currentSystem.bodies.forEach((b, i) => {
+    const div = document.createElement('div');
+    div.className = 'card';
+
+    let moonsHTML = '';
+    if (b.type !== 'belt') {
+      const isParentStar = isStarClass(b.type);
+      moonsHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin: 8px 0 4px;">
+          <label style="margin:0; color:#88b0dd;">${isParentStar ? 'Satellites / Planets' : 'Moons'} (${b.moons.length})</label>
+          <button class="secondary-btn" style="font-size:0.68rem; padding: 2px 6px;" onclick="addMoon(${i})">+ Add ${isParentStar ? 'Planet' : 'Moon'}</button>
+        </div>
+        <div class="moon-container">
+      `;
+      b.moons.forEach((m, mi) => {
+        let submoonsHTML = '';
+        if (isParentStar) {
+          submoonsHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin: 6px 0 3px;">
+              <label style="margin:0; color:#6ea8fe; font-size:0.62rem;">Sub-Moons (${m.moons ? m.moons.length : 0})</label>
+              <button class="secondary-btn" style="font-size:0.62rem; padding: 1px 5px;" onclick="addSubMoon(${i}, ${mi})">+ Add Sub-Moon</button>
+            </div>
+            <div class="submoon-container">
+          `;
+          if (m.moons && m.moons.length > 0) {
+            m.moons.forEach((sm, smi) => {
+              submoonsHTML += `
+                <div class="submoon-card">
+                  <button class="del-btn" style="font-size:0.85rem;" onclick="removeSubMoon(${i}, ${mi}, ${smi})">&times;</button>
+                  <div class="form-group" style="margin-bottom:3px;">
+                    <input type="text" value="${sm.name}" placeholder="Sub-Moon Name" oninput="currentSystem.bodies[${i}].moons[${mi}].moons[${smi}].name=this.value; persistCurrentSystem(); updateScript();">
+                  </div>
+                  <div style="display:flex; gap:6px;">
+                    <div class="form-group" style="flex:1;">
+                      <label>Size</label>
+                      <input type="number" value="${sm.size||5}" oninput="currentSystem.bodies[${i}].moons[${mi}].moons[${smi}].size=parseFloat(this.value)||5; persistCurrentSystem(); updateScript();">
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                      <label>&Delta;r</label>
+                      <input type="number" step="0.5" value="${sm.dist||2.5}" oninput="currentSystem.bodies[${i}].moons[${mi}].moons[${smi}].dist=parseFloat(this.value)||2.5; persistCurrentSystem(); updateScript();">
+                    </div>
+                    <div class="form-group" style="flex:1.5;">
+                      <label>Class</label>
+                      <select onchange="currentSystem.bodies[${i}].moons[${mi}].moons[${smi}].type=this.value; persistCurrentSystem(); syncSystemToGalaxyNode(); updateScript();">
+                        <option value="pc_barren_cold" ${sm.type==='pc_barren_cold'?'selected':''}>Barren Cold</option>
+                        <option value="pc_frozen" ${sm.type==='pc_frozen'?'selected':''}>Frozen</option>
+                        <option value="pc_molten" ${sm.type==='pc_molten'?'selected':''}>Molten</option>
+                        <option value="pc_toxic" ${sm.type==='pc_toxic'?'selected':''}>Toxic</option>
+                        <option value="pc_m_star" ${sm.type==='pc_m_star'?'selected':''}>Star: M-Dwarf</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              `;
+            });
+          }
+          submoonsHTML += `</div>`;
+        }
+
+        moonsHTML += `
+          <div class="moon-card">
+            <button class="del-btn" style="font-size:0.9rem;" onclick="removeMoon(${i}, ${mi})">&times;</button>
+            <div class="form-group" style="margin-bottom:4px;">
+              <input type="text" value="${m.name}" placeholder="Name" oninput="currentSystem.bodies[${i}].moons[${mi}].name=this.value; persistCurrentSystem(); updateScript();">
+            </div>
+            <div style="display:flex; gap:6px;">
+              <div class="form-group" style="flex:1;">
+                <label>Size</label>
+                <input type="number" value="${m.size||6}" oninput="currentSystem.bodies[${i}].moons[${mi}].size=parseFloat(this.value)||6; persistCurrentSystem(); updateScript();">
+              </div>
+              <div class="form-group" style="flex:1;">
+                <label>&Delta;r</label>
+                <input type="number" step="0.5" value="${m.dist||3}" oninput="currentSystem.bodies[${i}].moons[${mi}].dist=parseFloat(this.value)||3; persistCurrentSystem(); updateScript();">
+              </div>
+              <div class="form-group" style="flex:1.5;">
+                <label>Class</label>
+                <select onchange="currentSystem.bodies[${i}].moons[${mi}].type=this.value; persistCurrentSystem(); syncSystemToGalaxyNode(); updateScript();">
+                  <option value="pc_continental" ${m.type==='pc_continental'?'selected':''}>Continental</option>
+                  <option value="pc_barren_cold" ${m.type==='pc_barren_cold'?'selected':''}>Barren Cold</option>
+                  <option value="pc_frozen" ${m.type==='pc_frozen'?'selected':''}>Frozen</option>
+                  <option value="pc_molten" ${m.type==='pc_molten'?'selected':''}>Molten</option>
+                  <option value="pc_toxic" ${m.type==='pc_toxic'?'selected':''}>Toxic</option>
+                  <option value="pc_gas_giant" ${m.type==='pc_gas_giant'?'selected':''}>Gas Giant</option>
+                  <option value="pc_m_star" ${m.type==='pc_m_star'?'selected':''}>Companion Star: M-Dwarf</option>
+                  <option value="pc_white_dwarf" ${m.type==='pc_white_dwarf'?'selected':''}>Companion Star: White Dwarf</option>
+                  <option value="pc_black_hole" ${m.type==='pc_black_hole'?'selected':''}>Black Hole</option>
+                </select>
+              </div>
+            </div>
+            ${submoonsHTML}
+          </div>
+        `;
+      });
+      moonsHTML += `</div>`;
+    }
+
+    div.innerHTML = `
+      <div class="card-top-controls">
+        <button class="order-btn" title="Move Inward" onclick="moveBody(${i}, -1)">&Delta; In</button>
+        <button class="order-btn" title="Move Outward" onclick="moveBody(${i}, 1)">&nabla; Out</button>
+        <button class="del-btn" onclick="removeBody(${i})">&times;</button>
+      </div>
+      
+      <div class="form-group" style="padding-right: 90px;">
+        <label>Body Name</label>
+        <input type="text" value="${b.name}" oninput="currentSystem.bodies[${i}].name=this.value; persistCurrentSystem(); updateScript();">
+      </div>
+      
+      <div style="display:flex; gap:8px;">
+        <div class="form-group" style="flex:1.2;">
+          <label>Semi-Major Axis (AU)</label>
+          <input type="number" step="0.001" value="${b.sma}" oninput="currentSystem.bodies[${i}].sma=Math.max(0.0001, parseFloat(this.value)||0.001); persistCurrentSystem(); calculateSystemPositions(); updateDynamicOutputs(); updateScript();">
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label>Size</label>
+          <input type="number" value="${b.size||14}" oninput="currentSystem.bodies[${i}].size=parseFloat(this.value)||10; persistCurrentSystem(); updateScript();">
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label>&Delta;r (Step)</label>
+          <input type="text" id="step-delta-${i}" value="${b.stepDelta}" disabled style="background:#131822; color:#55bb77; font-weight:bold; cursor:not-allowed;">
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label>&Sigma; Dist</label>
+          <input type="text" id="total-dist-${i}" value="${b.totalDist}" disabled style="background:#131822; color:#70b5ff; font-weight:bold; cursor:not-allowed;">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Class</label>
+        <select onchange="currentSystem.bodies[${i}].type=this.value; persistCurrentSystem(); syncSystemToGalaxyNode(); renderAll();">
+          <option value="pc_continental" ${b.type==='pc_continental'?'selected':''}>Continental</option>
+          <option value="pc_ocean" ${b.type==='pc_ocean'?'selected':''}>Ocean</option>
+          <option value="pc_gaia" ${b.type==='pc_gaia'?'selected':''}>Gaia</option>
+          <option value="pc_desert" ${b.type==='pc_desert'?'selected':''}>Desert</option>
+          <option value="pc_tropical" ${b.type==='pc_tropical'?'selected':''}>Tropical</option>
+          <option value="pc_arid" ${b.type==='pc_arid'?'selected':''}>Arid</option>
+          <option value="pc_tundra" ${b.type==='pc_tundra'?'selected':''}>Tundra</option>
+          <option value="pc_arctic" ${b.type==='pc_arctic'?'selected':''}>Arctic</option>
+          <option value="pc_alpine" ${b.type==='pc_alpine'?'selected':''}>Alpine</option>
+          <option value="pc_savannah" ${b.type==='pc_savannah'?'selected':''}>Savannah</option>
+          <option value="pc_barren" ${b.type==='pc_barren'?'selected':''}>Barren</option>
+          <option value="pc_molten" ${b.type==='pc_molten'?'selected':''}>Molten</option>
+          <option value="pc_frozen" ${b.type==='pc_frozen'?'selected':''}>Frozen</option>
+          <option value="pc_toxic" ${b.type==='pc_toxic'?'selected':''}>Toxic</option>
+          <option value="pc_gas_giant" ${b.type==='pc_gas_giant'?'selected':''}>Gas Giant</option>
+          <option value="pc_ice_giant" ${b.type==='pc_ice_giant'?'selected':''}>Ice Giant</option>
+          <option value="pc_k_star" ${b.type==='pc_k_star'?'selected':''}>Distant Star (K-Type)</option>
+          <option value="pc_m_star" ${b.type==='pc_m_star'?'selected':''}>Distant Star (M-Type)</option>
+          <option value="pc_b_star" ${b.type==='pc_b_star'?'selected':''}>Distant Star (B-Type)</option>
+          <option value="pc_a_star" ${b.type==='pc_a_star'?'selected':''}>Distant Star (A-Type)</option>
+          <option value="pc_white_dwarf" ${b.type==='pc_white_dwarf'?'selected':''}>Distant White Dwarf</option>
+          <option value="belt" ${b.type==='belt'?'selected':''}>Asteroid Belt</option>
+        </select>
+      </div>
+
+      ${moonsHTML}
+    `;
+    container.appendChild(div);
+  });
+}
+
+function updateDynamicOutputs() {
+  if (!currentSystem) return;
+  currentSystem.bodies.forEach((b, i) => {
+    const s = document.getElementById(`step-delta-${i}`);
+    const t = document.getElementById(`total-dist-${i}`);
+    if (s) s.value = b.stepDelta;
+    if (t) t.value = b.totalDist;
+  });
+}
+
+function addBody() {
+  const lastSMA = currentSystem.bodies.length ? currentSystem.bodies[currentSystem.bodies.length - 1].sma : 0.5;
+  currentSystem.bodies.push({
+    name: "New Planet",
+    sma: +(lastSMA * 1.5).toFixed(3),
+    type: "pc_barren",
+    size: 14,
+    speed: 0.5,
+    randMode: false,
+    moons: []
+  });
+  persistCurrentSystem();
+  renderAll();
+}
+
+function removeBody(index) {
+  currentSystem.bodies.splice(index, 1);
+  persistCurrentSystem();
+  syncSystemToGalaxyNode();
+  renderAll();
+}
+
+function addMoon(planetIndex) {
+  const p = currentSystem.bodies[planetIndex];
+  const isStar = isStarClass(p.type);
+  p.moons.push({
+    name: `${p.name} ${isStar ? 'Planet' : 'Moon'} ${p.moons.length + 1}`,
+    type: isStar ? "pc_continental" : "pc_barren_cold",
+    size: isStar ? 18 : 7,
+    dist: p.moons.length === 0 ? 5 : 3,
+    randMode: false,
+    moons: []
+  });
+  persistCurrentSystem();
+  renderAll();
+}
+
+function removeMoon(planetIndex, moonIndex) {
+  currentSystem.bodies[planetIndex].moons.splice(moonIndex, 1);
+  persistCurrentSystem();
+  syncSystemToGalaxyNode();
+  renderAll();
+}
+
+function addSubMoon(planetIndex, moonIndex) {
+  const m = currentSystem.bodies[planetIndex].moons[moonIndex];
+  if (!m.moons) m.moons = [];
+  m.moons.push({
+    name: `${m.name} Moon ${m.moons.length + 1}`,
+    type: "pc_barren_cold",
+    size: 5,
+    dist: m.moons.length === 0 ? 4 : 2.5,
+    randMode: false
+  });
+  persistCurrentSystem();
+  renderAll();
+}
+
+function removeSubMoon(planetIndex, moonIndex, subMoonIndex) {
+  currentSystem.bodies[planetIndex].moons[moonIndex].moons.splice(subMoonIndex, 1);
+  persistCurrentSystem();
+  syncSystemToGalaxyNode();
+  renderAll();
+}
+
+function updateScript() {
+  if (!currentSystem) return;
+  const { scale, exponent, offset } = currentSystem.scaling;
+  const sysClass = getSystemStarClassTag(currentSystem);
+
+  let script = `# Conversion Model: r = ${scale} * (a_AU ^ ${exponent}) + ${offset}\n`;
+  script += `${currentSystem.id} = {\n`;
+  script += `\tname = "NAME_${currentSystem.star.name.replace(/\\s+/g, '_')}"\n`;
+  script += `\tclass = "${sysClass}"\n\n`;
+
+  // Primary Star
+  script += `\tplanet = {\n`;
+  script += `\t\tname = "NAME_${currentSystem.star.name.replace(/\\s+/g, '_')}"\n`;
+  script += `\t\tclass = "${currentSystem.star.class}"\n`;
+  script += `\t\torbit_distance = 0\n`;
+  script += `\t\torbit_angle = 1\n`;
+  script += `\t\tsize = ${currentSystem.star.size}\n`;
+  script += `\t\thas_ring = no\n`;
+  script += `\t}\n\n`;
+
+  // Close Circumbinary Pair Companion (P-Type)
+  if (currentSystem.hierarchy === 'circumbinary' && currentSystem.star2) {
+    script += `\t# Close Circumbinary Companion\n`;
+    script += `\tplanet = {\n`;
+    script += `\t\tname = "NAME_${currentSystem.star2.name.replace(/\\s+/g, '_')}"\n`;
+    script += `\t\tclass = "${currentSystem.star2.class}"\n`;
+    script += `\t\torbit_distance = ${currentSystem.star2.dist}\n`;
+    script += `\t\torbit_angle = 180\n`;
+    script += `\t\tsize = ${currentSystem.star2.size}\n`;
+    script += `\t\thas_ring = no\n`;
+    script += `\t}\n\n`;
+  }
+
+  // Bodies & Moons
+  currentSystem.bodies.forEach(b => {
+    if (b.type === 'belt') {
+      script += `\t# Asteroid Belt: ${b.sma} AU (Radius: ${b.totalDist})\n`;
+      script += `\tasteroid_belt = {\n`;
+      script += `\t\ttype = "rocky_asteroid_belt"\n`;
+      script += `\t\tradius = ${b.totalDist}\n`;
+      script += `\t}\n\n`;
+    } else {
+      script += `\t# ${b.name}: ${b.sma} AU (Step: ${b.stepDelta} | Cumulative: ${b.totalDist})\n`;
+      script += `\tplanet = {\n`;
+      script += `\t\tname = "NAME_${b.name.replace(/\\s+/g, '_')}"\n`;
+      script += `\t\tclass = "${b.type}"\n`;
+      script += `\t\tsize = ${b.size}\n`;
+      script += `\t\torbit_distance = ${b.stepDelta}\n`;
+      script += `\t\torbit_angle = { min = 0 max = 360 }\n`;
+      if (b.ring) script += `\t\thas_ring = yes\n`;
+
+      if (b.moons && b.moons.length > 0) {
+        b.moons.forEach(m => {
+          script += `\n\t\tmoon = {\n`;
+          script += `\t\t\tname = "NAME_${m.name.replace(/\\s+/g, '_')}"\n`;
+          script += `\t\t\tclass = "${m.type}"\n`;
+          script += `\t\t\tsize = ${m.size}\n`;
+          script += `\t\torbit_distance = ${m.dist}\n`;
+          script += `\t\torbit_angle = { min = 0 max = 360 }\n`;
+
+          if (m.moons && m.moons.length > 0) {
+            m.moons.forEach(sm => {
+              script += `\n\t\t\tmoon = {\n`;
+              script += `\t\t\t\tname = "NAME_${sm.name.replace(/\\s+/g, '_')}"\n`;
+              script += `\t\t\t\tclass = "${sm.type}"\n`;
+              script += `\t\t\t\tsize = ${sm.size}\n`;
+              script += `\t\t\torbit_distance = ${sm.dist}\n`;
+              script += `\t\t\torbit_angle = { min = 0 max = 360 }\n`;
+              script += `\t\t\t}\n`;
+            });
+          }
+
+          script += `\t\t}\n`;
+        });
+      }
+
+      script += `\t}\n\n`;
+    }
+  });
+
+  script += `}`;
+  document.getElementById('scriptOutput').textContent = script;
+}
+
+function switchTab(t) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  if (t === 'design') {
+    document.querySelector('.tabs button:nth-child(1)').classList.add('active');
+    document.getElementById('tab-design').classList.add('active');
+  } else {
+    document.querySelector('.tabs button:nth-child(2)').classList.add('active');
+    document.getElementById('tab-export').classList.add('active');
+  }
+}
+
+function copyScript() {
+  navigator.clipboard.writeText(document.getElementById('scriptOutput').textContent);
+  alert('Initializer script copied to clipboard.');
+}
+
+function getCanvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left - camera.x) / camera.zoom,
+    y: (e.clientY - rect.top - camera.y) / camera.zoom
+  };
+}
+
+canvas.addEventListener('mousedown', e => {
+  if (currentViewMode === 'galaxy') {
+    const coords = getCanvasCoords(e);
+    if (e.shiftKey && hoveredGalaxyNode) {
+      isDraggingStar = true;
+      dragTargetStar = hoveredGalaxyNode;
+      return;
+    }
+  }
+  isDragging = true;
+  dragStart = { x: e.clientX - camera.x, y: e.clientY - camera.y };
+});
+
+window.addEventListener('mousemove', e => {
+  if (isDraggingStar && dragTargetStar) {
+    const coords = getCanvasCoords(e);
+    dragTargetStar.x = Math.round(coords.x);
+    dragTargetStar.y = Math.round(coords.y);
+    return;
+  }
+
+  if (isDragging) {
+    camera.x = e.clientX - dragStart.x;
+    camera.y = e.clientY - dragStart.y;
+  }
+
+  if (currentViewMode === 'galaxy') {
+    const coords = getCanvasCoords(e);
+    let found = null;
+    for (const sys of GALAXY_SYSTEMS) {
+      const dist = Math.hypot(sys.x - coords.x, sys.y - coords.y);
+      if (dist < 14) {
+        found = sys;
+        break;
+      }
+    }
+    hoveredGalaxyNode = found;
+    if (galaxyTool === 'add') {
+      canvas.style.cursor = 'crosshair';
+    } else {
+      canvas.style.cursor = found ? (e.shiftKey ? 'move' : 'pointer') : (isDragging ? 'grabbing' : 'grab');
+    }
+  } else {
+    hoveredGalaxyNode = null;
+    canvas.style.cursor = isDragging ? 'grabbing' : 'grab';
+  }
+});
+
+window.addEventListener('mouseup', () => {
+  isDragging = false;
+  isDraggingStar = false;
+  dragTargetStar = null;
+});
+
+canvas.addEventListener('click', e => {
+  if (currentViewMode === 'galaxy') {
+    const coords = getCanvasCoords(e);
+
+    if (e.altKey && hoveredGalaxyNode) {
+      deleteGalaxySystem(hoveredGalaxyNode.id);
+      return;
+    }
+
+    if (galaxyTool === 'add') {
+      createNewSystemAt(coords.x, coords.y);
+      setGalaxyTool('select');
+      return;
+    }
+
+    if (hoveredGalaxyNode && !e.shiftKey) {
+      enterSystemFromGalaxy(hoveredGalaxyNode);
+    }
+  }
+});
+
+canvas.addEventListener('dblclick', e => {
+  if (currentViewMode === 'galaxy') {
+    const coords = getCanvasCoords(e);
+    createNewSystemAt(coords.x, coords.y);
+  }
+});
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
+  camera.zoom = Math.min(Math.max(camera.zoom * zoomFactor, 0.05), 15.0);
+});
+
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && currentViewMode !== 'galaxy') {
+    setViewMode('galaxy');
+  }
+});
+
+function renderStar(name, starClass, size, x, y) {
+  const color = CLASS_COLORS[starClass] || '#ffffff';
+  if (starClass === 'pc_black_hole') {
+    ctx.beginPath();
+    ctx.arc(x, y, (size || 25) * 0.45, 0, Math.PI * 2);
+    ctx.fillStyle = '#000';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#ff9900';
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = '#ff6600';
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  } else {
+    ctx.beginPath();
+    ctx.arc(x, y, (size || 25) * 0.45, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = color;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.70)';
+  ctx.font = '9px monospace';
+  ctx.fillText(name, x + (size * 0.45) + 5, y + 3);
+}
+
+function draw() {
+  animTime += 0.01 * simSpeed;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(camera.x, camera.y);
+  ctx.scale(camera.zoom, camera.zoom);
+
+  if (currentViewMode === 'galaxy') {
+    const coreGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, 160);
+    coreGrad.addColorStop(0, 'rgba(255, 240, 200, 0.45)');
+    coreGrad.addColorStop(0.3, 'rgba(255, 180, 100, 0.18)');
+    coreGrad.addColorStop(0.7, 'rgba(80, 120, 200, 0.06)');
+    coreGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, 160, 0, Math.PI * 2);
+    ctx.fill();
+
+    GALAXY_DUST.forEach(p => {
+      ctx.fillStyle = `rgba(210, 225, 255, ${p.brightness * 0.45})`;
+      ctx.fillRect(p.x, p.y, p.size, p.size);
+    });
+
+    ctx.lineWidth = 1.0;
+    ctx.strokeStyle = 'rgba(79, 163, 255, 0.18)';
+    ctx.setLineDash([3, 4]);
+    HYPERLANES.forEach(([idA, idB]) => {
+      const a = GALAXY_SYSTEMS.find(s => s.id === idA);
+      const b = GALAXY_SYSTEMS.find(s => s.id === idB);
+      if (a && b) {
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+    });
+    ctx.setLineDash([]);
+
+    // Systems (1 to 6+ stars)
+    GALAXY_SYSTEMS.forEach(sys => {
+      const isHovered = (hoveredGalaxyNode === sys);
+      const isSelected = (currentSystem?._galaxyId === sys.id);
+
+      if (isSelected || isHovered) {
+        ctx.beginPath();
+        ctx.arc(sys.x, sys.y, 11.5, 0, Math.PI * 2);
+        ctx.strokeStyle = isSelected ? 'rgba(79, 163, 255, 0.9)' : 'rgba(255, 255, 255, 0.85)';
+        ctx.lineWidth = isSelected ? 1.5 : 1;
+        ctx.stroke();
+      }
+
+      sys.stars.forEach(st => {
+        const starX = sys.x + st.dx;
+        const starY = sys.y + st.dy;
+        const color = CLASS_COLORS[st.class] || '#ffffff';
+
+        ctx.beginPath();
+        ctx.arc(starX, starY, st.size, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.shadowBlur = isHovered ? 14 : 7;
+        ctx.shadowColor = color;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      });
+
+      // Adaptive Barycentric Webbing
+      if (sys.stars.length > 1) {
+        ctx.beginPath();
+        if (sys.stars.length === 2) {
+          ctx.moveTo(sys.x + sys.stars[0].dx, sys.y + sys.stars[0].dy);
+          ctx.lineTo(sys.x + sys.stars[1].dx, sys.y + sys.stars[1].dy);
+        } else if (sys.stars.length <= 4) {
+          ctx.moveTo(sys.x + sys.stars[0].dx, sys.y + sys.stars[0].dy);
+          for (let i = 1; i < sys.stars.length; i++) {
+            ctx.lineTo(sys.x + sys.stars[i].dx, sys.y + sys.stars[i].dy);
+          }
+          ctx.closePath();
+        } else {
+          // 5+ stars: Outer ring polygon + spokes to center star (index 0)
+          const outerStars = sys.stars.slice(1);
+          ctx.moveTo(sys.x + outerStars[0].dx, sys.y + outerStars[0].dy);
+          for (let i = 1; i < outerStars.length; i++) {
+            ctx.lineTo(sys.x + outerStars[i].dx, sys.y + outerStars[i].dy);
+          }
+          ctx.closePath();
+
+          for (let i = 0; i < outerStars.length; i++) {
+            ctx.moveTo(sys.x + sys.stars[0].dx, sys.y + sys.stars[0].dy);
+            ctx.lineTo(sys.x + outerStars[i].dx, sys.y + outerStars[i].dy);
+          }
+        }
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.20)';
+        ctx.lineWidth = 0.75;
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = isHovered ? '#ffffff' : (isSelected ? '#70b5ff' : 'rgba(255, 255, 255, 0.70)');
+      ctx.font = isHovered ? 'bold 10px monospace' : '8.5px monospace';
+      ctx.fillText(sys.name, sys.x + 9, sys.y + 3);
+
+      if (isHovered) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(8, 12, 18, 0.94)';
+        ctx.strokeStyle = '#4fa3ff';
+        ctx.lineWidth = 1;
+        const ttWidth = 205;
+        const ttHeight = 56;
+        const ttX = sys.x + 12;
+        const ttY = sys.y - 52;
+        ctx.fillRect(ttX, ttY, ttWidth, ttHeight);
+        ctx.strokeRect(ttX, ttY, ttWidth, ttHeight);
+
+        ctx.fillStyle = '#4fa3ff';
+        ctx.font = 'bold 10px monospace';
+        const starCountLabel = getMultiplicityName(sys.stars.length);
+        ctx.fillText(`${sys.name} [${starCountLabel}]`, ttX + 8, ttY + 15);
+
+        ctx.fillStyle = '#a0aec0';
+        ctx.font = '8.5px monospace';
+        ctx.fillText(sys.desc, ttX + 8, ttY + 28);
+        ctx.fillStyle = '#55ff99';
+        ctx.fillText('► Click: Enter System', ttX + 8, ttY + 41);
+        ctx.fillStyle = '#ff7777';
+        ctx.fillText('Alt+Click: Delete', ttX + 120, ttY + 41);
+        ctx.restore();
+      }
+    });
+
+  } else if (currentViewMode === 'orrery') {
+    if (currentSystem?.star) {
+      renderStar(currentSystem.star.name, currentSystem.star.class, currentSystem.star.size, 0, 0);
+    }
+
+    if (currentSystem?.hierarchy === 'circumbinary' && currentSystem.star2) {
+      const s2Dist = currentSystem.star2.dist || 14;
+      const s2Angle = animTime * 0.4;
+      const s2x = Math.cos(s2Angle) * s2Dist;
+      const s2y = Math.sin(s2Angle) * s2Dist;
+
+      ctx.beginPath();
+      ctx.arc(0, 0, s2Dist, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255, 170, 0, 0.12)';
+      ctx.stroke();
+
+      renderStar(currentSystem.star2.name, currentSystem.star2.class, currentSystem.star2.size, s2x, s2y);
+    }
+
+    currentSystem?.bodies.forEach((b, idx) => {
+      ctx.beginPath();
+      ctx.arc(0, 0, b.totalDist, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      if (b.type === 'belt') {
+        const beltPoints = 64;
+        ctx.fillStyle = CLASS_COLORS[b.type] || '#666';
+        for (let i = 0; i < beltPoints; i++) {
+          const theta = (i / beltPoints) * Math.PI * 2 + (animTime * 0.05);
+          const r = b.totalDist + (Math.sin(i * 11) * 3);
+          ctx.fillRect(Math.cos(theta) * r, Math.sin(theta) * r, 1.5, 1.5);
+        }
+      } else {
+        const orbitalPeriod = Math.pow(Math.max(0.001, b.sma), 1.5);
+        const orbitalSpeed = Math.min(Math.max(0.5 / Math.max(orbitalPeriod, 0.05), 0.05), 3.0);
+        const angle = (animTime * orbitalSpeed) + (idx * 1.8);
+        const px = Math.cos(angle) * b.totalDist;
+        const py = Math.sin(angle) * b.totalDist;
+        const bodyRadius = Math.max(2, (b.size || 15) * 0.35);
+
+        const isStar = isStarClass(b.type);
+        const dynamicColor = CLASS_COLORS[b.type] || '#99aabf';
+
+        if (isStar) {
+          renderStar(b.name, b.type, b.size, px, py);
+        } else {
+          ctx.beginPath();
+          ctx.arc(px, py, bodyRadius, 0, Math.PI * 2);
+          ctx.fillStyle = dynamicColor;
+          ctx.fill();
+
+          if (b.ring) {
+            ctx.beginPath();
+            ctx.ellipse(px, py, bodyRadius * 2.2, bodyRadius * 0.8, 0.4, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(226, 197, 139, 0.5)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+        }
+
+        if (b.moons && b.moons.length > 0) {
+          let moonDistAccum = bodyRadius + 3;
+          b.moons.forEach((m, mi) => {
+            moonDistAccum += (m.dist || 3);
+            const moonAngle = (animTime * (3.5 / (mi + 1.2))) + (mi * 2.0);
+            const mx = px + Math.cos(moonAngle) * moonDistAccum;
+            const my = py + Math.sin(moonAngle) * moonDistAccum;
+            const moonRadius = Math.max(1.2, (m.size || 7) * 0.25);
+            const moonDynamicColor = CLASS_COLORS[m.type] || '#aaaaaa';
+
+            ctx.beginPath();
+            ctx.arc(px, py, moonDistAccum, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(mx, my, moonRadius, 0, Math.PI * 2);
+            ctx.fillStyle = moonDynamicColor;
+            ctx.fill();
+
+            if (m.moons && m.moons.length > 0) {
+              let subDistAccum = moonRadius + 2;
+              m.moons.forEach((sm, smi) => {
+                subDistAccum += (sm.dist || 2.5);
+                const subAngle = (animTime * 6.0) + (smi * 3.14);
+                const smx = mx + Math.cos(subAngle) * subDistAccum;
+                const smy = my + Math.sin(subAngle) * subDistAccum;
+                const subRadius = Math.max(0.9, (sm.size || 5) * 0.2);
+
+                ctx.beginPath();
+                ctx.arc(smx, smy, subRadius, 0, Math.PI * 2);
+                ctx.fillStyle = CLASS_COLORS[sm.type] || '#888888';
+                ctx.fill();
+              });
+            }
+          });
+        }
+
+        if (!isStar) {
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+          ctx.font = '9px monospace';
+          ctx.fillText(`${b.name} (${b.sma} AU | S:${b.size})`, px + bodyRadius + 4, py + 3);
+        }
+      }
+    });
+
+  } else {
+    const startX = 0;
+    const baseY = 0;
+
+    const maxTotalDist = currentSystem.bodies.length ? currentSystem.bodies[currentSystem.bodies.length - 1].totalDist + 80 : 300;
+    ctx.beginPath();
+    ctx.moveTo(startX, baseY);
+    ctx.lineTo(startX + maxTotalDist, baseY);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    if (currentSystem?.star) {
+      renderStar(currentSystem.star.name, currentSystem.star.class, currentSystem.star.size, startX, baseY);
+    }
+
+    if (currentSystem?.hierarchy === 'circumbinary' && currentSystem.star2) {
+      renderStar(currentSystem.star2.name, currentSystem.star2.class, currentSystem.star2.size, startX, baseY + 38);
+      ctx.beginPath();
+      ctx.moveTo(startX, baseY + 12);
+      ctx.lineTo(startX, baseY + 26);
+      ctx.strokeStyle = 'rgba(255, 170, 0, 0.3)';
+      ctx.stroke();
+    }
+
+    currentSystem?.bodies.forEach((b) => {
+      const bx = startX + b.totalDist;
+      const by = baseY;
+      const bodyRadius = Math.max(2.5, (b.size || 15) * 0.38);
+
+      if (b.type === 'belt') {
+        ctx.beginPath();
+        ctx.moveTo(bx, by - 35);
+        ctx.lineTo(bx, by + 35);
+        ctx.strokeStyle = 'rgba(150, 150, 150, 0.4)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([2, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.font = '8px monospace';
+        ctx.fillText(b.name, bx - 10, by - 40);
+        ctx.fillText(`${b.sma} AU`, bx - 10, by + 45);
+      } else {
+        const isStar = isStarClass(b.type);
+        const dynamicColor = CLASS_COLORS[b.type] || '#99aabf';
+
+        if (isStar) {
+          renderStar(b.name, b.type, b.size, bx, by);
+        } else {
+          ctx.beginPath();
+          ctx.arc(bx, by, bodyRadius, 0, Math.PI * 2);
+          ctx.fillStyle = dynamicColor;
+          ctx.fill();
+
+          if (b.ring) {
+            ctx.beginPath();
+            ctx.ellipse(bx, by, bodyRadius * 2.0, bodyRadius * 0.7, 0.3, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(226, 197, 139, 0.6)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+          ctx.font = '9px monospace';
+          ctx.fillText(b.name, bx - (bodyRadius), by - (bodyRadius + 8));
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.font = '8px monospace';
+          ctx.fillText(`${b.sma} AU`, bx - (bodyRadius), by - (bodyRadius + 18));
+        }
+
+        if (b.moons && b.moons.length > 0) {
+          let curMoonY = by + bodyRadius + 16;
+          const totalDrop = b.moons.length * 24 + 4;
+          ctx.beginPath();
+          ctx.moveTo(bx, by + bodyRadius + 2);
+          ctx.lineTo(bx, by + bodyRadius + totalDrop);
+          ctx.strokeStyle = 'rgba(70, 100, 140, 0.3)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          b.moons.forEach((m) => {
+            const moonRadius = Math.max(1.5, (m.size || 7) * 0.28);
+            const moonColor = CLASS_COLORS[m.type] || '#aaaaaa';
+
+            ctx.beginPath();
+            ctx.moveTo(bx, curMoonY);
+            ctx.lineTo(bx + 6, curMoonY);
+            ctx.strokeStyle = 'rgba(70, 100, 140, 0.3)';
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(bx + 10 + moonRadius, curMoonY, moonRadius, 0, Math.PI * 2);
+            ctx.fillStyle = moonColor;
+            ctx.fill();
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.font = '8px monospace';
+            ctx.fillText(m.name, bx + 16 + (moonRadius * 2), curMoonY + 3);
+
+            if (m.moons && m.moons.length > 0) {
+              let subX = bx + 18 + (moonRadius * 2) + 55;
+              m.moons.forEach((sm) => {
+                const subRadius = Math.max(1.0, (sm.size || 5) * 0.22);
+                ctx.beginPath();
+                ctx.arc(subX, curMoonY, subRadius, 0, Math.PI * 2);
+                ctx.fillStyle = CLASS_COLORS[sm.type] || '#888888';
+                ctx.fill();
+
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+                ctx.font = '7px monospace';
+                ctx.fillText(sm.name, subX + subRadius + 4, curMoonY + 2);
+                subX += 60;
+              });
+            }
+
+            curMoonY += 24;
+          });
+        }
+      }
+    });
+  }
+
+  ctx.restore();
+  requestAnimationFrame(draw);
+}
+
+// Initial bootup
+loadPreset('sol');
+setViewMode('galaxy');
+draw();
+</script>
+</body>
+</html>

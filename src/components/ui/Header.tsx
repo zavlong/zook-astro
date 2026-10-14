@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Compass, Rocket, Wrench, Home } from 'lucide-react';
+import { Sparkles, Compass, Rocket, Wrench, Home, Atom } from 'lucide-react';
 import { FilterCategory, StarSystem, ActiveAppMode } from '../../types/astrophysics';
 
 interface HeaderProps {
@@ -65,11 +65,11 @@ export const Header: React.FC<HeaderProps> = ({
               {starCount.toLocaleString()} Stars &bull; {morphologyLabel}
             </span>
             <span className="text-[9px] font-mono text-slate-500 bg-slate-900/60 px-1.5 py-0.5 rounded border border-slate-800">
-              v2.5
+              v3.0
             </span>
           </h1>
           <p className="text-[10.5px] text-slate-400">
-            3D Sector Simulator &bull; 3D Astro-Architect &bull; Stellaris Mod Engine
+            3D Sector Sim &bull; Steps 1–6 StarGen Lab &bull; 3D Astro-Architect
           </p>
         </div>
       </div>
@@ -78,7 +78,7 @@ export const Header: React.FC<HeaderProps> = ({
       <nav className="flex items-center gap-1 bg-slate-950/90 p-1 rounded-xl border border-slate-800 shadow-inner text-xs font-mono">
         <button
           onClick={() => onSelectApp('home')}
-          className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition text-[11px] ${
+          className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition text-[11px] cursor-pointer ${
             activeApp === 'home'
               ? 'bg-gradient-to-r from-slate-700 to-slate-800 text-white font-bold shadow-md shadow-white/10'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
@@ -91,7 +91,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         <button
           onClick={() => onSelectApp('sector-3d')}
-          className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition text-[11px] ${
+          className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition text-[11px] cursor-pointer ${
             activeApp === 'sector-3d'
               ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold shadow-md shadow-cyan-500/20'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
@@ -103,8 +103,21 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         <button
+          onClick={() => onSelectApp('stargen-lab')}
+          className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition text-[11px] cursor-pointer ${
+            activeApp === 'stargen-lab'
+              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold shadow-md shadow-emerald-500/20'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+          }`}
+          title="Steps 1-6 Astrophysical Star System Generator Workbench"
+        >
+          <Atom className="w-3.5 h-3.5" />
+          <span>StarGen Lab</span>
+        </button>
+
+        <button
           onClick={() => onSelectApp('astro-architect')}
-          className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition text-[11px] ${
+          className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition text-[11px] cursor-pointer ${
             activeApp === 'astro-architect'
               ? 'bg-gradient-to-r from-amber-600 to-amber-700 text-white font-bold shadow-md shadow-amber-500/20'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
@@ -194,6 +207,11 @@ export const Header: React.FC<HeaderProps> = ({
             Random Target
           </button>
         </div>
+      ) : activeApp === 'stargen-lab' ? (
+        <div className="flex items-center gap-2 text-[11px] font-mono text-emerald-300 bg-emerald-950/60 px-3 py-1.5 rounded-lg border border-emerald-800">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span>Steps 1–6 Astrophysics &bull; 1–2% Disk Split &bull; Migration &amp; Water Worlds</span>
+        </div>
       ) : activeApp === 'astro-architect' ? (
         <div className="flex items-center gap-2 text-[11px] font-mono text-amber-300 bg-amber-950/60 px-3 py-1.5 rounded-lg border border-amber-800">
           <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
@@ -208,3 +226,4 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+

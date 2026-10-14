@@ -53,6 +53,79 @@ export interface StellarEvolutionState {
   remnantType: 'Black Hole' | 'Neutron Star' | 'White Dwarf' | null;
 }
 
+export interface RealisticHydrosphere {
+  state: string;
+  solvent?: string;
+  coveragePct?: number;
+  biosphere?: string | null;
+  liqKm: number;
+  scKm: number;
+  iceKm: number;
+  siKm: number;
+  crustKm?: number;
+}
+
+export interface RealisticMoon {
+  id: string;
+  name: string;
+  moonClass: string;
+  origin: string;
+  a_Rp: number;
+  a_km: number;
+  e: number;
+  incDeg: number;
+  periodDays: number;
+  massEarth: number;
+  massLunar: number;
+  radiusEarth: number;
+  radiusKm: number;
+  densityGcm3: number;
+  gravityG: number;
+  rockFrac: number;
+  iceFrac: number;
+  gasFrac: number;
+  albedo: number;
+  T_eq: number;
+  T_atm: number;
+  surfaceTempK: number;
+  greenhouseK: number;
+  tidalW: number;
+  tidalFluxWm2: number;
+  muMin: number;
+  pressureBar: number | null;
+  atmosphereType: string;
+  gases: Record<string, number>;
+  hydrosphere: RealisticHydrosphere | null;
+  retrograde: boolean;
+  rotationHours: number;
+  spinState: string;
+  axialTiltDeg: number;
+}
+
+export interface RealisticBinarySplit {
+  pair: string;
+  a_AU: number;
+  e: number;
+  regime: string;
+  sMaxA: number;
+  sMaxB: number;
+  pMin: number;
+}
+
+export interface RealisticStarNode {
+  label: string;
+  category: string;
+  mass: number;
+  lum: number | string;
+  lumNum: number;
+  radius: number;
+  Teff: number;
+  logg: number;
+  tau: number;
+  spectralType: string;
+  colorHex: string;
+}
+
 export interface PlanetArchetype {
   id: number;
   name: string;
@@ -70,6 +143,28 @@ export interface PlanetArchetype {
   angle: number;
   isEngulfed: boolean;
   status: PlanetStatus;
+  // Enriched Steps 1-6 Astrophysical Fields
+  a_birth?: number;
+  migrationHistory?: string;
+  densityGcm3?: number;
+  rockFrac?: number;
+  iceFrac?: number;
+  gasFrac?: number;
+  T_eq?: number;
+  T_atm?: number;
+  surfaceTempK?: number;
+  muMin?: number;
+  pressureBar?: number | null;
+  sudarskyClass?: string | null;
+  atmosphereType?: string;
+  gases?: Record<string, number>;
+  hydrosphere?: RealisticHydrosphere | null;
+  rings?: string | null;
+  rocheLimitRp?: number;
+  moons?: RealisticMoon[];
+  rotationHours?: number;
+  spinState?: string;
+  axialTiltDeg?: number;
 }
 
 export interface PlanetPhysicsComputed {
@@ -100,6 +195,13 @@ export interface StarSystem {
   colorData: StarColorData;
   planets: PlanetArchetype[];
   hasHZPlanet: boolean;
+  // Enriched Steps 1-6 System Architecture Metadata
+  metallicityDex?: number;
+  systemArchName?: string;
+  zoneArchetype?: 'A' | 'B' | 'C' | 'D';
+  diskMassEarth?: number;
+  companionStars?: RealisticStarNode[];
+  binarySplits?: RealisticBinarySplit[];
 }
 
 export interface SectorConfiguration {
@@ -112,4 +214,5 @@ export interface SectorConfiguration {
   seed: number;
 }
 
-export type ActiveAppMode = 'home' | 'sector-3d' | 'astro-architect';
+export type ActiveAppMode = 'home' | 'sector-3d' | 'astro-architect' | 'stargen-lab';
+

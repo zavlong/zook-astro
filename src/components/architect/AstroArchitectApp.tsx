@@ -11,20 +11,80 @@ import {
 } from '../../types/architect';
 import { ARCHITECT_PRESETS, INITIAL_GALAXY_SYSTEMS, INITIAL_HYPERLANES } from '../../core/architect/presets';
 import { AstroArchitectCanvas3D } from '../canvas/AstroArchitectCanvas3D';
+import {
+  STARGEN_BENCHMARK_PRESETS,
+  convertRealisticToArchitectSystem,
+  rollStep1,
+  runRealisticGenerator,
+} from '../../core/generation/realisticStarGen';
 
 interface Props {
   onBackToSectorSim: () => void;
   onGoHome: () => void;
+  initialSystem?: ArchitectSystem | null;
+  onOpenStarGenLab?: () => void;
 }
 
-export const AstroArchitectApp: React.FC<Props> = ({ onBackToSectorSim, onGoHome }) => {
+export const AstroArchitectApp: React.FC<Props> = ({
+  onBackToSectorSim,
+  onGoHome,
+  initialSystem,
+  onOpenStarGenLab,
+}) => {
   // Application State
   const [galaxySystems, setGalaxySystems] = useState<GalaxySystemNode[]>(INITIAL_GALAXY_SYSTEMS);
   const [hyperlanes, setHyperlanes] = useState<Hyperlane[]>(INITIAL_HYPERLANES);
-  const [currentSystem, setCurrentSystem] = useState<ArchitectSystem>(ARCHITECT_PRESETS.sol);
+  const [currentSystem, setCurrentSystem] = useState<ArchitectSystem>(
+    initialSystem || ARCHITECT_PRESETS.sol
+  );
   const [viewMode, setViewMode] = useState<ArchitectViewMode>('orrery');
   const [activeTab, setActiveTab] = useState<'design' | 'script' | 'json'>('design');
   const [galaxyTool, setGalaxyTool] = useState<'select' | 'add' | 'hyperlane' | 'delete'>('select');
+
+  // Embedded Steps 1-6 Realistic StarGen State
+  const [sgMass, setSgMass] = useState<number>(1.0);
+  const [sgAge, setSgAge] = useState<number>(4.6);
+  const [sgFeh, setSgFeh] = useState<number>(0.0);
+  const [sgMult, setSgMult] = useState<'auto' | '1' | '2' | '3' | '4'>('auto');
+  const [sgSummary, setSgSummary] = useState<string>('');
+
+  useEffect(() => {
+    if (initialSystem) {
+      setCurrentSystem(initialSystem);
+      setViewMode('orrery');
+    }
+  }, [initialSystem]);
+
+  const handleSynthesizeRealisticSystem = (
+    m = sgMass,
+    a = sgAge,
+    f = sgFeh,
+    mult = sgMult
+  ) => {
+    const res = runRealisticGenerator({
+      sysMass: m,
+      age: a,
+      feh: f,
+      forcedMult: mult,
+    });
+    const archSys = convertRealisticToArchitectSystem(res, 0);
+    setCurrentSystem(archSys);
+    setViewMode('orrery');
+    const z0 = res.zones[0];
+    setSgSummary(
+      `${res.hierarchy.archName} • ${
+        z0 ? `Type ${z0.archetype} (${z0.diskMassEarth} M⊕ Disk, Snow ${z0.a_snow} AU)` : 'Cleared'
+      }`
+    );
+  };
+
+  const handleRollIMFInArchitect = () => {
+    const p = rollStep1();
+    setSgMass(p.sysMass);
+    setSgAge(p.age);
+    setSgFeh(p.feh);
+    handleSynthesizeRealisticSystem(p.sysMass, p.age, p.feh, sgMult);
+  };
 
   // Animation Controls
   const [simSpeed, setSimSpeed] = useState<number>(1.0);
@@ -337,6 +397,121 @@ export const AstroArchitectApp: React.FC<Props> = ({ onBackToSectorSim, onGoHome
                 <option value="denebola">Denebola (Debris Disk Star)</option>
                 <option value="sgra">Sagittarius A* (Supermassive Black Hole)</option>
               </select>
+            </div>
+
+            {/* Steps 1-6 Realistic StarGen Synthesizer Bridge */}
+            <div className="p-2.5 rounded-lg bg-sky-950/25 border border-sky-800/60 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-mono uppercase text-sky-400 font-bold flex items-center gap-1.5">
+                  <span>⚛️ Realistic StarGen (Steps 1–6)</span>
+                </label>
+                {onOpenStarGenLab && (
+                  <button
+                    type="button"
+                    onClick={onOpenStarGenLab}
+                    className="text-[9.5px] font-mono text-sky-300 hover:text-white bg-sky-900/60 hover:bg-sky-800 px-1.5 py-0.5 rounded border border-sky-700 transition cursor-pointer"
+                  >
+                    Open Full Lab &rarr;
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5 text-[10px] font-mono">
+                <div>
+                  <span className="text-slate-400 block">Mass: {sgMass} M☉</span>
+                  <input
+                    type="range"
+                    min="0.09"
+                    max="6.0"
+                    step="0.05"
+                    value={sgMass}
+                    onChange={(e) => setSgMass(parseFloat(e.target.value))}
+                    className="w-full accent-sky-400"
+                  />
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Age: {sgAge} Gyr</span>
+                  <input
+                    type="range"
+                    min="0.05"
+                    max="13.0"
+                    step="0.1"
+                    value={sgAge}
+                    onChange={(e) => setSgAge(parseFloat(e.target.value))}
+                    className="w-full accent-sky-400"
+                  />
+                </div>
+                <div>
+                  <span className="text-slate-400 block">[Fe/H]: {sgFeh >= 0 ? `+${sgFeh}` : sgFeh}</span>
+                  <input
+                    type="range"
+                    min="-1.8"
+                    max="0.5"
+                    step="0.05"
+                    value={sgFeh}
+                    onChange={(e) => setSgFeh(parseFloat(e.target.value))}
+                    className="w-full accent-sky-400"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1.5">
+                <select
+                  value={sgMult}
+                  onChange={(e) => setSgMult(e.target.value as any)}
+                  className="bg-slate-950 border border-slate-700/80 rounded px-2 py-1 text-[10.5px] text-white font-mono"
+                >
+                  <option value="auto">Multiplicity: Auto</option>
+                  <option value="1">Force 1 Star</option>
+                  <option value="2">Force 2 Stars</option>
+                  <option value="3">Force 3 Stars</option>
+                  <option value="4">Force 4 Stars</option>
+                </select>
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const p = STARGEN_BENCHMARK_PRESETS[e.target.value];
+                    if (p) {
+                      setSgMass(p.sysMass);
+                      setSgAge(p.age);
+                      setSgFeh(p.feh);
+                      setSgMult(p.forcedMult);
+                      handleSynthesizeRealisticSystem(p.sysMass, p.age, p.feh, p.forcedMult);
+                    }
+                  }}
+                  className="bg-slate-950 border border-slate-700/80 rounded px-2 py-1 text-[10.5px] text-white font-mono"
+                >
+                  <option value="">-- StarGen Preset --</option>
+                  {Object.entries(STARGEN_BENCHMARK_PRESETS).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v.label.split('(')[0].trim()}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleSynthesizeRealisticSystem()}
+                  className="flex-1 py-1.5 rounded bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-bold text-[10.5px] font-mono border border-sky-400/60 shadow cursor-pointer transition"
+                >
+                  ⚡ Synthesize System
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRollIMFInArchitect}
+                  className="px-2.5 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-sky-300 font-semibold text-[10.5px] font-mono border border-slate-700 cursor-pointer transition"
+                >
+                  🎲 Pure IMF Roll
+                </button>
+              </div>
+
+              {sgSummary && (
+                <div className="text-[9.5px] font-mono text-emerald-300 bg-emerald-950/30 border border-emerald-800/50 rounded px-2 py-1">
+                  {sgSummary}
+                </div>
+              )}
             </div>
 
             {/* System Hierarchy Configuration */}

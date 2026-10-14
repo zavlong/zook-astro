@@ -5,6 +5,7 @@ import {
   StarSystem,
   ActiveAppMode,
 } from './types/astrophysics';
+import { ArchitectSystem } from './types/architect';
 import { generateSectorStars } from './core/generation/sector';
 import { calculateStellarEvolution } from './core/astrophysics/evolution';
 import { getStarColorRGB } from './core/astrophysics/colors';
@@ -15,10 +16,13 @@ import { StellarInspector } from './components/ui/StellarInspector';
 import { useResizableColumns } from './hooks/useResizableColumns';
 import { ShowcaseHome } from './components/home/ShowcaseHome';
 import { AstroArchitectApp } from './components/architect/AstroArchitectApp';
+import { RealisticStarGenApp } from './components/stargen/RealisticStarGenApp';
 
 export const App: React.FC = () => {
   // Application mode starts at the sensational homepage showcase
   const [activeApp, setActiveApp] = useState<ActiveAppMode>('home');
+  const [architectInitialSystem, setArchitectInitialSystem] =
+    useState<ArchitectSystem | null>(null);
 
   const [config, setConfig] = useState<SectorConfiguration>({
     starCount: 1000,
@@ -203,14 +207,32 @@ export const App: React.FC = () => {
             />
           </div>
         </main>
+      ) : activeApp === 'stargen-lab' ? (
+        <main className="w-full flex-1 min-h-0 relative rounded-xl overflow-hidden glass-hud border border-slate-800/80">
+          <RealisticStarGenApp
+            onOpenInArchitect={(archSys) => {
+              setArchitectInitialSystem(archSys);
+              setActiveApp('astro-architect');
+            }}
+            onInspectInSector3D={(starSys) => {
+              setStars((prev) => [starSys, ...prev.filter((s) => s.id !== starSys.id)]);
+              setSelectedStar(starSys);
+              setSelectedPlanetIndex(0);
+              setActiveApp('sector-3d');
+            }}
+          />
+        </main>
       ) : (
         <main className="w-full flex-1 min-h-0 relative rounded-xl overflow-hidden glass-hud border border-slate-800/80">
           <AstroArchitectApp
             onBackToSectorSim={() => setActiveApp('sector-3d')}
             onGoHome={() => setActiveApp('home')}
+            initialSystem={architectInitialSystem}
+            onOpenStarGenLab={() => setActiveApp('stargen-lab')}
           />
         </main>
       )}
     </div>
   );
 };
+

@@ -254,7 +254,46 @@ export const StellarInspector: React.FC<StellarInspectorProps> = ({
               ? 'Sterilized (SN)'
               : `${state.rInHZ.toFixed(2)} - ${state.rOutHZ.toFixed(2)} AU`}
           </div>
+
+          {selectedStar.systemArchName && (
+            <>
+              <div className="text-slate-400">Hierarchy / Zone:</div>
+              <div className="text-right text-cyan-300 font-semibold truncate">
+                {selectedStar.systemArchName} &bull; Type {selectedStar.zoneArchetype || 'A'}
+              </div>
+            </>
+          )}
+
+          {selectedStar.diskMassEarth !== undefined && selectedStar.diskMassEarth > 0 && (
+            <>
+              <div className="text-slate-400">1-2% Disk / Snow:</div>
+              <div className="text-right text-slate-200">
+                {selectedStar.diskMassEarth} M⊕ &bull; {state.snowLineAU.toFixed(2)} AU
+              </div>
+            </>
+          )}
         </div>
+
+        {/* Companion Stars Banner (if Multi-Star System) */}
+        {selectedStar.companionStars && selectedStar.companionStars.length > 0 && (
+          <div className="bg-slate-900/70 px-2 py-1 rounded-lg border border-slate-800/80 flex flex-wrap items-center justify-between gap-1 text-[9px] font-mono">
+            <span className="text-slate-400 font-semibold">Companion Stars:</span>
+            <div className="flex flex-wrap gap-1.5">
+              {selectedStar.companionStars.map((comp) => (
+                <span
+                  key={comp.label}
+                  className="inline-flex items-center gap-1 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800 text-slate-200"
+                >
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: comp.colorHex }}
+                  />
+                  <b>{comp.label}:</b> {comp.spectralType} ({comp.mass} M☉)
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* RESIZABLE DUAL LOWER PANES: HR TRACK & 3D CIRCUMSTELLAR ORBIT VIEW */}
         <div className="flex flex-col gap-1">

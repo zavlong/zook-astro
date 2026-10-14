@@ -1000,6 +1000,33 @@ export const ShowcaseHome: React.FC<Props> = ({ onSelectApp }) => {
           </div>
         </div>
 
+        {/* PORTAL CARD 3: STEPS 1-6 ASTROPHYSICAL STARGEN WORKBENCH */}
+        <div className="w-full max-w-5xl mb-8 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-slate-900/90 to-sky-950/60 border border-emerald-500/40 hover:border-emerald-400 transition-all duration-300 p-5 flex flex-col md:flex-row items-center justify-between gap-5 text-left backdrop-blur-xl shadow-xl">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 font-bold px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-700/60">
+                DOMAIN 03 // STEPS 1–6 ASTROPHYSICS ENGINE
+              </span>
+              <span className="text-[10px] font-mono text-sky-300">
+                Vogt-Russell &bull; 1–2% Disk Split &bull; Migration &bull; Water Worlds &amp; Moons
+              </span>
+            </div>
+            <h2 className="text-lg sm:text-xl font-extrabold text-white mb-1">
+              Astrophysical Star System Generator Workbench
+            </h2>
+            <p className="text-slate-300 text-xs leading-relaxed">
+              Generate complete unary to quadruple star hierarchies from cloud mass, age, and metallicity [Fe/H]. Simulates Holman-Wiegert binary stability zones, 1–2% protoplanetary disk partitioning across 3 snow lines, Type I/II resonant migration convoys, supercritical/Hycean water worlds, and moon systems — with 1-click export to 3D Raytraced Theater and Stellaris!
+            </p>
+          </div>
+          <button
+            onClick={() => onSelectApp('stargen-lab')}
+            className="px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-mono text-xs font-bold tracking-wider uppercase transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2 flex-shrink-0 cursor-pointer"
+          >
+            <span>Launch StarGen Lab (Steps 1–6)</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+
         {/* Scientific Observational Overview & Specs Drawer */}
         <section className="w-full max-w-5xl bg-slate-950/80 rounded-2xl border border-slate-800/80 backdrop-blur-md p-6 mb-8 text-left">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
