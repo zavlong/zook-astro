@@ -507,7 +507,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       <g>
                         {/* Outer Stellar Corona Glow */}
                         <circle
-                          r={Math.min(18, Math.max(8, 7 * Math.pow(cell.system.mass, 0.35)))}
+                          r={Math.min(18, Math.max(8, 7 * Math.pow(cell.system.primaryMass, 0.35)))}
                           fill={cell.system.glowColor}
                           opacity={0.35}
                           filter="url(#hexStarGlow)"
@@ -515,13 +515,13 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
 
                         {/* Central Star Disc */}
                         <circle
-                          r={Math.min(9, Math.max(3.5, 4.2 * Math.pow(cell.system.mass, 0.28)))}
+                          r={Math.min(9, Math.max(3.5, 4.2 * Math.pow(cell.system.primaryMass, 0.28)))}
                           fill={cell.system.colorHex}
                           stroke="#ffffff"
                           strokeWidth={0.7}
                         />
 
-                        {/* Habitable Candidate Green Badge Dot */}
+                        {/* Habitable World Green Badge Dot */}
                         {cell.system.candidateHabitable && (
                           <circle
                             cx={14}
@@ -529,6 +529,18 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                             r={2.5}
                             fill="#10b981"
                             stroke="#064e3b"
+                            strokeWidth={0.5}
+                          />
+                        )}
+
+                        {/* Binary / Multiple Star Companion Indicator Dot */}
+                        {cell.system.nStars > 1 && (
+                          <circle
+                            cx={-13}
+                            cy={-6}
+                            r={2.2}
+                            fill="#93c5fd"
+                            stroke="#1e3a8a"
                             strokeWidth={0.5}
                           />
                         )}
@@ -564,7 +576,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                             pointerEvents: 'none',
                           }}
                         >
-                          {cell.system.primaryClass.split(' ')[0]} &bull; {cell.system.mass.toFixed(2)}M☉
+                          {cell.system.primaryClass.split(' ')[0]} &bull; {cell.system.primaryMass.toFixed(2)}M☉{cell.system.nStars > 1 ? ` +${cell.system.nStars - 1}★` : ''}
                         </text>
                       </g>
                     )}
@@ -743,7 +755,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     <div className="text-sm font-bold text-amber-300 mt-0.5">
                       {selectedSystem.mass.toFixed(3)} <span className="text-xs text-slate-400">M☉</span>
                     </div>
-                    <div className="text-[9.5px] text-slate-500 mt-0.5">Progenitor Stellar Mass</div>
+                    <div className="text-[9.5px] text-slate-400 mt-0.5">
+                      Star A: <span className="text-amber-200 font-semibold">{selectedSystem.primaryMass.toFixed(3)} M☉</span>
+                    </div>
                   </div>
 
                   {/* Age */}
@@ -803,8 +817,35 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               {/* Astrophysical Telemetry Summary */}
               <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs font-mono space-y-2">
                 <div className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                  <span>Stellar Telemetry</span>
-                  <span className="text-slate-500">Preview</span>
+                  <span>System Architecture &amp; Telemetry</span>
+                  <span className="text-cyan-400 font-semibold">{selectedSystem.archName}</span>
+                </div>
+
+                <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                  <span className="text-slate-400">Primary Star (A)</span>
+                  <span className="text-slate-200 font-semibold">
+                    {selectedSystem.primaryClass} ({selectedSystem.primaryMass.toFixed(3)} M☉)
+                  </span>
+                </div>
+
+                {selectedSystem.companionStars.length > 0 && (
+                  <div className="flex items-start justify-between py-1 border-b border-slate-800/60">
+                    <span className="text-slate-400">Companions</span>
+                    <div className="text-right text-slate-300 font-medium space-y-0.5">
+                      {selectedSystem.companionStars.map((cs) => (
+                        <div key={cs.label}>
+                          {cs.label}: {cs.spectralType} ({cs.mass.toFixed(3)} M☉)
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                  <span className="text-slate-400">Generated Bodies</span>
+                  <span className="text-slate-200 font-semibold">
+                    {selectedSystem.planetCount} Planets &bull; {selectedSystem.beltCount} Belts
+                  </span>
                 </div>
 
                 <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
@@ -818,11 +859,6 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                  <span className="text-slate-400">Spectral Class</span>
-                  <span className="text-slate-200 font-semibold">{selectedSystem.primaryClass}</span>
-                </div>
-
-                <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
                   <span className="text-slate-400">Evolutionary State</span>
                   <span className={selectedSystem.isRemnant ? 'text-fuchsia-400 font-bold' : 'text-cyan-400 font-semibold'}>
                     {selectedSystem.isRemnant ? selectedSystem.remnantType || 'Remnant' : 'Main Sequence'}
@@ -832,7 +868,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 <div className="flex items-center justify-between py-1">
                   <span className="text-slate-400">Habitable Zone Candidate</span>
                   <span className={selectedSystem.candidateHabitable ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                    {selectedSystem.candidateHabitable ? 'Yes (Candidate)' : 'Low Probability'}
+                    {selectedSystem.candidateHabitable ? 'Yes (Candidate Planet Present)' : 'None'}
                   </span>
                 </div>
               </div>

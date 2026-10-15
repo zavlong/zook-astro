@@ -1,32 +1,42 @@
 import { PRNG, seedFromId } from './prng';
 import {
-  calculateMSLifetimeGyr,
-  calculateStellarEvolution,
-} from '../astrophysics/evolution';
-import { getStarColorRGB } from '../astrophysics/colors';
-import { SpectralCategory } from '../../types/astrophysics';
+  runRealisticGenerator,
+  StarGenParams,
+  RealisticStarSystemResult,
+} from './realisticStarGen';
+import {
+  RealisticStarNode,
+  SpectralCategory,
+} from '../../types/astrophysics';
 
 export interface SectorHexSystem {
   // Required core tuple: { age, mass, metallicity, id }
   age: number; // System age in Gyr (e.g. 4.6)
-  mass: number; // Total / Primary progenitor mass in M_sun (e.g. 1.02)
+  mass: number; // Progenitor system mass in M_sun (sysMass, e.g. 1.02)
   metallicity: number; // [Fe/H] in dex (e.g. +0.05)
-  id: string; // Deterministic PRNG seed string (e.g. "SEC-4289-0408")
+  id: string; // Deterministic PRNG seed string (e.g. "SYS-0408-A938")
 
-  // Rich metadata for map rendering & inspector
+  // Exact stellar data derived directly from system generator (RealisticStarSystemResult)
   name: string;
   col: number; // 1-indexed column
   row: number; // 1-indexed row
   coord: string; // "0101", "0408"
-  primaryClass: string; // "G2V", "M4V", "B5V", "White Dwarf", etc.
+  primaryClass: string; // Exact spectral type from Star A (e.g. "G2V", "M4V", "B5V")
+  primaryMass: number; // Mass of Star A in M_sun
   spectralCat: SpectralCategory;
-  colorHex: string;
+  colorHex: string; // Star A color hex
   glowColor: string;
-  teff: number;
-  lumLsun: number;
+  teff: number; // Star A Teff in K
+  lumLsun: number; // Star A luminosity L/L_sun
   isRemnant: boolean;
   remnantType: string | null;
+  nStars: number; // 1 = Single, 2 = Binary, 3 = Trinary, 4 = Quadruple
+  archName: string; // "Single Star", "Binary Star System", etc.
+  companionStars: RealisticStarNode[];
+  planetCount: number;
+  beltCount: number;
   candidateHabitable: boolean;
+  sysResult: RealisticStarSystemResult; // The full system generation result
 }
 
 export interface SectorHexCell {
@@ -107,28 +117,23 @@ export function formatHexCoord(col: number, row: number): string {
 }
 
 /**
- * Samples a stellar progenitor mass using a piecewise Kroupa IMF power-law
+ * Samples a progenitor stellar system mass using a piecewise Kroupa IMF power-law
  */
 function sampleKroupaMass(rng: PRNG): number {
   const u = rng.next();
   let mass: number;
   if (u < 0.08) {
-    // Brown dwarf / sub-stellar boundary
     mass = 0.08 + u * (0.12 - 0.08) / 0.08;
   } else if (u < 0.58) {
-    // Red dwarfs (0.12 - 0.5 M_sun)
     const t = (u - 0.08) / 0.50;
     mass = 0.12 + Math.pow(t, 1.4) * (0.50 - 0.12);
   } else if (u < 0.88) {
-    // K and G dwarf stars (0.50 - 1.25 M_sun)
     const t = (u - 0.58) / 0.30;
     mass = 0.50 + Math.pow(t, 1.2) * (1.25 - 0.50);
   } else if (u < 0.97) {
-    // F and A dwarf stars (1.25 - 2.8 M_sun)
     const t = (u - 0.88) / 0.09;
     mass = 1.25 + Math.pow(t, 1.3) * (2.8 - 1.25);
   } else {
-    // Rare B and O massive stars (2.8 - 25.0 M_sun)
     const t = (u - 0.97) / 0.03;
     mass = 2.8 + Math.pow(t, 2.0) * (25.0 - 2.8);
   }
@@ -158,8 +163,9 @@ function generateStarName(col: number, row: number, rng: PRNG): string {
 }
 
 /**
- * Builds the complete Sector Hex Grid with randomly distributed systems
- * Each system has the exact { age, mass, metallicity, id } tuple required
+ * Builds the complete Sector Hex Grid with randomly distributed systems.
+ * CRITICAL ARCHITECTURE: Calls runRealisticGenerator(params) directly using the { age, mass, metallicity, id }
+ * tuple, then extracts all stellar and planetary data from the system generator result.
  */
 export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_CONFIG): SectorHexGridData {
   const sectorSeedInt = seedFromId(config.seed);
@@ -189,71 +195,125 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       const cellSeedNum = Math.floor(rng.next() * 8999) + 1000;
       const systemId = `SYS-${coord}-${cellSeedNum.toString(16).toUpperCase()}`;
 
-      // Local PRNG dedicated to this specific system for reproducible details
+      // Local PRNG dedicated to this specific system for reproducible parameter sampling
       const sysRng = new PRNG(seedFromId(systemId));
 
-      // 1. Mass sample
+      // 1. Progenitor system mass (sysMass in M_sun)
       const mass = sampleKroupaMass(sysRng);
 
       // 2. Age sample (clamped between 0.1 and 12.8 Gyr)
       const rawAge = config.meanAge + sysRng.nextGaussian(0, config.ageSigma);
       const age = +Math.max(0.1, Math.min(12.8, rawAge)).toFixed(2);
 
-      // 3. Metallicity sample (with slight cosmic age anti-correlation)
+      // 3. Metallicity sample (with cosmic age anti-correlation)
       const ageDrift = -0.04 * (age - config.meanAge);
       const rawFeh = config.metallicityMean + ageDrift + sysRng.nextGaussian(0, config.metallicitySigma);
       const metallicity = +Math.max(-1.8, Math.min(0.55, rawFeh)).toFixed(2);
 
-      // 4. Stellar evolution preview
-      const tMS = calculateMSLifetimeGyr(mass);
-      const progressPct = Math.min(100.0, (age / tMS) * 50.0);
-      const evoState = calculateStellarEvolution(mass, progressPct);
-      const colorData = getStarColorRGB(evoState.Teff, evoState.phase);
-
-      const isRemnant = evoState.isRemnant;
-      const spectralCat: SpectralCategory = isRemnant
-        ? 'remnant'
-        : mass > 2.5
-        ? 'ob'
-        : mass > 1.2
-        ? 'af'
-        : mass >= 0.8
-        ? 'g'
-        : 'km';
-
-      if (isRemnant) remnantCount++;
-      else if (spectralCat === 'ob') obCount++;
-      else if (spectralCat === 'af') afCount++;
-      else if (spectralCat === 'g') gCount++;
-      else kmCount++;
-
-      // Candidate habitable if G/K dwarf or stable long-lived F dwarf
-      const candidateHabitable =
-        !isRemnant && mass >= 0.6 && mass <= 1.4 && age >= 1.0 && age <= 10.0;
-
       const name = generateStarName(c, r, sysRng);
 
+      // 4. CALL SYSTEM GENERATOR DIRECTLY WITH THE { age, mass, metallicity, id } TUPLE!
+      const sysGenParams: StarGenParams = {
+        sysMass: mass,
+        age,
+        feh: metallicity,
+        id: systemId,
+        name,
+        forcedMult: 'auto',
+      };
+      const sysResult = runRealisticGenerator(sysGenParams);
+
+      // 5. EXTRACT EXACT STELLAR AND SYSTEM DATA FROM THE SYSTEM GENERATOR RESULT
+      const primaryStar = sysResult.hierarchy.stars[0];
+      const companionStars = sysResult.hierarchy.stars.slice(1);
+      const nStars = sysResult.hierarchy.stars.length;
+      const archName = sysResult.hierarchy.archName;
+
+      // Classify spectral type and remnant status from primary star
+      const categoryStr = primaryStar.category || '';
+      const typeStr = primaryStar.spectralType || '';
+      const isRemnant =
+        categoryStr.toLowerCase().includes('remnant') ||
+        typeStr.includes('Dwarf (D') ||
+        typeStr.includes('White Dwarf') ||
+        typeStr.includes('Neutron') ||
+        typeStr.includes('Black Hole');
+
+      let spectralCat: SpectralCategory;
+      if (isRemnant) {
+        spectralCat = 'remnant';
+        remnantCount++;
+      } else {
+        const firstLetter = typeStr.trim().charAt(0).toUpperCase();
+        if (firstLetter === 'O' || firstLetter === 'B') {
+          spectralCat = 'ob';
+          obCount++;
+        } else if (firstLetter === 'A' || firstLetter === 'F') {
+          spectralCat = 'af';
+          afCount++;
+        } else if (firstLetter === 'G') {
+          spectralCat = 'g';
+          gCount++;
+        } else {
+          spectralCat = 'km';
+          kmCount++;
+        }
+      }
+
+      // Check planets and habitable candidate worlds directly from the generated zones
+      let planetCount = 0;
+      let beltCount = 0;
+      let candidateHabitable = false;
+
+      for (const zone of sysResult.zones) {
+        for (const body of zone.bodies) {
+          if (body.kind === 'planet') {
+            planetCount++;
+            if (
+              body.planetClass.includes('Habitable') ||
+              (body.surfaceTempK >= 260 &&
+                body.surfaceTempK <= 325 &&
+                body.hydrosphere &&
+                (body.hydrosphere.coveragePct || 0) > 5)
+            ) {
+              candidateHabitable = true;
+            }
+          } else if (body.kind === 'belt') {
+            beltCount++;
+          }
+        }
+      }
+
+      const lumNum = typeof primaryStar.lumNum === 'number' ? primaryStar.lumNum : 1;
+
       const system: SectorHexSystem = {
-        // Core required tuplet:
+        // Required core tuple:
         age,
         mass,
         metallicity,
         id: systemId,
 
-        // Visual & descriptive metadata:
+        // Exact stellar data from system generator:
         name,
         col: c,
         row: r,
         coord,
-        primaryClass: evoState.spectralMK || `${spectralCat.toUpperCase()} Star`,
+        primaryClass: primaryStar.spectralType,
+        primaryMass: primaryStar.mass,
         spectralCat,
-        colorHex: colorData.hex,
-        glowColor: colorData.glow,
-        teff: evoState.Teff,
-        lumLsun: +evoState.L.toFixed(3),
+        colorHex: primaryStar.colorHex,
+        glowColor: primaryStar.colorHex,
+        teff: primaryStar.Teff,
+        lumLsun: +lumNum.toFixed(3),
         isRemnant,
-        remnantType: evoState.remnantType,
+        remnantType: isRemnant ? primaryStar.spectralType : null,
+        nStars,
+        archName,
+        companionStars,
+        planetCount,
+        beltCount,
         candidateHabitable,
+        sysResult,
       };
 
       systems.push(system);
