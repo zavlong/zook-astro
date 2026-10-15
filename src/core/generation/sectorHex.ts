@@ -111,6 +111,7 @@ export interface SectorHexGridData {
     heavyMassCount: number;
     giantCount: number;
     habitableCount: number;
+    nonMsCount: number;
   };
 }
 
@@ -678,6 +679,13 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
   const occupiedHexes = systems.length;
   const occupancyPct = totalHexes > 0 ? +((occupiedHexes / totalHexes) * 100).toFixed(1) : 0;
 
+  let nonMsCount = 0;
+  for (let i = 0; i < systems.length; i++) {
+    if (isNonMainSequenceSystem(systems[i])) {
+      nonMsCount++;
+    }
+  }
+
   return {
     config,
     sectorWidth,
@@ -703,8 +711,42 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       heavyMassCount,
       giantCount,
       habitableCount,
+      nonMsCount,
     },
   };
+}
+
+/**
+ * Returns true if the system's primary star is Non-Main Sequence
+ * (i.e. Morgan-Keenan luminosity class is NOT V: giants III, bright giants II,
+ * supergiants I/Ia/Ib, subgiants IV, subdwarfs VI, white dwarfs, neutron stars, black holes, SMBH).
+ */
+export function isNonMainSequenceSystem(system: SectorHexSystem): boolean {
+  if (system.isRemnant) return true;
+  const primary = system.sysResult?.hierarchy?.stars?.[0];
+  if (!primary) return false;
+  if (primary.category && primary.category !== 'Main Sequence') return true;
+
+  const sp = (primary.spectralType || system.primaryClass || '').trim();
+  if (
+    sp.includes('PSR') ||
+    sp.includes('NS') ||
+    sp.includes('BH') ||
+    sp.includes('WD') ||
+    sp.includes('SMBH') ||
+    sp.includes('Giant') ||
+    sp.includes('Supergiant')
+  ) {
+    return true;
+  }
+  // Subgiant IV ends with 'IV' -> Luminosity Class IV (not V!)
+  if (sp.endsWith('IV')) return true;
+  // Subdwarf VI ends with 'VI' -> Luminosity Class VI (not V!)
+  if (sp.endsWith('VI')) return true;
+  // Luminosity class V (Main Sequence Dwarf)
+  if (sp.endsWith('V')) return false;
+  // Any other ending: Ia, Ib, II, III, etc.
+  return true;
 }
 
 /**

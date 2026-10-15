@@ -23,6 +23,7 @@ import {
   Download,
   Upload,
   Tag,
+  ChevronDown,
 } from 'lucide-react';
 import {
   SectorHexConfig,
@@ -30,6 +31,7 @@ import {
   type SectorHyperlane,
   DEFAULT_SECTOR_CONFIG,
   generateSectorHexGrid,
+  isNonMainSequenceSystem,
 } from '../../core/generation/sectorHex';
 import {
   SectorEmpire,
@@ -50,6 +52,23 @@ interface SectorHexAppProps {
   onBackToGalaxy?: () => void;
   initialConfig?: Partial<SectorHexConfig> | null;
 }
+
+export type SectorFilterCategory =
+  | 'all'
+  | SpectralCategory
+  | 'habitable'
+  | 'non-ms'
+  | 'mass';
+
+export type MassFilterBracket =
+  | 'all'
+  | 'low' // < 0.8 M☉
+  | 'solar' // 0.8 - 2.0 M☉
+  | 'intermediate' // 2.0 - 8.0 M☉
+  | 'massive' // > 8.0 M☉
+  | 'giant' // 10 - 50 M☉
+  | 'supermassive' // > 999,999 M☉
+  | 'custom';
 
 type SectorPresetKey = 'disk' | 'young-cluster' | 'old-halo' | 'dense-core' | 'galactic-nucleus';
 
@@ -159,7 +178,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
 
   const [activePreset, setActivePreset] = useState<SectorPresetKey>('disk');
   const [searchCoord, setSearchCoord] = useState<string>('');
-  const [filterCat, setFilterCat] = useState<'all' | SpectralCategory | 'habitable'>('all');
+  const [filterCat, setFilterCat] = useState<SectorFilterCategory>('all');
+  const [massBracket, setMassBracket] = useState<MassFilterBracket>('all');
+  const [customMinMass, setCustomMinMass] = useState<string>('0.1');
+  const [customMaxMass, setCustomMaxMass] = useState<string>('50.0');
+  const [showMassMenu, setShowMassMenu] = useState<boolean>(false);
 
   // Custom Grid & Density Modal/Drawer state
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
@@ -222,6 +245,42 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       setSelectedCoord(null);
     }
   }, [gridData]);
+
+  // Dynamic filter matching count
+  const matchingStarsCount = useMemo(() => {
+    return gridData.systems.filter((system) => {
+      if (filterCat === 'all') return true;
+      if (filterCat === 'habitable') return system.candidateHabitable;
+      if (filterCat === 'non-ms') return isNonMainSequenceSystem(system);
+      if (filterCat === 'mass') {
+        if (massBracket === 'low') return system.mass < 0.8;
+        if (massBracket === 'solar') return system.mass >= 0.8 && system.mass <= 2.0;
+        if (massBracket === 'intermediate') return system.mass > 2.0 && system.mass <= 8.0;
+        if (massBracket === 'massive') return system.mass > 8.0 && system.mass <= 999999;
+        if (massBracket === 'giant') return system.isGiantSystem || (system.mass >= 10.0 && system.mass <= 50.0);
+        if (massBracket === 'supermassive') return system.mass > 999999;
+        if (massBracket === 'custom') {
+          const minM = parseFloat(customMinMass) || 0;
+          const maxM = parseFloat(customMaxMass) || 1000000;
+          return system.mass >= minM && system.mass <= maxM;
+        }
+        return true;
+      }
+      return system.spectralCat === filterCat;
+    }).length;
+  }, [gridData.systems, filterCat, massBracket, customMinMass, customMaxMass]);
+
+  const getMassFilterButtonLabel = () => {
+    if (filterCat !== 'mass') return 'Mass ▾';
+    if (massBracket === 'low') return 'Mass: <0.8M☉';
+    if (massBracket === 'solar') return 'Mass: 0.8-2M☉';
+    if (massBracket === 'intermediate') return 'Mass: 2-8M☉';
+    if (massBracket === 'massive') return 'Mass: >8M☉';
+    if (massBracket === 'giant') return 'Mass: 10-50M☉';
+    if (massBracket === 'supermassive') return 'Mass: >999kM☉';
+    if (massBracket === 'custom') return `Mass: ${customMinMass}-${customMaxMass}M☉`;
+    return 'Mass: All ▾';
+  };
 
   // Pan & Zoom Canvas Camera
   const [zoom, setZoom] = useState<number>(1.0);
@@ -1497,6 +1556,28 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 if (filterCat !== 'all') {
                   if (filterCat === 'habitable') {
                     matchesFilter = system.candidateHabitable;
+                  } else if (filterCat === 'non-ms') {
+                    matchesFilter = isNonMainSequenceSystem(system);
+                  } else if (filterCat === 'mass') {
+                    if (massBracket === 'low') {
+                      matchesFilter = system.mass < 0.8;
+                    } else if (massBracket === 'solar') {
+                      matchesFilter = system.mass >= 0.8 && system.mass <= 2.0;
+                    } else if (massBracket === 'intermediate') {
+                      matchesFilter = system.mass > 2.0 && system.mass <= 8.0;
+                    } else if (massBracket === 'massive') {
+                      matchesFilter = system.mass > 8.0 && system.mass <= 999999;
+                    } else if (massBracket === 'giant') {
+                      matchesFilter = system.isGiantSystem || (system.mass >= 10.0 && system.mass <= 50.0);
+                    } else if (massBracket === 'supermassive') {
+                      matchesFilter = system.mass > 999999;
+                    } else if (massBracket === 'custom') {
+                      const minM = parseFloat(customMinMass) || 0;
+                      const maxM = parseFloat(customMaxMass) || 1000000;
+                      matchesFilter = system.mass >= minM && system.mass <= maxM;
+                    } else {
+                      matchesFilter = true;
+                    }
                   } else {
                     matchesFilter = system.spectralCat === filterCat;
                   }
@@ -1761,21 +1842,164 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   { id: 'g', label: 'G (Sol)', color: 'text-amber-300' },
                   { id: 'km', label: 'K/M', color: 'text-red-400' },
                   { id: 'remnant', label: 'Remnants', color: 'text-purple-400' },
+                  { id: 'non-ms', label: 'Non-MS (≠ V)', color: 'text-amber-400', title: 'Non-Main Sequence Stars (Luminosity Class NOT V: Giants, Supergiants, Subgiants, Remnants)' },
                   { id: 'habitable', label: 'Habitable Worlds', color: 'text-emerald-400' },
                 ] as const
               ).map((f) => (
                 <button
                   key={f.id}
-                  onClick={() => setFilterCat(f.id)}
+                  onClick={() => {
+                    setFilterCat(f.id);
+                    setShowMassMenu(false);
+                  }}
+                  title={'title' in f ? f.title : undefined}
                   className={`px-2 py-0.5 rounded text-[10px] transition cursor-pointer ${
                     filterCat === f.id
                       ? 'bg-cyan-600 text-white font-bold'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800'
                   }`}
                 >
-                  <span className={f.color}>{f.label}</span>
+                  <span className={filterCat === f.id ? 'text-white' : f.color}>{f.label}</span>
                 </button>
               ))}
+
+              {/* Mass Filter Button with Interactive Popover */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setFilterCat('mass');
+                    setShowMassMenu((prev) => !prev);
+                  }}
+                  className={`px-2 py-0.5 rounded text-[10px] transition cursor-pointer flex items-center gap-1 ${
+                    filterCat === 'mass'
+                      ? 'bg-indigo-600 text-white font-bold shadow'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`}
+                  title="Filter systems by Stellar Mass"
+                >
+                  <span className={filterCat === 'mass' ? 'text-white' : 'text-indigo-400 font-semibold'}>
+                    {getMassFilterButtonLabel()}
+                  </span>
+                  <ChevronDown className="w-2.5 h-2.5 opacity-70" />
+                </button>
+
+                {/* Mass Filter Popover Dropdown */}
+                {showMassMenu && (
+                  <div
+                    className="absolute bottom-full left-0 mb-2 w-72 bg-slate-950/98 backdrop-blur-xl border border-slate-700/80 rounded-xl p-3 shadow-2xl z-50 font-mono text-xs flex flex-col gap-2.5 animate-fade-in"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                      <span className="text-[11px] font-bold text-slate-200 uppercase tracking-wide flex items-center gap-1.5">
+                        <Sliders className="w-3 h-3 text-indigo-400" />
+                        <span>Filter by Stellar Mass</span>
+                      </span>
+                      <button
+                        onClick={() => setShowMassMenu(false)}
+                        className="text-slate-400 hover:text-white transition p-0.5"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Quick Mass Presets */}
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9.5px] uppercase text-slate-500 font-semibold">Mass Presets</span>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {[
+                          { id: 'all', label: 'All Masses', sub: 'Reset mass filter' },
+                          { id: 'low', label: '< 0.8 M☉', sub: 'Low Mass / Red Dwarfs' },
+                          { id: 'solar', label: '0.8 – 2.0 M☉', sub: 'Solar & Intermediate' },
+                          { id: 'intermediate', label: '2.0 – 8.0 M☉', sub: 'Intermediate Stars' },
+                          { id: 'massive', label: '> 8.0 M☉', sub: 'Massive Stars' },
+                          { id: 'giant', label: '10 – 50 M☉', sub: 'Giant Star Systems' },
+                          { id: 'supermassive', label: '> 999k M☉', sub: 'Sagittarius A* SMBH' },
+                        ].map((p) => (
+                          <button
+                            key={p.id}
+                            onClick={() => {
+                              setMassBracket(p.id as MassFilterBracket);
+                              setFilterCat('mass');
+                            }}
+                            className={`p-1.5 rounded-lg border text-left transition cursor-pointer ${
+                              massBracket === p.id && filterCat === 'mass'
+                                ? 'bg-indigo-950/90 border-indigo-500 text-white shadow-sm'
+                                : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800'
+                            }`}
+                          >
+                            <div className="text-[10.5px] font-bold">{p.label}</div>
+                            <div className="text-[8.5px] text-slate-400 truncate">{p.sub}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Custom Min / Max Inputs */}
+                    <div className="border-t border-slate-800 pt-2 flex flex-col gap-1.5">
+                      <span className="text-[9.5px] uppercase text-slate-500 font-semibold">Custom Mass Range (M☉)</span>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1">
+                          <span className="text-[9px] text-slate-500 block">Min</span>
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0.08"
+                            value={customMinMass}
+                            onChange={(e) => {
+                              setCustomMinMass(e.target.value);
+                              setMassBracket('custom');
+                              setFilterCat('mass');
+                            }}
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs font-mono focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                        <span className="text-slate-600 mt-3">&mdash;</span>
+                        <div className="flex-1">
+                          <span className="text-[9px] text-slate-500 block">Max</span>
+                          <input
+                            type="number"
+                            step="0.5"
+                            min="0.1"
+                            value={customMaxMass}
+                            onChange={(e) => {
+                              setCustomMaxMass(e.target.value);
+                              setMassBracket('custom');
+                              setFilterCat('mass');
+                            }}
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs font-mono focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-[10px]">
+                      <button
+                        onClick={() => {
+                          setMassBracket('all');
+                          setFilterCat('all');
+                          setShowMassMenu(false);
+                        }}
+                        className="text-slate-400 hover:text-white transition"
+                      >
+                        Reset All
+                      </button>
+                      <button
+                        onClick={() => setShowMassMenu(false)}
+                        className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Active matching count badge */}
+              {filterCat !== 'all' && (
+                <span className="text-[9.5px] text-cyan-300 bg-cyan-950/70 border border-cyan-800/80 px-1.5 py-0.5 rounded ml-1 font-bold">
+                  {matchingStarsCount} / {gridData.systems.length}
+                </span>
+              )}
             </div>
 
             {/* Canvas Zoom & Reset Controls */}
@@ -2116,6 +2340,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                           <span>Supermassive Black Hole ({selectedSystem.mass.toLocaleString()} M☉)</span>
                         </span>
                       )}
+                      {isNonMainSequenceSystem(selectedSystem) && (
+                        <span className="text-[10px] text-fuchsia-300 bg-fuchsia-950/80 px-1.5 py-0.2 rounded border border-fuchsia-800 font-bold">
+                          Non-MS (≠ V)
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2438,8 +2667,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
 
                 <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
                   <span className="text-slate-400">Evolutionary State</span>
-                  <span className={selectedSystem.isRemnant ? 'text-fuchsia-400 font-bold' : 'text-cyan-400 font-semibold'}>
-                    {selectedSystem.isRemnant ? selectedSystem.remnantType || 'Remnant' : 'Main Sequence'}
+                  <span className={isNonMainSequenceSystem(selectedSystem) ? 'text-purple-300 font-bold' : 'text-cyan-400 font-semibold'}>
+                    {selectedSystem.isRemnant
+                      ? selectedSystem.remnantType || 'Remnant'
+                      : selectedSystem.sysResult?.hierarchy?.stars?.[0]?.category ||
+                        (isNonMainSequenceSystem(selectedSystem) ? 'Non-Main Sequence' : 'Main Sequence')}
                   </span>
                 </div>
 
