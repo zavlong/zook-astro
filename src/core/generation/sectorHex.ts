@@ -226,8 +226,9 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
   const parsecWidth = +(config.columns * 2.5).toFixed(1);
   const parsecHeight = +(config.rows * 2.5).toFixed(1);
 
-  // Total stars in sector derived directly from density and sector size
-  const targetStarCount = Math.max(1, Math.round(config.columns * config.rows * config.density));
+  // Total stars in sector: baseline density of stars reduced by half (effective density of 50% before overflow at 100%)
+  const effectiveDensity = config.density * 0.5;
+  const targetStarCount = Math.max(1, Math.round(config.columns * config.rows * effectiveDensity));
 
   const padding = 55;
   const usableW = sectorWidth - padding * 2;
@@ -237,34 +238,35 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
   const avgArea = (usableW * usableH) / targetStarCount;
   const idealDist = Math.sqrt(avgArea);
   const minSpacing = Math.max(26, Math.min(65, idealDist * 0.70));
+  const minDistSq = minSpacing * minSpacing;
 
   const placedCoords: { x: number; y: number }[] = [];
 
   for (let i = 0; i < targetStarCount; i++) {
     let bestX = padding + rng.next() * usableW;
     let bestY = padding + rng.next() * usableH;
-    let bestMinDist = -1;
+    let bestMinDistSq = -1;
 
-    // Up to 12 candidate attempts per star to maintain aesthetic minimum separation
-    for (let attempt = 0; attempt < 12; attempt++) {
+    // Fast candidate sampling using squared Euclidean distance without expensive square roots
+    for (let attempt = 0; attempt < 6; attempt++) {
       const candX = padding + rng.next() * usableW;
       const candY = padding + rng.next() * usableH;
 
-      let nearest = Infinity;
+      let nearestSq = Infinity;
       for (let p = 0; p < placedCoords.length; p++) {
         const dx = candX - placedCoords[p].x;
         const dy = candY - placedCoords[p].y;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (d < nearest) nearest = d;
+        const dSq = dx * dx + dy * dy;
+        if (dSq < nearestSq) nearestSq = dSq;
       }
 
-      if (nearest >= minSpacing) {
+      if (nearestSq >= minDistSq) {
         bestX = candX;
         bestY = candY;
         break;
       }
-      if (nearest > bestMinDist) {
-        bestMinDist = nearest;
+      if (nearestSq > bestMinDistSq) {
+        bestMinDistSq = nearestSq;
         bestX = candX;
         bestY = candY;
       }

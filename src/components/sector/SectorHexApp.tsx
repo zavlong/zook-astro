@@ -350,10 +350,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     if (n <= 1 || !stars || stars.length === 0) {
       const star = stars[0] || { mass: system.primaryMass, colorHex: system.colorHex };
       const r = Math.min(9.5, Math.max(3.5, 4.2 * Math.pow(star.mass, 0.28)));
-      const glowR = Math.min(20, Math.max(8, 7 * Math.pow(star.mass, 0.35)));
+      const glowR = Math.min(18, Math.max(7, 6.5 * Math.pow(star.mass, 0.35)));
       return (
         <g>
-          <circle r={glowR} fill={star.colorHex} opacity={0.35} filter="url(#hexStarGlow)" />
+          {/* High-Performance Lightweight Vector Glow */}
+          <circle r={glowR} fill={star.colorHex} opacity={0.20} />
+          <circle r={glowR * 0.65} fill={star.colorHex} opacity={0.35} />
           <circle r={r} fill={star.colorHex} stroke="#ffffff" strokeWidth={0.7} />
         </g>
       );
@@ -381,11 +383,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             strokeDasharray="2,2"
           />
           {/* Star A */}
-          <circle cx={posA.x} cy={posA.y} r={rA * 1.9} fill={starA.colorHex} opacity={0.30} filter="url(#hexStarGlow)" />
+          <circle cx={posA.x} cy={posA.y} r={rA * 1.8} fill={starA.colorHex} opacity={0.22} />
           <circle cx={posA.x} cy={posA.y} r={rA} fill={starA.colorHex} stroke="#ffffff" strokeWidth={0.6} />
 
           {/* Star B */}
-          <circle cx={posB.x} cy={posB.y} r={rB * 1.9} fill={starB.colorHex} opacity={0.30} filter="url(#hexStarGlow)" />
+          <circle cx={posB.x} cy={posB.y} r={rB * 1.8} fill={starB.colorHex} opacity={0.22} />
           <circle cx={posB.x} cy={posB.y} r={rB} fill={starB.colorHex} stroke="#ffffff" strokeWidth={0.6} />
         </g>
       );
@@ -415,15 +417,15 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             strokeDasharray="2,2"
           />
           {/* Star A */}
-          <circle cx={posA.x} cy={posA.y} r={rA * 1.8} fill={starA.colorHex} opacity={0.30} filter="url(#hexStarGlow)" />
+          <circle cx={posA.x} cy={posA.y} r={rA * 1.7} fill={starA.colorHex} opacity={0.22} />
           <circle cx={posA.x} cy={posA.y} r={rA} fill={starA.colorHex} stroke="#ffffff" strokeWidth={0.6} />
 
           {/* Star B */}
-          <circle cx={posB.x} cy={posB.y} r={rB * 1.8} fill={starB.colorHex} opacity={0.30} filter="url(#hexStarGlow)" />
+          <circle cx={posB.x} cy={posB.y} r={rB * 1.7} fill={starB.colorHex} opacity={0.22} />
           <circle cx={posB.x} cy={posB.y} r={rB} fill={starB.colorHex} stroke="#ffffff" strokeWidth={0.6} />
 
           {/* Star C */}
-          <circle cx={posC.x} cy={posC.y} r={rC * 1.8} fill={starC.colorHex} opacity={0.30} filter="url(#hexStarGlow)" />
+          <circle cx={posC.x} cy={posC.y} r={rC * 1.7} fill={starC.colorHex} opacity={0.22} />
           <circle cx={posC.x} cy={posC.y} r={rC} fill={starC.colorHex} stroke="#ffffff" strokeWidth={0.6} />
         </g>
       );
@@ -454,16 +456,16 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           strokeWidth={0.7}
           strokeDasharray="2,2"
         />
-        <circle cx={posA.x} cy={posA.y} r={rA * 1.6} fill={starA.colorHex} opacity={0.28} filter="url(#hexStarGlow)" />
+        <circle cx={posA.x} cy={posA.y} r={rA * 1.5} fill={starA.colorHex} opacity={0.22} />
         <circle cx={posA.x} cy={posA.y} r={rA} fill={starA.colorHex} stroke="#ffffff" strokeWidth={0.5} />
 
-        <circle cx={posB.x} cy={posB.y} r={rB * 1.6} fill={starB.colorHex} opacity={0.28} filter="url(#hexStarGlow)" />
+        <circle cx={posB.x} cy={posB.y} r={rB * 1.5} fill={starB.colorHex} opacity={0.22} />
         <circle cx={posB.x} cy={posB.y} r={rB} fill={starB.colorHex} stroke="#ffffff" strokeWidth={0.5} />
 
-        <circle cx={posC.x} cy={posC.y} r={rC * 1.6} fill={starC.colorHex} opacity={0.28} filter="url(#hexStarGlow)" />
+        <circle cx={posC.x} cy={posC.y} r={rC * 1.5} fill={starC.colorHex} opacity={0.22} />
         <circle cx={posC.x} cy={posC.y} r={rC} fill={starC.colorHex} stroke="#ffffff" strokeWidth={0.5} />
 
-        <circle cx={posD.x} cy={posD.y} r={rD * 1.6} fill={starD.colorHex} opacity={0.28} filter="url(#hexStarGlow)" />
+        <circle cx={posD.x} cy={posD.y} r={rD * 1.5} fill={starD.colorHex} opacity={0.22} />
         <circle cx={posD.x} cy={posD.y} r={rD} fill={starD.colorHex} stroke="#ffffff" strokeWidth={0.5} />
       </g>
     );
@@ -850,16 +852,6 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             className="w-full h-full absolute inset-0 pointer-events-auto"
             style={{ willChange: 'transform' }}
           >
-            <defs>
-              <filter id="hexStarGlow" x="-60%" y="-60%" width="220%" height="220%">
-                <feGaussianBlur in="SourceGraphic" stdDeviation="4.5" result="blur" />
-                <feMerge>
-                  <feMergeNode in="blur" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            </defs>
-
             <g
               transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}
               style={{ transformOrigin: '0 0' }}
