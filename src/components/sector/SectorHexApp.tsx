@@ -313,9 +313,29 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     return 'Mass: All ▾';
   };
 
-  // Pan & Zoom Canvas Camera
-  const [zoom, setZoom] = useState<number>(1.0);
-  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 40, y: 40 });
+  // Pan & Zoom Canvas Camera combined atomically
+  const [{ zoom, pan }, setCamera] = useState<{ zoom: number; pan: { x: number; y: number } }>({
+    zoom: 1.0,
+    pan: { x: 40, y: 40 },
+  });
+
+  const setZoom = useCallback((updater: number | ((prevZoom: number) => number)) => {
+    setCamera((prev) => ({
+      ...prev,
+      zoom: typeof updater === 'function' ? updater(prev.zoom) : updater,
+    }));
+  }, []);
+
+  const setPan = useCallback(
+    (updater: { x: number; y: number } | ((prevPan: { x: number; y: number }) => { x: number; y: number })) => {
+      setCamera((prev) => ({
+        ...prev,
+        pan: typeof updater === 'function' ? updater(prev.pan) : updater,
+      }));
+    },
+    []
+  );
+
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -625,20 +645,19 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   // Zoom towards a specific screen coordinate (cursor or center)
   const zoomAtScreenPoint = useCallback(
     (screenX: number, screenY: number, factor: number) => {
-      setZoom((prevZoom) => {
-        const newZoom = Math.max(0.06, Math.min(2.8, prevZoom * factor));
-        if (newZoom === prevZoom) return prevZoom;
+      setCamera((prev) => {
+        const newZoom = Math.max(0.06, Math.min(2.8, prev.zoom * factor));
+        if (newZoom === prev.zoom) return prev;
 
-        setPan((prevPan) => {
-          const worldX = (screenX - prevPan.x) / prevZoom;
-          const worldY = (screenY - prevPan.y) / prevZoom;
-          return {
+        const worldX = (screenX - prev.pan.x) / prev.zoom;
+        const worldY = (screenY - prev.pan.y) / prev.zoom;
+        return {
+          zoom: newZoom,
+          pan: {
             x: screenX - worldX * newZoom,
             y: screenY - worldY * newZoom,
-          };
-        });
-
-        return newZoom;
+          },
+        };
       });
     },
     []

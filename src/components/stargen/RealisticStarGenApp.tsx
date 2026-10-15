@@ -334,38 +334,6 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     return () => cancelAnimationFrame(rafId);
   }, [orreryPlaying, mapMode, orrerySpeed, trackedTarget, systemResult, orreryIncScale]);
 
-  // Attach native non-passive wheel listener to the 3D Orrery SVG so wheel-zoom doesn't scroll page
-  useEffect(() => {
-    const svgEl = orrerySvgRef.current;
-    if (!svgEl || mapMode !== 'orrery2d') return;
-
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const rect = svgEl.getBoundingClientRect();
-      const dxSvg = ((e.clientX - rect.left) / Math.max(1, rect.width) - 0.5) * 1040;
-      const dySvg = ((e.clientY - rect.top) / Math.max(1, rect.height) - 0.5) * 680;
-      const zoomFactor = e.deltaY < 0 ? 1.28 : 1 / 1.28;
-
-      setOrreryPxPerAU((prevPx) => {
-        const nextPx = clamp(prevPx * zoomFactor, 0.05, 5000000);
-        const ratio = 1 - prevPx / nextPx;
-        const cY = Math.cos(orreryYaw);
-        const sY = Math.sin(orreryYaw);
-        const effDy = dySvg / Math.max(0.25, Math.cos(orreryPitch));
-        const dWorldX = (dxSvg * cY + effDy * sY) / prevPx;
-        const dWorldY = (-dxSvg * sY + effDy * cY) / prevPx;
-        setOrreryCamAU((prevCam) => ({
-          x: prevCam.x + dWorldX * ratio,
-          y: prevCam.y + dWorldY * ratio,
-        }));
-        return nextPx;
-      });
-    };
-
-    svgEl.addEventListener('wheel', handleWheel, { passive: false });
-    return () => svgEl.removeEventListener('wheel', handleWheel);
-  }, [mapMode, systemResult, orreryYaw, orreryPitch]);
-
   // Close blow-up modal on Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

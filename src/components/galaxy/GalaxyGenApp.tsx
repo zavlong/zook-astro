@@ -245,9 +245,29 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     return () => ro.disconnect();
   }, []);
 
-  // Pan & Zoom state
-  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState<number>(0.48);
+  // Pan & Zoom state combined atomically
+  const [{ zoom, pan }, setCamera] = useState<{ zoom: number; pan: { x: number; y: number } }>({
+    zoom: 0.48,
+    pan: { x: 0, y: 0 },
+  });
+
+  const setZoom = useCallback((updater: number | ((prevZoom: number) => number)) => {
+    setCamera((prev) => ({
+      ...prev,
+      zoom: typeof updater === 'function' ? updater(prev.zoom) : updater,
+    }));
+  }, []);
+
+  const setPan = useCallback(
+    (updater: { x: number; y: number } | ((prevPan: { x: number; y: number }) => { x: number; y: number })) => {
+      setCamera((prev) => ({
+        ...prev,
+        pan: typeof updater === 'function' ? updater(prev.pan) : updater,
+      }));
+    },
+    []
+  );
+
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -440,20 +460,19 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   // Zoom towards a specific screen coordinate (cursor or center)
   const zoomAtScreenPoint = useCallback(
     (screenX: number, screenY: number, factor: number) => {
-      setZoom((prevZoom) => {
-        const newZoom = Math.max(0.08, Math.min(2.5, prevZoom * factor));
-        if (newZoom === prevZoom) return prevZoom;
+      setCamera((prev) => {
+        const newZoom = Math.max(0.08, Math.min(2.5, prev.zoom * factor));
+        if (newZoom === prev.zoom) return prev;
 
-        setPan((prevPan) => {
-          const worldX = (screenX - prevPan.x) / prevZoom;
-          const worldY = (screenY - prevPan.y) / prevZoom;
-          return {
+        const worldX = (screenX - prev.pan.x) / prev.zoom;
+        const worldY = (screenY - prev.pan.y) / prev.zoom;
+        return {
+          zoom: newZoom,
+          pan: {
             x: screenX - worldX * newZoom,
             y: screenY - worldY * newZoom,
-          };
-        });
-
-        return newZoom;
+          },
+        };
       });
     },
     []
@@ -872,6 +891,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
             <g
               transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}
               style={{
+                transformOrigin: '0 0',
                 transition:
                   isEnteringSector || isReturningFromSector
                     ? 'transform 450ms cubic-bezier(0.2, 0.8, 0.2, 1)'
