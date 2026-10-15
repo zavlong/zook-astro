@@ -19,7 +19,6 @@ import {
 import {
   SectorHexConfig,
   SectorHexSystem,
-  SectorHexCell,
   DEFAULT_SECTOR_CONFIG,
   generateSectorHexGrid,
 } from '../../core/generation/sectorHex';
@@ -168,47 +167,18 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Hover state
-  const [hoveredCell, setHoveredCell] = useState<SectorHexCell | null>(null);
+  const [hoveredSystem, setHoveredSystem] = useState<SectorHexSystem | null>(null);
 
   // Copied state
   const [copiedId, setCopiedId] = useState<boolean>(false);
 
-  // Hex Geometry Parameters (Pointy-topped)
-  const hexRadius = 46; // Radius from center to vertices in px
-  const hexWidth = Math.sqrt(3) * hexRadius; // ~79.67 px
-  const hexHeight = 2 * hexRadius; // 92 px
-  const colSpacing = hexWidth;
-  const rowSpacing = 1.5 * hexRadius; // 69 px
-
-  // Calculate pixel center for column c and row r (1-indexed)
-  const getHexCenter = useCallback(
-    (col: number, row: number) => {
-      const xOffset = row % 2 === 1 ? hexWidth * 0.5 : 0;
-      const cx = (col - 1) * colSpacing + hexRadius + xOffset + 30;
-      const cy = (row - 1) * rowSpacing + hexRadius + 30;
-      return { cx, cy };
-    },
-    [colSpacing, rowSpacing, hexRadius, hexWidth]
-  );
-
-  // Generate SVG polygon points for pointy-topped hexagon
-  const hexPoints = useMemo(() => {
-    const pts: string[] = [];
-    for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 180) * (60 * i - 30);
-      const x = hexRadius * Math.cos(angle);
-      const y = hexRadius * Math.sin(angle);
-      pts.push(`${x.toFixed(2)},${y.toFixed(2)}`);
-    }
-    return pts.join(' ');
-  }, [hexRadius]);
-
-  // Total bounds of the hex grid
+  // Total bounds of the sector space
   const gridBoundingSize = useMemo(() => {
-    const totalW = config.columns * colSpacing + hexWidth + 80;
-    const totalH = config.rows * rowSpacing + hexHeight + 80;
-    return { width: Math.max(800, totalW), height: Math.max(600, totalH) };
-  }, [config.columns, config.rows, colSpacing, rowSpacing, hexWidth, hexHeight]);
+    return {
+      width: gridData.sectorWidth,
+      height: gridData.sectorHeight,
+    };
+  }, [gridData.sectorWidth, gridData.sectorHeight]);
 
   // Track container viewport dimensions for smooth frustum/viewport culling
   const containerRef = useRef<HTMLDivElement>(null);
@@ -323,23 +293,27 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     setShowConfigModal(false);
   };
 
-  // Search Hex Coordinate
+  // Search Star Coordinate or Name
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchCoord.trim()) return;
-    const clean = searchCoord.trim().padStart(4, '0');
-    const match = gridData.cells.find((c) => c.coord === clean);
+    const q = searchCoord.trim().toLowerCase();
+    const clean = q.padStart(4, '0');
+    const match = gridData.systems.find(
+      (s) =>
+        s.coord.toLowerCase() === q ||
+        s.coord === clean ||
+        s.name.toLowerCase().includes(q) ||
+        s.id.toLowerCase().includes(q)
+    );
     if (match) {
       setSelectedCoord(match.coord);
-      if (match.system) {
-        setSelectedSystem(match.system);
-      }
-      const { cx, cy } = getHexCenter(match.col, match.row);
+      setSelectedSystem(match);
       if (containerRef.current) {
         const { clientWidth, clientHeight } = containerRef.current;
         setPan({
-          x: clientWidth / 2 - cx * zoom,
-          y: clientHeight / 2 - cy * zoom,
+          x: clientWidth / 2 - match.x * zoom,
+          y: clientHeight / 2 - match.y * zoom,
         });
       }
     }
@@ -496,36 +470,24 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   };
 
   // ============================================================================
-  // HIGH-PERFORMANCE VIEWPORT CULLING FOR LARGE GRIDS (UP TO 100x100 = 10,000 HEXES!)
+  // HIGH-PERFORMANCE VIEWPORT CULLING FOR VISIBLE STARS
   // ============================================================================
-  const visibleHexCells = useMemo(() => {
-    // If total hexes are small (<= 400), rendering all cells is fast
-    if (config.columns * config.rows <= 400) {
-      return gridData.cells;
-    }
-
-    // For large grids up to 100x100: calculate visible column and row bounds in O(1)
-    const margin = 140; // Pixel padding around screen
+  const visibleSystems = useMemo(() => {
+    const margin = 120; // Pixel padding around screen
     const viewMinX = -pan.x / zoom - margin;
     const viewMaxX = (containerSize.width - pan.x) / zoom + margin;
     const viewMinY = -pan.y / zoom - margin;
     const viewMaxY = (containerSize.height - pan.y) / zoom + margin;
 
-    const minCol = Math.max(1, Math.floor((viewMinX - 30) / colSpacing));
-    const maxCol = Math.min(config.columns, Math.ceil((viewMaxX - 30) / colSpacing) + 1);
-    const minRow = Math.max(1, Math.floor((viewMinY - 30) / rowSpacing));
-    const maxRow = Math.min(config.rows, Math.ceil((viewMaxY - 30) / rowSpacing) + 1);
-
-    const culled: SectorHexCell[] = [];
-    for (let c = minCol; c <= maxCol; c++) {
-      for (let r = minRow; r <= maxRow; r++) {
-        const idx = (c - 1) * config.rows + (r - 1);
-        const cell = gridData.cells[idx];
-        if (cell) culled.push(cell);
-      }
-    }
-    return culled;
-  }, [gridData.cells, config.columns, config.rows, pan.x, pan.y, zoom, containerSize, colSpacing, rowSpacing]);
+    return gridData.systems.filter((sys) => {
+      return (
+        sys.x >= viewMinX &&
+        sys.x <= viewMaxX &&
+        sys.y >= viewMinY &&
+        sys.y <= viewMaxY
+      );
+    });
+  }, [gridData.systems, pan.x, pan.y, zoom, containerSize]);
 
   return (
     <div className="w-full h-full flex flex-col bg-[#050814] text-slate-100 overflow-hidden font-sans select-none relative">
@@ -589,30 +551,32 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           ))}
         </div>
 
-        {/* Grid Dimensions & Density Button */}
+        {/* Sector Dimensions, Density & Star Count Button */}
         <button
           onClick={() => setShowConfigModal(true)}
           className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700/80 hover:border-cyan-500 text-xs font-mono font-medium flex items-center gap-2 transition shadow cursor-pointer"
-          title="Customize Hex Grid Dimensions (up to 100x100), Density, Age & Metallicity"
+          title="Customize Sector Scale (up to 100x100), Density, Age & Metallicity"
         >
           <Sliders className="w-3.5 h-3.5 text-cyan-400" />
-          <span>Grid: <strong className="text-white">{config.columns}&times;{config.rows}</strong></span>
+          <span>Scale: <strong className="text-white">{config.columns}&times;{config.rows}</strong></span>
           <span className="text-slate-500">&bull;</span>
           <span>Density: <strong className={config.density > 1.0 ? 'text-amber-300 font-bold' : 'text-emerald-300'}>{Math.round(config.density * 100)}%{config.density > 1.0 ? ' (Overdensity)' : ''}</strong></span>
+          <span className="text-slate-500">&bull;</span>
+          <span>Stars: <strong className="text-cyan-300">{gridData.systems.length}</strong></span>
           <span className="text-slate-500">&bull;</span>
           <span className="hidden md:inline">Age: <strong className="text-cyan-300">{config.meanAge.toFixed(1)} Gyr</strong></span>
         </button>
 
-        {/* Search Hex Coordinate */}
+        {/* Search Star or Coordinate */}
         <form onSubmit={handleSearchSubmit} className="flex items-center gap-1.5">
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
-              placeholder="Jump to hex (e.g. 0408)..."
+              placeholder="Search star or coord (e.g. 0408, Centauri)..."
               value={searchCoord}
               onChange={(e) => setSearchCoord(e.target.value)}
-              className="w-44 pl-8 pr-2 py-1 text-xs font-mono bg-slate-900/90 border border-slate-800 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
+              className="w-56 pl-8 pr-2 py-1 text-xs font-mono bg-slate-900/90 border border-slate-800 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
             />
           </div>
           <button
@@ -900,146 +864,190 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}
               style={{ transformOrigin: '0 0' }}
             >
-              {/* High-Performance Culled Hex Cells Rendering */}
-              {visibleHexCells.map((cell) => {
-                const { cx, cy } = getHexCenter(cell.col, cell.row);
-                const hasSystem = !!cell.system;
-                const isSelected = selectedCoord === cell.coord || selectedSystem?.coord === cell.coord;
-                const isHovered = hoveredCell?.coord === cell.coord;
+              {/* Sector Boundary Box */}
+              <rect
+                x={0}
+                y={0}
+                width={gridData.sectorWidth}
+                height={gridData.sectorHeight}
+                rx={16}
+                fill="rgba(6, 11, 24, 0.45)"
+                stroke="rgba(56, 189, 248, 0.30)"
+                strokeWidth={1.5}
+                strokeDasharray="6,4"
+              />
+
+              {/* Subtle Astronomical Parsec Coordinate Grid Lines */}
+              {Array.from({ length: 9 }).map((_, idx) => {
+                const frac = (idx + 1) / 10;
+                const gx = gridData.sectorWidth * frac;
+                const gy = gridData.sectorHeight * frac;
+                return (
+                  <g key={`grid-line-${idx}`} opacity={0.10} stroke="#38bdf8" strokeWidth={0.8} strokeDasharray="3,4">
+                    <line x1={gx} y1={0} x2={gx} y2={gridData.sectorHeight} />
+                    <line x1={0} y1={gy} x2={gridData.sectorWidth} y2={gy} />
+                  </g>
+                );
+              })}
+
+              {/* Sector Corner Sci-Fi Tech Brackets */}
+              <path
+                d={`M 25 10 L 10 10 L 10 25 M ${gridData.sectorWidth - 25} 10 L ${gridData.sectorWidth - 10} 10 L ${gridData.sectorWidth - 10} 25 M 10 ${gridData.sectorHeight - 25} L 10 ${gridData.sectorHeight - 10} L 25 ${gridData.sectorHeight - 10} M ${gridData.sectorWidth - 25} ${gridData.sectorHeight - 10} L ${gridData.sectorWidth - 10} ${gridData.sectorHeight - 10} L ${gridData.sectorWidth - 10} ${gridData.sectorHeight - 25}`}
+                fill="none"
+                stroke="#38bdf8"
+                strokeWidth={2}
+                opacity={0.60}
+              />
+
+              {/* Sector Parsec Scale Marker in Bottom Corner */}
+              <text
+                x={16}
+                y={gridData.sectorHeight - 14}
+                fill="rgba(148, 163, 184, 0.6)"
+                fontSize={9}
+                fontFamily="monospace"
+                letterSpacing="0.05em"
+              >
+                SECTOR FIELD: {gridData.parsecWidth}&times;{gridData.parsecHeight} pc &bull; {gridData.systems.length} STELLAR SYSTEMS
+              </text>
+
+              {/* Stars in Random Positions with Circular Zones of Influence */}
+              {visibleSystems.map((system) => {
+                const isSelected = selectedSystem?.id === system.id || selectedCoord === system.coord;
+                const isHovered = hoveredSystem?.id === system.id;
 
                 // Filter check
                 let matchesFilter = true;
                 if (filterCat !== 'all') {
-                  if (!cell.system) {
-                    matchesFilter = false;
-                  } else if (filterCat === 'habitable') {
-                    matchesFilter = cell.system.candidateHabitable;
+                  if (filterCat === 'habitable') {
+                    matchesFilter = system.candidateHabitable;
                   } else {
-                    matchesFilter = cell.system.spectralCat === filterCat;
+                    matchesFilter = system.spectralCat === filterCat;
                   }
                 }
 
-                const cellOpacity = matchesFilter ? 1 : 0.20;
+                const systemOpacity = matchesFilter ? 1 : 0.20;
 
                 return (
                   <g
-                    key={cell.coord}
-                    transform={`translate(${cx}, ${cy})`}
-                    onClick={() => {
-                      setSelectedCoord(cell.coord);
-                      if (cell.system) setSelectedSystem(cell.system);
+                    key={system.id}
+                    transform={`translate(${system.x}, ${system.y})`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedSystem(system);
+                      setSelectedCoord(system.coord);
                     }}
-                    onDoubleClick={() => {
-                      if (cell.system) handleLaunchSystemGenerator(cell.system);
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      handleLaunchSystemGenerator(system);
                     }}
-                    onMouseEnter={() => setHoveredCell(cell)}
-                    onMouseLeave={() => setHoveredCell(null)}
+                    onMouseEnter={() => setHoveredSystem(system)}
+                    onMouseLeave={() => setHoveredSystem(null)}
                     className="cursor-pointer transition-opacity"
-                    style={{ opacity: cellOpacity }}
+                    style={{ opacity: systemOpacity }}
                   >
-                    {/* Hex Base Polygon */}
-                    <polygon
-                      points={hexPoints}
+                    {/* Outer Subtle Gravitational Sphere Fringe */}
+                    <circle
+                      r={system.influenceRadius + 4}
+                      fill="none"
+                      stroke={isSelected ? '#38bdf8' : isHovered ? '#7dd3fc' : 'rgba(100, 116, 139, 0.22)'}
+                      strokeWidth={0.8}
+                      strokeDasharray="2,3"
+                      opacity={isSelected || isHovered ? 0.95 : 0.40}
+                    />
+
+                    {/* Circular Zone of Influence (Primary Hit Area & Click/Hover Target) */}
+                    <circle
+                      r={system.influenceRadius}
                       fill={
                         isSelected
-                          ? 'rgba(14, 165, 233, 0.16)'
+                          ? 'rgba(14, 165, 233, 0.22)'
                           : isHovered
-                          ? 'rgba(56, 189, 248, 0.10)'
-                          : hasSystem
-                          ? 'rgba(15, 23, 42, 0.65)'
-                          : 'rgba(6, 11, 24, 0.40)'
+                          ? 'rgba(56, 189, 248, 0.12)'
+                          : 'rgba(15, 23, 42, 0.50)'
                       }
                       stroke={
                         isSelected
                           ? '#38bdf8'
                           : isHovered
                           ? '#7dd3fc'
-                          : hasSystem
-                          ? 'rgba(71, 85, 105, 0.50)'
-                          : 'rgba(30, 41, 59, 0.35)'
+                          : 'rgba(148, 163, 184, 0.35)'
                       }
-                      strokeWidth={isSelected ? 2.5 : isHovered ? 1.5 : 1}
-                      strokeDasharray={isSelected ? '6,3' : 'none'}
+                      strokeWidth={isSelected ? 2.5 : isHovered ? 1.8 : 1.2}
+                      strokeDasharray={isSelected ? '5,3' : 'none'}
                       className={isSelected ? 'animate-pulse' : ''}
                     />
 
-                    {/* Coordinate Label at top of hex - revealed only on mouse over or click/selection */}
-                    {(isSelected || isHovered) && zoom >= 0.28 && (
+                    {/* Render Multiple Stars (A, B, C, D) with their exact colors and sizes */}
+                    {renderSystemStars(system)}
+
+                    {/* Habitable World Green Badge Dot */}
+                    {system.candidateHabitable && (
+                      <circle
+                        cx={system.influenceRadius * 0.65}
+                        cy={-system.influenceRadius * 0.65}
+                        r={2.5}
+                        fill="#10b981"
+                        stroke="#064e3b"
+                        strokeWidth={0.5}
+                      />
+                    )}
+
+                    {/* Coordinate / Catalog Label at top of zone - revealed only on mouse over or click/selection */}
+                    {(isSelected || isHovered) && zoom >= 0.26 && (
                       <text
-                        y={-hexRadius + 14}
+                        y={-system.influenceRadius - 6}
                         textAnchor="middle"
-                        fill={
-                          isSelected
-                            ? '#38bdf8'
-                            : hasSystem
-                            ? '#94a3b8'
-                            : '#475569'
-                        }
-                        fontSize={hasSystem ? 9 : 8}
+                        fill={isSelected ? '#38bdf8' : '#94a3b8'}
+                        fontSize={8.5}
                         fontFamily="monospace"
-                        fontWeight={hasSystem ? 'bold' : 'normal'}
+                        fontWeight="bold"
                         letterSpacing="0.05em"
+                        style={{
+                          textShadow: '0 1px 3px rgba(0,0,0,0.95)',
+                          pointerEvents: 'none',
+                        }}
                       >
-                        {cell.coord}
+                        {system.coord}
                       </text>
                     )}
 
-                    {/* Occupied System Representation (Depicts Multiple Stars authentically) */}
-                    {cell.system && (
-                      <g>
-                        {/* Render Multiple Stars (A, B, C, D) with their exact colors and sizes */}
-                        {renderSystemStars(cell.system)}
+                    {/* Star System Name (only label shown by default on star hexes) */}
+                    {zoom >= 0.30 && (
+                      <text
+                        y={system.influenceRadius + 13}
+                        textAnchor="middle"
+                        fill="#f8fafc"
+                        fontSize={8.5}
+                        fontWeight="600"
+                        letterSpacing="0.02em"
+                        style={{
+                          textShadow: '0 1px 3px rgba(0,0,0,0.95)',
+                          pointerEvents: 'none',
+                        }}
+                      >
+                        {system.name.length > 13
+                          ? system.name.slice(0, 12) + '…'
+                          : system.name}
+                      </text>
+                    )}
 
-                        {/* Habitable World Green Badge Dot */}
-                        {cell.system.candidateHabitable && (
-                          <circle
-                            cx={14}
-                            cy={-6}
-                            r={2.5}
-                            fill="#10b981"
-                            stroke="#064e3b"
-                            strokeWidth={0.5}
-                          />
-                        )}
-
-                        {/* Star System Name (only label shown by default on star hexes) */}
-                        {zoom >= 0.35 && (
-                          <text
-                            y={14}
-                            textAnchor="middle"
-                            fill="#f8fafc"
-                            fontSize={8.5}
-                            fontWeight="600"
-                            letterSpacing="0.02em"
-                            style={{
-                              textShadow: '0 1px 3px rgba(0,0,0,0.9)',
-                              pointerEvents: 'none',
-                            }}
-                          >
-                            {cell.system.name.length > 12
-                              ? cell.system.name.slice(0, 11) + '…'
-                              : cell.system.name}
-                          </text>
-                        )}
-
-                        {/* Spectral Class Pill - Revealed only on mouse over or click */}
-                        {(isSelected || isHovered) && zoom >= 0.35 && (
-                          <text
-                            y={25}
-                            textAnchor="middle"
-                            fill={cell.system.colorHex}
-                            fontSize={7.5}
-                            fontFamily="monospace"
-                            fontWeight="bold"
-                            style={{
-                              textShadow: '0 1px 2px rgba(0,0,0,0.8)',
-                              pointerEvents: 'none',
-                            }}
-                          >
-                            {cell.system.primaryClass.split(' ')[0]} &bull; {cell.system.primaryMass.toFixed(2)}M☉{cell.system.nStars > 1 ? ` +${cell.system.nStars - 1}★` : ''}
-                          </text>
-                        )}
-                      </g>
+                    {/* Spectral Class Pill - Revealed only on mouse over or click */}
+                    {(isSelected || isHovered) && zoom >= 0.30 && (
+                      <text
+                        y={system.influenceRadius + 24}
+                        textAnchor="middle"
+                        fill={system.colorHex}
+                        fontSize={7.5}
+                        fontFamily="monospace"
+                        fontWeight="bold"
+                        style={{
+                          textShadow: '0 1px 3px rgba(0,0,0,0.95)',
+                          pointerEvents: 'none',
+                        }}
+                      >
+                        {system.primaryClass.split(' ')[0]} &bull; {system.primaryMass.toFixed(2)}M☉{system.nStars > 1 ? ` +${system.nStars - 1}★` : ''}
+                      </text>
                     )}
                   </g>
                 );
@@ -1110,35 +1118,35 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             </div>
           </div>
 
-          {/* Quick Hover Tooltip if hovering a hex */}
-          {hoveredCell && hoveredCell.system && (
+          {/* Quick Hover Tooltip if hovering a star */}
+          {hoveredSystem && (
             <div
               className="absolute top-4 left-4 bg-slate-950/90 backdrop-blur-md border border-slate-700/80 px-3 py-2 rounded-xl text-xs font-mono shadow-2xl pointer-events-none z-10 flex items-center gap-3 animate-fade-in"
             >
               <div
                 className="w-3.5 h-3.5 rounded-full border border-white/60 shadow"
-                style={{ backgroundColor: hoveredCell.system.colorHex }}
+                style={{ backgroundColor: hoveredSystem.colorHex }}
               />
               <div>
                 <div className="text-white font-bold flex items-center gap-2">
-                  <span>{hoveredCell.system.name}</span>
+                  <span>{hoveredSystem.name}</span>
                   <span className="text-[10px] text-cyan-400 bg-cyan-950/60 px-1 rounded border border-cyan-800">
-                    Hex {hoveredCell.coord}
+                    Sector {hoveredSystem.coord}
                   </span>
-                  {hoveredCell.system.nStars > 1 && (
+                  {hoveredSystem.nStars > 1 && (
                     <span className="text-[9.5px] text-blue-300 bg-blue-950/70 px-1 rounded border border-blue-800">
-                      {hoveredCell.system.nStars}★ Multiple
+                      {hoveredSystem.nStars}★ Multiple
                     </span>
                   )}
                 </div>
                 <div className="text-[10px] text-slate-400 flex items-center gap-2">
-                  <span>{hoveredCell.system.primaryClass}</span>
+                  <span>{hoveredSystem.primaryClass}</span>
                   <span>&bull;</span>
-                  <span>Star A: {hoveredCell.system.primaryMass.toFixed(2)} M☉</span>
+                  <span>Star A: {hoveredSystem.primaryMass.toFixed(2)} M☉</span>
                   <span>&bull;</span>
-                  <span>Sys: {hoveredCell.system.mass.toFixed(2)} M☉</span>
+                  <span>Sys: {hoveredSystem.mass.toFixed(2)} M☉</span>
                   <span>&bull;</span>
-                  <span>{hoveredCell.system.planetCount}p</span>
+                  <span>{hoveredSystem.planetCount}p</span>
                 </div>
               </div>
             </div>
@@ -1188,7 +1196,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     </div>
                     <div className="flex items-center gap-1.5 text-xs font-mono text-slate-400 mt-0.5">
                       <span className="px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[10.5px]">
-                        Hex {selectedSystem.coord}
+                        Sector {selectedSystem.coord} &bull; {selectedSystem.parsecX} pc, {selectedSystem.parsecY} pc
                       </span>
                       <span className="text-slate-600">&bull;</span>
                       <span className="font-semibold text-slate-300">

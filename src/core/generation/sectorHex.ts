@@ -17,10 +17,17 @@ export interface SectorHexSystem {
   metallicity: number; // [Fe/H] in dex (e.g. +0.05)
   id: string; // Deterministic PRNG seed string (e.g. "SYS-0408-A938")
 
+  // Position and Zone of Influence
+  x: number; // Continuous X position within sector bounds (px)
+  y: number; // Continuous Y position within sector bounds (px)
+  influenceRadius: number; // Radius of circular zone of influence (e.g. 24 to 42 px)
+  parsecX: number; // Astronomical relative position in parsecs
+  parsecY: number;
+
   // Exact stellar data derived directly from system generator (RealisticStarSystemResult)
   name: string;
-  col: number; // 1-indexed column
-  row: number; // 1-indexed row
+  col: number; // 1-indexed column / sector quadrant X
+  row: number; // 1-indexed row / sector quadrant Y
   coord: string; // "0101", "0408"
   primaryClass: string; // Exact spectral type from Star A (e.g. "G2V", "M4V", "B5V")
   primaryMass: number; // Mass of Star A in M_sun
@@ -61,6 +68,10 @@ export interface SectorHexConfig {
 
 export interface SectorHexGridData {
   config: SectorHexConfig;
+  sectorWidth: number;
+  sectorHeight: number;
+  parsecWidth: number;
+  parsecHeight: number;
   cells: SectorHexCell[];
   systems: SectorHexSystem[];
   integratedColorHex: string; // Luminosity-weighted average color of all constituent stars in sector
@@ -68,6 +79,7 @@ export interface SectorHexGridData {
     totalHexes: number;
     occupiedHexes: number;
     occupancyPct: number;
+    totalStars: number;
     obCount: number;
     afCount: number;
     gCount: number;
@@ -75,6 +87,7 @@ export interface SectorHexGridData {
     remnantCount: number;
     multipleSystemCount: number;
     heavyMassCount: number;
+    habitableCount: number;
   };
 }
 
@@ -198,13 +211,67 @@ function generateStarName(col: number, row: number, rng: PRNG): string {
 }
 
 /**
- * Builds the complete Sector Hex Grid with randomly distributed systems.
+ * Builds the complete Sector with stars in continuous random positions.
+ * Each star is surrounded by a circular "zone of influence" with spatial coordinates (x, y).
  * CRITICAL ARCHITECTURE: Calls runRealisticGenerator(params) directly using the { age, mass, metallicity, id }
  * tuple, then extracts all stellar and planetary data from the system generator result.
  */
 export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_CONFIG): SectorHexGridData {
   const sectorSeedInt = seedFromId(config.seed);
   const rng = new PRNG(sectorSeedInt);
+
+  // Sector dimensions in canvas pixels and astronomical parsecs
+  const sectorWidth = Math.max(800, config.columns * 54);
+  const sectorHeight = Math.max(600, config.rows * 54);
+  const parsecWidth = +(config.columns * 2.5).toFixed(1);
+  const parsecHeight = +(config.rows * 2.5).toFixed(1);
+
+  // Total stars in sector derived directly from density and sector size
+  const targetStarCount = Math.max(1, Math.round(config.columns * config.rows * config.density));
+
+  const padding = 55;
+  const usableW = sectorWidth - padding * 2;
+  const usableH = sectorHeight - padding * 2;
+
+  // Compute organic spacing to prevent direct overlap while keeping natural Poisson distribution
+  const avgArea = (usableW * usableH) / targetStarCount;
+  const idealDist = Math.sqrt(avgArea);
+  const minSpacing = Math.max(26, Math.min(65, idealDist * 0.70));
+
+  const placedCoords: { x: number; y: number }[] = [];
+
+  for (let i = 0; i < targetStarCount; i++) {
+    let bestX = padding + rng.next() * usableW;
+    let bestY = padding + rng.next() * usableH;
+    let bestMinDist = -1;
+
+    // Up to 12 candidate attempts per star to maintain aesthetic minimum separation
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const candX = padding + rng.next() * usableW;
+      const candY = padding + rng.next() * usableH;
+
+      let nearest = Infinity;
+      for (let p = 0; p < placedCoords.length; p++) {
+        const dx = candX - placedCoords[p].x;
+        const dy = candY - placedCoords[p].y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < nearest) nearest = d;
+      }
+
+      if (nearest >= minSpacing) {
+        bestX = candX;
+        bestY = candY;
+        break;
+      }
+      if (nearest > bestMinDist) {
+        bestMinDist = nearest;
+        bestX = candX;
+        bestY = candY;
+      }
+    }
+
+    placedCoords.push({ x: Math.round(bestX), y: Math.round(bestY) });
+  }
 
   const cells: SectorHexCell[] = [];
   const systems: SectorHexSystem[] = [];
@@ -216,175 +283,182 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
   let remnantCount = 0;
   let multipleSystemCount = 0;
   let heavyMassCount = 0;
+  let habitableCount = 0;
 
   let sumSectorR = 0;
   let sumSectorG = 0;
   let sumSectorB = 0;
   let totalSectorLum = 0;
 
-  for (let c = 1; c <= config.columns; c++) {
-    for (let r = 1; r <= config.rows; r++) {
-      const coord = formatHexCoord(c, r);
-      const isOccupied = rng.next() < config.density;
+  for (let i = 0; i < placedCoords.length; i++) {
+    const { x, y } = placedCoords[i];
 
-      if (!isOccupied) {
-        cells.push({ col: c, row: r, coord, system: null });
-        continue;
+    // Map continuous coordinates to sector quadrant locator (e.g. 0408)
+    const c = Math.min(config.columns, Math.max(1, Math.floor(((x - padding) / usableW) * config.columns) + 1));
+    const r = Math.min(config.rows, Math.max(1, Math.floor(((y - padding) / usableH) * config.rows) + 1));
+    const coord = formatHexCoord(c, r);
+
+    const cellSeedNum = Math.floor(rng.next() * 8999) + 1000;
+    const systemId = `SYS-${coord}-${cellSeedNum.toString(16).toUpperCase()}`;
+    const sysRng = new PRNG(seedFromId(systemId));
+
+    // 1. Progenitor mass with density overflow
+    const mass = sampleSystemMass(sysRng, config.density);
+    if (mass >= 3.0) heavyMassCount++;
+
+    // 2. Age sample (clamped between 0.1 and 12.8 Gyr)
+    const rawAge = config.meanAge + sysRng.nextGaussian(0, config.ageSigma);
+    const age = +Math.max(0.1, Math.min(12.8, rawAge)).toFixed(2);
+
+    // 3. Metallicity sample (with cosmic age anti-correlation)
+    const ageDrift = -0.04 * (age - config.meanAge);
+    const rawFeh = config.metallicityMean + ageDrift + sysRng.nextGaussian(0, config.metallicitySigma);
+    const metallicity = +Math.max(-1.8, Math.min(0.55, rawFeh)).toFixed(2);
+
+    const name = generateStarName(c, r, sysRng);
+
+    // Fun Rule: Densities > 100% trigger gravitational capture and high multiple-star systems
+    let forcedMult: 'auto' | '1' | '2' | '3' | '4' = 'auto';
+    if (config.density > 1.0) {
+      const multRoll = sysRng.next();
+      const multChance = Math.min(0.90, 0.38 + (config.density - 1.0) * 0.26);
+      if (multRoll < multChance) {
+        const mPick = sysRng.next();
+        forcedMult = mPick < 0.40 ? '2' : mPick < 0.75 ? '3' : '4';
       }
-
-      // Generate unique deterministic ID for this hex system
-      // Format: SYS-coord-hexSeed, e.g. SYS-0408-A938
-      const cellSeedNum = Math.floor(rng.next() * 8999) + 1000;
-      const systemId = `SYS-${coord}-${cellSeedNum.toString(16).toUpperCase()}`;
-
-      // Local PRNG dedicated to this specific system for reproducible parameter sampling
-      const sysRng = new PRNG(seedFromId(systemId));
-
-      // 1. Progenitor system mass (sysMass in M_sun) with density overflow
-      const mass = sampleSystemMass(sysRng, config.density);
-      if (mass >= 3.0) heavyMassCount++;
-
-      // 2. Age sample (clamped between 0.1 and 12.8 Gyr)
-      const rawAge = config.meanAge + sysRng.nextGaussian(0, config.ageSigma);
-      const age = +Math.max(0.1, Math.min(12.8, rawAge)).toFixed(2);
-
-      // 3. Metallicity sample (with cosmic age anti-correlation)
-      const ageDrift = -0.04 * (age - config.meanAge);
-      const rawFeh = config.metallicityMean + ageDrift + sysRng.nextGaussian(0, config.metallicitySigma);
-      const metallicity = +Math.max(-1.8, Math.min(0.55, rawFeh)).toFixed(2);
-
-      const name = generateStarName(c, r, sysRng);
-
-      // Fun Rule: Densities > 100% trigger gravitational capture and high multiple-star systems
-      let forcedMult: 'auto' | '1' | '2' | '3' | '4' = 'auto';
-      if (config.density > 1.0) {
-        const multRoll = sysRng.next();
-        // At 200% (overflow 1.0): ~65% forced multiple; at 300%: ~88% forced multiple
-        const multChance = Math.min(0.90, 0.38 + (config.density - 1.0) * 0.26);
-        if (multRoll < multChance) {
-          const mPick = sysRng.next();
-          forcedMult = mPick < 0.40 ? '2' : mPick < 0.75 ? '3' : '4';
-        }
-      }
-
-      // 4. CALL SYSTEM GENERATOR DIRECTLY WITH THE { age, mass, metallicity, id } TUPLE!
-      const sysGenParams: StarGenParams = {
-        sysMass: mass,
-        age,
-        feh: metallicity,
-        id: systemId,
-        name,
-        forcedMult,
-      };
-      const sysResult = runRealisticGenerator(sysGenParams);
-
-      // 5. EXTRACT EXACT STELLAR AND SYSTEM DATA FROM THE SYSTEM GENERATOR RESULT
-      const primaryStar = sysResult.hierarchy.stars[0];
-      const companionStars = sysResult.hierarchy.stars.slice(1);
-      const nStars = sysResult.hierarchy.stars.length;
-      if (nStars > 1) multipleSystemCount++;
-      const archName = sysResult.hierarchy.archName;
-
-      // Classify spectral type and remnant status from primary star
-      const categoryStr = primaryStar.category || '';
-      const typeStr = primaryStar.spectralType || '';
-      const isRemnant =
-        categoryStr.toLowerCase().includes('remnant') ||
-        typeStr.includes('Dwarf (D') ||
-        typeStr.includes('White Dwarf') ||
-        typeStr.includes('Neutron') ||
-        typeStr.includes('Black Hole');
-
-      let spectralCat: SpectralCategory;
-      if (isRemnant) {
-        spectralCat = 'remnant';
-        remnantCount++;
-      } else {
-        const firstLetter = typeStr.trim().charAt(0).toUpperCase();
-        if (firstLetter === 'O' || firstLetter === 'B') {
-          spectralCat = 'ob';
-          obCount++;
-        } else if (firstLetter === 'A' || firstLetter === 'F') {
-          spectralCat = 'af';
-          afCount++;
-        } else if (firstLetter === 'G') {
-          spectralCat = 'g';
-          gCount++;
-        } else {
-          spectralCat = 'km';
-          kmCount++;
-        }
-      }
-
-      // Check planets and habitable candidate worlds directly from the generated zones
-      let planetCount = 0;
-      let beltCount = 0;
-      let candidateHabitable = false;
-
-      for (const zone of sysResult.zones) {
-        for (const body of zone.bodies) {
-          if (body.kind === 'planet') {
-            planetCount++;
-            if (
-              body.planetClass.includes('Habitable') ||
-              (body.surfaceTempK >= 260 &&
-                body.surfaceTempK <= 325 &&
-                body.hydrosphere &&
-                (body.hydrosphere.coveragePct || 0) > 5)
-            ) {
-              candidateHabitable = true;
-            }
-          } else if (body.kind === 'belt') {
-            beltCount++;
-          }
-        }
-      }
-
-      const lumNum = typeof primaryStar.lumNum === 'number' ? primaryStar.lumNum : 1;
-
-      const system: SectorHexSystem = {
-        // Required core tuple:
-        age,
-        mass,
-        metallicity,
-        id: systemId,
-
-        // Exact stellar data from system generator:
-        name,
-        col: c,
-        row: r,
-        coord,
-        primaryClass: primaryStar.spectralType,
-        primaryMass: primaryStar.mass,
-        spectralCat,
-        colorHex: primaryStar.colorHex,
-        glowColor: primaryStar.colorHex,
-        teff: primaryStar.Teff,
-        lumLsun: +lumNum.toFixed(3),
-        isRemnant,
-        remnantType: isRemnant ? primaryStar.spectralType : null,
-        nStars,
-        archName,
-        companionStars,
-        planetCount,
-        beltCount,
-        candidateHabitable,
-        sysResult,
-      };
-
-      // Accumulate luminosity-weighted color of all constituent stars in this system
-      for (const st of sysResult.hierarchy.stars) {
-        const lum = Math.max(1e-4, typeof st.lumNum === 'number' ? st.lumNum : 0.001);
-        const rgb = hexToRgb(st.colorHex || '#ffffff');
-        sumSectorR += lum * rgb.r;
-        sumSectorG += lum * rgb.g;
-        sumSectorB += lum * rgb.b;
-        totalSectorLum += lum;
-      }
-
-      systems.push(system);
-      cells.push({ col: c, row: r, coord, system });
     }
+
+    // 4. CALL SYSTEM GENERATOR DIRECTLY WITH THE { age, mass, metallicity, id } TUPLE!
+    const sysGenParams: StarGenParams = {
+      sysMass: mass,
+      age,
+      feh: metallicity,
+      id: systemId,
+      name,
+      forcedMult,
+    };
+    const sysResult = runRealisticGenerator(sysGenParams);
+
+    // 5. EXTRACT EXACT STELLAR AND SYSTEM DATA FROM THE SYSTEM GENERATOR RESULT
+    const primaryStar = sysResult.hierarchy.stars[0];
+    const companionStars = sysResult.hierarchy.stars.slice(1);
+    const nStars = sysResult.hierarchy.stars.length;
+    if (nStars > 1) multipleSystemCount++;
+    const archName = sysResult.hierarchy.archName;
+
+    // Spectral classification
+    const categoryStr = primaryStar.category || '';
+    const typeStr = primaryStar.spectralType || '';
+    const isRemnant =
+      categoryStr.toLowerCase().includes('remnant') ||
+      typeStr.includes('Dwarf (D') ||
+      typeStr.includes('White Dwarf') ||
+      typeStr.includes('Neutron') ||
+      typeStr.includes('Black Hole');
+
+    let spectralCat: SpectralCategory;
+    if (isRemnant) {
+      spectralCat = 'remnant';
+      remnantCount++;
+    } else {
+      const firstLetter = typeStr.trim().charAt(0).toUpperCase();
+      if (firstLetter === 'O' || firstLetter === 'B') {
+        spectralCat = 'ob';
+        obCount++;
+      } else if (firstLetter === 'A' || firstLetter === 'F') {
+        spectralCat = 'af';
+        afCount++;
+      } else if (firstLetter === 'G') {
+        spectralCat = 'g';
+        gCount++;
+      } else {
+        spectralCat = 'km';
+        kmCount++;
+      }
+    }
+
+    // Check planets and habitable candidate worlds
+    let planetCount = 0;
+    let beltCount = 0;
+    let candidateHabitable = false;
+
+    for (const zone of sysResult.zones) {
+      for (const body of zone.bodies) {
+        if (body.kind === 'planet') {
+          planetCount++;
+          if (
+            body.planetClass.includes('Habitable') ||
+            (body.surfaceTempK >= 260 &&
+              body.surfaceTempK <= 325 &&
+              body.hydrosphere &&
+              (body.hydrosphere.coveragePct || 0) > 5)
+          ) {
+            candidateHabitable = true;
+          }
+        } else if (body.kind === 'belt') {
+          beltCount++;
+        }
+      }
+    }
+    if (candidateHabitable) habitableCount++;
+
+    const lumNum = typeof primaryStar.lumNum === 'number' ? primaryStar.lumNum : 1;
+
+    // Radius of circular zone of influence (in px) scaled naturally with stellar mass and multiplicity
+    const rBase = 26 + 3.8 * Math.log10(Math.max(0.1, primaryStar.mass));
+    const rMulti = nStars > 1 ? (nStars === 2 ? 4 : 7) : 0;
+    const influenceRadius = Math.round(Math.min(42, Math.max(22, rBase + rMulti)));
+
+    // Relative parsec coordinates
+    const parsecX = +(((x - padding) / usableW) * parsecWidth - parsecWidth / 2).toFixed(1);
+    const parsecY = +(((y - padding) / usableH) * parsecHeight - parsecHeight / 2).toFixed(1);
+
+    const system: SectorHexSystem = {
+      age,
+      mass,
+      metallicity,
+      id: systemId,
+
+      x,
+      y,
+      influenceRadius,
+      parsecX,
+      parsecY,
+
+      name,
+      col: c,
+      row: r,
+      coord,
+      primaryClass: primaryStar.spectralType,
+      primaryMass: primaryStar.mass,
+      spectralCat,
+      colorHex: primaryStar.colorHex,
+      glowColor: primaryStar.colorHex,
+      teff: primaryStar.Teff,
+      lumLsun: +lumNum.toFixed(3),
+      isRemnant,
+      remnantType: isRemnant ? primaryStar.spectralType : null,
+      nStars,
+      archName,
+      companionStars,
+      planetCount,
+      beltCount,
+      candidateHabitable,
+      sysResult,
+    };
+
+    // Accumulate luminosity-weighted color of all constituent stars
+    for (const st of sysResult.hierarchy.stars) {
+      const lum = Math.max(1e-4, typeof st.lumNum === 'number' ? st.lumNum : 0.001);
+      const rgb = hexToRgb(st.colorHex || '#ffffff');
+      sumSectorR += lum * rgb.r;
+      sumSectorG += lum * rgb.g;
+      sumSectorB += lum * rgb.b;
+      totalSectorLum += lum;
+    }
+
+    systems.push(system);
+    cells.push({ col: c, row: r, coord, system });
   }
 
   // Compute the sector's integrated color as luminosity-weighted average of all constituent stars
@@ -402,10 +476,14 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
 
   const totalHexes = config.columns * config.rows;
   const occupiedHexes = systems.length;
-  const occupancyPct = totalHexes > 0 ? +( (occupiedHexes / totalHexes) * 100 ).toFixed(1) : 0;
+  const occupancyPct = totalHexes > 0 ? +((occupiedHexes / totalHexes) * 100).toFixed(1) : 0;
 
   return {
     config,
+    sectorWidth,
+    sectorHeight,
+    parsecWidth,
+    parsecHeight,
     cells,
     systems,
     integratedColorHex,
@@ -413,6 +491,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       totalHexes,
       occupiedHexes,
       occupancyPct,
+      totalStars: systems.length,
       obCount,
       afCount,
       gCount,
@@ -420,6 +499,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       remnantCount,
       multipleSystemCount,
       heavyMassCount,
+      habitableCount,
     },
   };
 }
