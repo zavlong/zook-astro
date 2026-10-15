@@ -64,6 +64,7 @@ import {
   SectorEmpire,
   ColonyDesignation,
 } from '../../core/generation/empireGen';
+import { universeCache } from '../../core/storage/universeCache';
 
 interface RealisticStarGenAppProps {
   onOpenInArchitect: (archSystem: ArchitectSystem) => void;
@@ -260,8 +261,26 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     }
   };
 
-  const triggerRun = (params: StarGenParams) => {
+  // System persistent cache status
+  const [isFromCache, setIsFromCache] = useState<boolean>(false);
+
+  const triggerRun = (params: StarGenParams, forceRegenerate = false) => {
+    if (!forceRegenerate && params.id) {
+      const cached = universeCache.getCachedSystem(params.id);
+      if (cached) {
+        setSystemResult(cached);
+        setIsFromCache(true);
+        setSelectedEntity(null);
+        setTrackedTarget(null);
+        fitOrreryToFullSystem(cached);
+        return;
+      }
+    }
     const res = runRealisticGenerator(params);
+    if (params.id) {
+      universeCache.cacheLoadedSystem(params.id, res);
+    }
+    setIsFromCache(false);
     setSystemResult(res);
     setSelectedEntity(null);
     setTrackedTarget(null);
@@ -398,7 +417,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       age,
       feh,
       forcedMult,
-    });
+      id: currentSysId,
+    }, true);
   };
 
   const handleSelectPreset = (key: string) => {
@@ -2896,6 +2916,15 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               {systemResult?.step1?.id && (
                 <span className="text-[10.5px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
                   {systemResult.step1.name || systemResult.step1.id}
+                </span>
+              )}
+              {isFromCache && (
+                <span
+                  className="text-[10.5px] font-mono px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800 flex items-center gap-1 shadow-sm"
+                  title="System state restored from persistent universe cache"
+                >
+                  <span>💾</span>
+                  <span>Cached System</span>
                 </span>
               )}
             </h1>

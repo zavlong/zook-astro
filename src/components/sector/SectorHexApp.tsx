@@ -51,6 +51,7 @@ import {
 import { SpawnEmpireModal } from './SpawnEmpireModal';
 import { StarGenParams } from '../../core/generation/realisticStarGen';
 import { SpectralCategory } from '../../types/astrophysics';
+import { universeCache } from '../../core/storage/universeCache';
 
 interface SectorHexAppProps {
   onLaunchStarGen: (params: StarGenParams) => void;
@@ -226,8 +227,28 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     config.hasNebula,
   ]);
 
-  // Generated Grid Data
-  const gridData = useMemo(() => generateSectorHexGrid(config), [config]);
+  // Sector persistent cache key
+  const sectorCacheKey = useMemo(() => {
+    return universeCache.getSectorCacheKey(config.seed, config.coord);
+  }, [config.seed, config.coord]);
+
+  // Sector cache status state
+  const [isFromCache, setIsFromCache] = useState<boolean>(() => {
+    return universeCache.hasCachedSector(universeCache.getSectorCacheKey(config.seed, config.coord));
+  });
+
+  // Generated Grid Data (with persistent cache lookup)
+  const gridData = useMemo(() => {
+    const cached = universeCache.getCachedSector(sectorCacheKey);
+    if (cached) {
+      setIsFromCache(true);
+      return cached;
+    }
+    setIsFromCache(false);
+    const fresh = generateSectorHexGrid(config);
+    universeCache.cacheLoadedSector(sectorCacheKey, fresh);
+    return fresh;
+  }, [config, sectorCacheKey]);
 
   // Selected Hex System and Selected Coordinate
   const [selectedCoord, setSelectedCoord] = useState<string | null>(() => {
@@ -723,6 +744,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       sectorRows: config.rows,
       empireId: systemEmpire?.id || activeEmpire?.id,
     };
+    if (system.sysResult && !universeCache.hasCachedSystem(system.id)) {
+      universeCache.cacheLoadedSystem(system.id, system.sysResult);
+    }
     onLaunchStarGen(params);
   };
 
@@ -977,6 +1001,15 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950/80 text-cyan-400 border border-cyan-800">
                   Seed #{config.seed}
                 </span>
+                {isFromCache && (
+                  <span
+                    className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-800 flex items-center gap-1 shadow-sm"
+                    title="Sector state restored from persistent universe cache"
+                  >
+                    <span>💾</span>
+                    <span>Cached Sector</span>
+                  </span>
+                )}
               </h2>
             </div>
             <p className="text-[11px] text-slate-400 flex items-center gap-2 flex-wrap">

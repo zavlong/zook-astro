@@ -19,12 +19,12 @@ import {
   Hexagon,
   Tag,
   Layers,
+  FolderOpen,
 } from 'lucide-react';
 import {
   GalaxyConfig,
   GalaxySectorHex,
   GalaxyMorphology,
-  DEFAULT_GALAXY_CONFIG,
   generateGalaxyGrid,
   GalaxyGridData,
   generateBlurredGalaxyBackground,
@@ -32,6 +32,8 @@ import {
 import { getHexGridOverlayUrl } from '../../core/generation/hexGridOverlay';
 import { getStarAssetPath } from '../../core/generation/starAssets';
 import { ImageQuantizerModal } from './ImageQuantizerModal';
+import { SavedGalaxiesModal } from './SavedGalaxiesModal';
+import { universeCache, SavedGalaxy } from '../../core/storage/universeCache';
 
 interface GalaxyGenAppProps {
   onSelectSector: (sector: GalaxySectorHex) => void;
@@ -64,15 +66,21 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   initialSelectedCoord,
   returnTransition,
 }) => {
-  // Galaxy configuration state
-  const [config, setConfig] = useState<GalaxyConfig>(() => ({
-    ...DEFAULT_GALAXY_CONFIG,
-    ...(initialConfig || {}),
-  }));
+  // Galaxy configuration state initialized from persistent cache or initialConfig
+  const [config, setConfig] = useState<GalaxyConfig>(() => {
+    const active = universeCache.getActiveGalaxyConfig();
+    return {
+      ...active,
+      ...(initialConfig || {}),
+    };
+  });
 
   // Drawer / Modal for advanced customization sliders
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
   const [draftConfig, setDraftConfig] = useState<GalaxyConfig>(config);
+
+  // Saved Galaxies Catalog Modal state
+  const [showSavedGalaxiesModal, setShowSavedGalaxiesModal] = useState<boolean>(false);
 
   // Image Quantizer & Backdrop state
   const [showImageModal, setShowImageModal] = useState<boolean>(false);
@@ -89,9 +97,10 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   const [showHexBoundaries, setShowHexBoundaries] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
 
-  // Sync draft when config changes
+  // Sync draft and persist active galaxy config when config changes
   useEffect(() => {
     setDraftConfig(config);
+    universeCache.saveActiveGalaxyConfig(config);
   }, [config]);
 
   // Generate full 50x50 Galaxy Grid (2,500 sectors) or use custom quantized image data
@@ -529,6 +538,14 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     setTimeout(() => setCopiedId(false), 1800);
   };
 
+  // Load saved galaxy from catalog
+  const handleLoadSavedGalaxy = (saved: SavedGalaxy) => {
+    setConfig(saved.config);
+    setCustomGalaxyData(null);
+    setBgImageUrl(null);
+    setShowSavedGalaxiesModal(false);
+  };
+
   // Apply custom sliders
   const handleApplySliders = () => {
     setConfig({ ...draftConfig });
@@ -560,9 +577,15 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-bold text-white tracking-wide flex items-center gap-1.5">
                 GALAXY GENERATOR
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-950/80 text-blue-400 border border-blue-800">
+                <button
+                  type="button"
+                  onClick={() => setShowSavedGalaxiesModal(true)}
+                  className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-950/80 hover:bg-blue-900 text-blue-400 border border-blue-800 flex items-center gap-1 transition cursor-pointer"
+                  title="Open Saved Galaxies Catalog to manage, save, or load this seeded galaxy"
+                >
                   {customGalaxyData ? '🖼️ Quantized Image' : `Seed #${config.seed}`}
-                </span>
+                  <Sparkles className="w-2.5 h-2.5 text-blue-400" />
+                </button>
               </h2>
             </div>
             <p className="text-[11px] text-slate-400 flex items-center gap-2">
@@ -607,6 +630,21 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
 
         {/* Right: Customization, Search, Roll */}
         <div className="flex items-center gap-2">
+          {/* Saved Galaxies Catalog Button */}
+          <button
+            onClick={() => setShowSavedGalaxiesModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-800/80 hover:border-cyan-500 text-xs font-mono font-medium flex items-center gap-1.5 transition shadow cursor-pointer"
+            title="Open Saved Galaxies Catalog to save, load, or export seeded universes"
+          >
+            <FolderOpen className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">Saved Galaxies</span>
+            {universeCache.getSavedGalaxies().length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-cyan-950 text-cyan-300 text-[10px] border border-cyan-800 font-bold">
+                {universeCache.getSavedGalaxies().length}
+              </span>
+            )}
+          </button>
+
           {/* Import / Quantize Image Button */}
           <button
             onClick={() => setShowImageModal(true)}
@@ -1698,6 +1736,23 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
           onClose={() => setShowImageModal(false)}
           onApplyQuantizedGalaxy={handleApplyQuantizedGalaxy}
           currentRadiusKpc={config.radiusKpc}
+        />
+      )}
+
+      {/* Saved Galaxies Catalog Modal */}
+      {showSavedGalaxiesModal && (
+        <SavedGalaxiesModal
+          isOpen={showSavedGalaxiesModal}
+          onClose={() => setShowSavedGalaxiesModal(false)}
+          currentConfig={config}
+          currentStats={{
+            activeSectors: galaxyData.stats.activeSectors,
+            totalEstimatedStars: galaxyData.stats.totalEstimatedStars,
+            avgDensity: galaxyData.stats.avgDensity,
+            avgAge: galaxyData.stats.avgAge,
+            nebulaCount: galaxyData.stats.nebulaCount,
+          }}
+          onLoadGalaxy={handleLoadSavedGalaxy}
         />
       )}
     </div>
