@@ -156,26 +156,37 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   }, [sectorEmpires, currentSysId, initialParams?.empireId]);
 
   const getPlanetClaimInfo = useCallback(
-    (b: RealisticPlanetBody, bIdx: number) => {
+    (b: RealisticPlanetBody, zoneIdx: number, bIdx: number) => {
       if (!currentSysId) return null;
-      const pKey1 = makePlanetKey(currentSysId, `p${bIdx + 1}`);
-      const pKey2 = b.role ? makePlanetKey(currentSysId, b.role) : '';
+      const pKeySpecific = makePlanetKey(currentSysId, `z${zoneIdx}_p${bIdx + 1}`);
+      const pKeyLegacy = makePlanetKey(currentSysId, `p${bIdx + 1}`);
+      const pKeyRole = b.role ? makePlanetKey(currentSysId, b.role) : '';
 
       for (const emp of sectorEmpires) {
         const keys = emp.claimedPlanetKeys || [];
-        if (keys.includes(pKey1)) {
+        if (keys.includes(pKeySpecific)) {
           return {
             empire: emp,
-            key: pKey1,
-            designation: (emp.planetDesignations?.[pKey1] || 'Colony') as ColonyDesignation,
+            key: pKeySpecific,
+            designation: (emp.planetDesignations?.[pKeySpecific] || 'Colony') as ColonyDesignation,
           };
         }
-        if (pKey2 && keys.includes(pKey2)) {
-          return {
-            empire: emp,
-            key: pKey2,
-            designation: (emp.planetDesignations?.[pKey2] || 'Colony') as ColonyDesignation,
-          };
+        // Only zone 0 (primary star) falls back to legacy unprefixed keys
+        if (zoneIdx === 0) {
+          if (keys.includes(pKeyLegacy)) {
+            return {
+              empire: emp,
+              key: pKeyLegacy,
+              designation: (emp.planetDesignations?.[pKeyLegacy] || 'Colony') as ColonyDesignation,
+            };
+          }
+          if (pKeyRole && keys.includes(pKeyRole)) {
+            return {
+              empire: emp,
+              key: pKeyRole,
+              designation: (emp.planetDesignations?.[pKeyRole] || 'Colony') as ColonyDesignation,
+            };
+          }
         }
       }
       return null;
@@ -186,6 +197,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   const handleToggleClaimPlanet = useCallback(
     (
       b: RealisticPlanetBody,
+      zoneIdx: number,
       bIdx: number,
       designation?: ColonyDesignation,
       targetEmpireId?: string
@@ -198,8 +210,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         sectorEmpires[0];
       if (!empireToUse) return;
 
-      const pKey = makePlanetKey(currentSysId, `p${bIdx + 1}`);
-      const existing = getPlanetClaimInfo(b, bIdx);
+      const pKey = makePlanetKey(currentSysId, `z${zoneIdx}_p${bIdx + 1}`);
+      const existing = getPlanetClaimInfo(b, zoneIdx, bIdx);
 
       if (existing && !designation) {
         // Relinquish
@@ -1236,7 +1248,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
                       {/* Clickable Planet Group */}
                       {(() => {
-                        const claimInfo = getPlanetClaimInfo(b, bIdx);
+                        const claimInfo = getPlanetClaimInfo(b, zIdx, bIdx);
                         return (
                           <g
                             className="cursor-pointer"
@@ -2257,7 +2269,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                         selectedEntity.zoneIdx === zIdx &&
                         selectedEntity.bodyIdx === bIdx;
                       const isPlanetSel = isPlanetTracked || isPlanetDossier;
-                      const claimInfo = getPlanetClaimInfo(b, bIdx);
+                      const claimInfo = getPlanetClaimInfo(b, zIdx, bIdx);
 
                       // Actual Procedural Planet Texture from Planet Info View:
                       const planetIconUrl = getProceduralPlanetIconDataUrl(
@@ -2709,7 +2721,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     // 4. Planet & Moon Dossier Modal
     if (selectedEntity.kind === 'planet' || selectedEntity.kind === 'moon') {
       const hostPlanet = systemResult.zones[selectedEntity.zoneIdx]?.bodies[selectedEntity.bodyIdx] as RealisticPlanetBody | undefined;
-      const claimInfo = hostPlanet ? getPlanetClaimInfo(hostPlanet, selectedEntity.bodyIdx) : null;
+      const claimInfo = hostPlanet ? getPlanetClaimInfo(hostPlanet, selectedEntity.zoneIdx, selectedEntity.bodyIdx) : null;
 
       return (
         <PlanetDossierModal
@@ -2726,7 +2738,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
           planetClaimInfo={claimInfo}
           onToggleClaimPlanet={(des, empId) => {
             if (hostPlanet) {
-              handleToggleClaimPlanet(hostPlanet, selectedEntity.bodyIdx, des, empId);
+              handleToggleClaimPlanet(hostPlanet, selectedEntity.zoneIdx, selectedEntity.bodyIdx, des, empId);
             }
           }}
         />

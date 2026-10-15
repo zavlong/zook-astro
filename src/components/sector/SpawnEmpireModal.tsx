@@ -120,14 +120,18 @@ export const SpawnEmpireModal: React.FC<SpawnEmpireModalProps> = ({
     // Identify prime planet in homeworld system if available
     let homeworldPlanetKey: string | undefined = undefined;
     if (homeworldSystem.sysResult && homeworldSystem.sysResult.zones) {
-      for (const z of homeworldSystem.sysResult.zones) {
-        for (const b of z.bodies) {
+      for (let zIdx = 0; zIdx < homeworldSystem.sysResult.zones.length; zIdx++) {
+        const z = homeworldSystem.sysResult.zones[zIdx];
+        for (let bIdx = 0; bIdx < z.bodies.length; bIdx++) {
+          const b = z.bodies[bIdx];
           if (b.kind === 'planet') {
             if (!homeworldPlanetKey) {
-              homeworldPlanetKey = makePlanetKey(homeworldSystem.id, b.role || 'p1');
+              homeworldPlanetKey = makePlanetKey(homeworldSystem.id, `z${zIdx}_p${bIdx + 1}`);
+              break;
             }
           }
         }
+        if (homeworldPlanetKey) break;
       }
     }
 

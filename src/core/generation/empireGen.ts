@@ -415,13 +415,37 @@ export function makePlanetKey(systemId: string, planetRole: string): string {
   return `${systemId}_${planetRole}`;
 }
 
-export function parsePlanetKey(planetKey: string): { systemId: string; planetRole: string } {
-  const lastUnderscore = planetKey.lastIndexOf('_');
-  if (lastUnderscore === -1) return { systemId: planetKey, planetRole: '' };
-  return {
-    systemId: planetKey.substring(0, lastUnderscore),
-    planetRole: planetKey.substring(lastUnderscore + 1),
-  };
+export function parsePlanetKey(planetKey: string): {
+  systemId: string;
+  planetRole: string;
+  label: string;
+} {
+  const firstUnderscore = planetKey.indexOf('_');
+  if (firstUnderscore === -1) {
+    return { systemId: planetKey, planetRole: '', label: 'Planet' };
+  }
+  const systemId = planetKey.substring(0, firstUnderscore);
+  const planetRole = planetKey.substring(firstUnderscore + 1);
+
+  // Check if planetRole matches z{zoneIdx}_p{planetNum}
+  const matchZone = planetRole.match(/^z(\d+)_p(\d+)$/i);
+  if (matchZone) {
+    const zIdx = parseInt(matchZone[1], 10);
+    const pNum = parseInt(matchZone[2], 10);
+    const starLetter = String.fromCharCode(65 + zIdx);
+    const label = `Star ${starLetter} · Planet ${pNum}`;
+    return { systemId, planetRole, label };
+  }
+
+  const matchSimple = planetRole.match(/^p(\d+)$/i);
+  if (matchSimple) {
+    return { systemId, planetRole, label: `Planet ${matchSimple[1]}` };
+  }
+
+  // Fallback for role strings like 'terrestrial'
+  const cleanRole = planetRole.replace(/[-_]/g, ' ').trim();
+  const label = cleanRole ? `${cleanRole.charAt(0).toUpperCase() + cleanRole.slice(1)} World` : 'Planet';
+  return { systemId, planetRole, label };
 }
 
 export function generateRandomEmpire(
@@ -444,15 +468,18 @@ export function generateRandomEmpire(
   // Automatically find prime planet in homeworld system if available
   let homeworldPlanetKey: string | undefined = undefined;
   if (homeworldSystem.sysResult && homeworldSystem.sysResult.zones) {
-    for (const z of homeworldSystem.sysResult.zones) {
-      for (const b of z.bodies) {
+    for (let zIdx = 0; zIdx < homeworldSystem.sysResult.zones.length; zIdx++) {
+      const z = homeworldSystem.sysResult.zones[zIdx];
+      for (let bIdx = 0; bIdx < z.bodies.length; bIdx++) {
+        const b = z.bodies[bIdx];
         if (b.kind === 'planet') {
-          // If first planet or terrestrial candidate
           if (!homeworldPlanetKey) {
-            homeworldPlanetKey = makePlanetKey(homeworldSystem.id, b.role || 'p1');
+            homeworldPlanetKey = makePlanetKey(homeworldSystem.id, `z${zIdx}_p${bIdx + 1}`);
+            break;
           }
         }
       }
+      if (homeworldPlanetKey) break;
     }
   }
 

@@ -2011,7 +2011,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                                     className="flex items-center justify-between text-[10.5px] px-1.5 py-0.5 rounded bg-slate-900/60 border border-slate-800"
                                   >
                                     <span className="text-slate-200 font-mono">
-                                      🪐 {parsed.planetRole.toUpperCase()}
+                                      🪐 {parsed.label || parsed.planetRole.toUpperCase()}
                                     </span>
                                     <span
                                       className="px-1.5 py-0.2 rounded text-[9px] font-bold"
