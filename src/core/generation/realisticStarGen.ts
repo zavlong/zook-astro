@@ -216,8 +216,10 @@ export function starColorHex(T: number, bd?: string): string {
   if (T >= 7400) return '#cad7ff';
   if (T >= 6000) return '#f8f7ff';
   if (T >= 5200) return '#fff4ea';
-  if (T >= 3850) return '#ffd2a1';
-  return '#ffcc6f';
+  if (T >= 3850) return '#ffaa55'; // K-dwarfs warm orange
+  if (T >= 3000) return '#ff4438'; // Early M-dwarf (M0-M4) vivid red
+  if (T >= 2200) return '#e61919'; // Mid/late M-dwarf (M5-M9) deep rich red
+  return '#c8102e'; // Sub-stellar / coolest late M ruby red
 }
 
 export function rollStep1(rng?: PRNG): { sysMass: number; age: number; feh: number } {

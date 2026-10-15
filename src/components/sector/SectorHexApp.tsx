@@ -12,6 +12,9 @@ import {
   Check,
   Filter,
   Info,
+  Sliders,
+  X,
+  Grid,
 } from 'lucide-react';
 import {
   SectorHexConfig,
@@ -94,12 +97,24 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   const [searchCoord, setSearchCoord] = useState<string>('');
   const [filterCat, setFilterCat] = useState<'all' | SpectralCategory | 'habitable'>('all');
 
+  // Custom Grid & Density Modal/Drawer state
+  const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
+  const [draftCols, setDraftCols] = useState<number>(config.columns);
+  const [draftRows, setDraftRows] = useState<number>(config.rows);
+  const [draftDensity, setDraftDensity] = useState<number>(config.density);
+
+  // Sync draft inputs when config changes
+  useEffect(() => {
+    setDraftCols(config.columns);
+    setDraftRows(config.rows);
+    setDraftDensity(config.density);
+  }, [config.columns, config.rows, config.density]);
+
   // Generated Grid Data
   const gridData = useMemo(() => generateSectorHexGrid(config), [config]);
 
   // Selected Hex System
   const [selectedSystem, setSelectedSystem] = useState<SectorHexSystem | null>(() => {
-    // Default to the first occupied system or null
     return gridData.systems[0] || null;
   });
 
@@ -140,7 +155,6 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   // Calculate pixel center for column c and row r (1-indexed)
   const getHexCenter = useCallback(
     (col: number, row: number) => {
-      // Stagger odd rows horizontally by half width
       const xOffset = row % 2 === 1 ? hexWidth * 0.5 : 0;
       const cx = (col - 1) * colSpacing + hexRadius + xOffset + 30;
       const cy = (row - 1) * rowSpacing + hexRadius + 30;
@@ -168,15 +182,34 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     return { width: Math.max(800, totalW), height: Math.max(600, totalH) };
   }, [config.columns, config.rows, colSpacing, rowSpacing, hexWidth, hexHeight]);
 
-  // Center & Fit Hex Grid in Viewport
+  // Track container viewport dimensions for smooth frustum/viewport culling
   const containerRef = useRef<HTMLDivElement>(null);
+  const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({
+    width: 1200,
+    height: 800,
+  });
 
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerSize({
+          width: Math.max(300, entry.contentRect.width),
+          height: Math.max(300, entry.contentRect.height),
+        });
+      }
+    });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  // Center & Fit Hex Grid in Viewport
   const handleFitToScreen = useCallback(() => {
     if (!containerRef.current) return;
     const { clientWidth, clientHeight } = containerRef.current;
     const scaleX = (clientWidth - 80) / gridBoundingSize.width;
     const scaleY = (clientHeight - 80) / gridBoundingSize.height;
-    const fitScale = Math.max(0.4, Math.min(1.4, Math.min(scaleX, scaleY)));
+    const fitScale = Math.max(0.08, Math.min(1.4, Math.min(scaleX, scaleY)));
     setZoom(fitScale);
     setPan({
       x: (clientWidth - gridBoundingSize.width * fitScale) / 2,
@@ -190,7 +223,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
 
   // Mouse pan handlers
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Only primary button
+    if (e.button !== 0) return;
     setIsDragging(true);
     dragStartRef.current = { x: e.clientX, y: e.clientY };
     panStartRef.current = { ...pan };
@@ -214,7 +247,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
-    setZoom((prev) => Math.max(0.35, Math.min(2.8, prev * zoomFactor)));
+    setZoom((prev) => Math.max(0.06, Math.min(2.8, prev * zoomFactor)));
   };
 
   // Preset Selector
@@ -236,6 +269,20 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     setConfig((prev) => ({ ...prev, seed: newSeed }));
   };
 
+  // Apply Custom Grid Size and Density
+  const handleApplyCustomGrid = (newCols: number, newRows: number, newDensity: number) => {
+    const clampedCols = Math.max(4, Math.min(100, Math.round(newCols)));
+    const clampedRows = Math.max(4, Math.min(100, Math.round(newRows)));
+    const clampedDensity = Math.max(0.05, Math.min(0.85, +newDensity.toFixed(2)));
+    setConfig((prev) => ({
+      ...prev,
+      columns: clampedCols,
+      rows: clampedRows,
+      density: clampedDensity,
+    }));
+    setShowConfigModal(false);
+  };
+
   // Search Hex Coordinate
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -246,7 +293,6 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       if (match.system) {
         setSelectedSystem(match.system);
       }
-      // Pan camera to center on that hex
       const { cx, cy } = getHexCenter(match.col, match.row);
       if (containerRef.current) {
         const { clientWidth, clientHeight } = containerRef.current;
@@ -278,6 +324,168 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     onLaunchStarGen(params);
   };
 
+  // ============================================================================
+  // MULTIPLE STAR RENDERING HELPER (DEPICTS MULTIPLE STARS IN SECTORHEX GRAPHIC)
+  // ============================================================================
+  const renderSystemStars = (system: SectorHexSystem) => {
+    const stars = system.sysResult.hierarchy.stars;
+    const n = stars.length;
+
+    // Single Star
+    if (n <= 1 || !stars || stars.length === 0) {
+      const star = stars[0] || { mass: system.primaryMass, colorHex: system.colorHex };
+      const r = Math.min(9.5, Math.max(3.5, 4.2 * Math.pow(star.mass, 0.28)));
+      const glowR = Math.min(20, Math.max(8, 7 * Math.pow(star.mass, 0.35)));
+      return (
+        <g>
+          <circle r={glowR} fill={star.colorHex} opacity={0.35} filter="url(#hexStarGlow)" />
+          <circle r={r} fill={star.colorHex} stroke="#ffffff" strokeWidth={0.7} />
+        </g>
+      );
+    }
+
+    // Binary System (Star A & Star B side-by-side with gravitational bridge)
+    if (n === 2) {
+      const starA = stars[0];
+      const starB = stars[1];
+      const rA = Math.min(7.5, Math.max(3.0, 3.8 * Math.pow(starA.mass, 0.28)));
+      const rB = Math.min(6.5, Math.max(2.4, 3.4 * Math.pow(starB.mass, 0.28)));
+      const posA = { x: -6.5, y: -2 };
+      const posB = { x: +6.5, y: -2 };
+      return (
+        <g>
+          {/* Subtle orbital bridge */}
+          <ellipse
+            cx={0}
+            cy={-2}
+            rx={10.5}
+            ry={4.5}
+            fill="none"
+            stroke="rgba(148, 163, 184, 0.25)"
+            strokeWidth={0.8}
+            strokeDasharray="2,2"
+          />
+          {/* Star A */}
+          <circle cx={posA.x} cy={posA.y} r={rA * 1.9} fill={starA.colorHex} opacity={0.30} filter="url(#hexStarGlow)" />
+          <circle cx={posA.x} cy={posA.y} r={rA} fill={starA.colorHex} stroke="#ffffff" strokeWidth={0.6} />
+
+          {/* Star B */}
+          <circle cx={posB.x} cy={posB.y} r={rB * 1.9} fill={starB.colorHex} opacity={0.30} filter="url(#hexStarGlow)" />
+          <circle cx={posB.x} cy={posB.y} r={rB} fill={starB.colorHex} stroke="#ffffff" strokeWidth={0.6} />
+        </g>
+      );
+    }
+
+    // Trinary System (Triangle configuration: Primary A on left, B & C pair on right)
+    if (n === 3) {
+      const starA = stars[0];
+      const starB = stars[1];
+      const starC = stars[2];
+      const rA = Math.min(7.0, Math.max(2.8, 3.5 * Math.pow(starA.mass, 0.28)));
+      const rB = Math.min(5.5, Math.max(2.2, 3.0 * Math.pow(starB.mass, 0.28)));
+      const rC = Math.min(5.5, Math.max(2.0, 3.0 * Math.pow(starC.mass, 0.28)));
+      const posA = { x: -7.5, y: -2 };
+      const posB = { x: +6.0, y: -6.5 };
+      const posC = { x: +6.0, y: +2.5 };
+      return (
+        <g>
+          <ellipse
+            cx={0}
+            cy={-2}
+            rx={12}
+            ry={6.5}
+            fill="none"
+            stroke="rgba(148, 163, 184, 0.20)"
+            strokeWidth={0.7}
+            strokeDasharray="2,2"
+          />
+          {/* Star A */}
+          <circle cx={posA.x} cy={posA.y} r={rA * 1.8} fill={starA.colorHex} opacity={0.30} filter="url(#hexStarGlow)" />
+          <circle cx={posA.x} cy={posA.y} r={rA} fill={starA.colorHex} stroke="#ffffff" strokeWidth={0.6} />
+
+          {/* Star B */}
+          <circle cx={posB.x} cy={posB.y} r={rB * 1.8} fill={starB.colorHex} opacity={0.30} filter="url(#hexStarGlow)" />
+          <circle cx={posB.x} cy={posB.y} r={rB} fill={starB.colorHex} stroke="#ffffff" strokeWidth={0.6} />
+
+          {/* Star C */}
+          <circle cx={posC.x} cy={posC.y} r={rC * 1.8} fill={starC.colorHex} opacity={0.30} filter="url(#hexStarGlow)" />
+          <circle cx={posC.x} cy={posC.y} r={rC} fill={starC.colorHex} stroke="#ffffff" strokeWidth={0.6} />
+        </g>
+      );
+    }
+
+    // Quadruple System (4 Stars: Dual binary pairs AB and CD)
+    const starA = stars[0];
+    const starB = stars[1];
+    const starC = stars[2];
+    const starD = stars[3];
+    const rA = Math.min(6.0, Math.max(2.5, 3.0 * Math.pow(starA.mass, 0.28)));
+    const rB = Math.min(5.0, Math.max(2.0, 2.6 * Math.pow(starB.mass, 0.28)));
+    const rC = Math.min(5.0, Math.max(2.0, 2.6 * Math.pow(starC.mass, 0.28)));
+    const rD = Math.min(4.5, Math.max(1.8, 2.4 * Math.pow(starD.mass, 0.28)));
+    const posA = { x: -8, y: -5 };
+    const posB = { x: -6, y: +2 };
+    const posC = { x: +6, y: -5 };
+    const posD = { x: +8, y: +2 };
+    return (
+      <g>
+        <ellipse
+          cx={0}
+          cy={-1.5}
+          rx={13.5}
+          ry={7}
+          fill="none"
+          stroke="rgba(148, 163, 184, 0.20)"
+          strokeWidth={0.7}
+          strokeDasharray="2,2"
+        />
+        <circle cx={posA.x} cy={posA.y} r={rA * 1.6} fill={starA.colorHex} opacity={0.28} filter="url(#hexStarGlow)" />
+        <circle cx={posA.x} cy={posA.y} r={rA} fill={starA.colorHex} stroke="#ffffff" strokeWidth={0.5} />
+
+        <circle cx={posB.x} cy={posB.y} r={rB * 1.6} fill={starB.colorHex} opacity={0.28} filter="url(#hexStarGlow)" />
+        <circle cx={posB.x} cy={posB.y} r={rB} fill={starB.colorHex} stroke="#ffffff" strokeWidth={0.5} />
+
+        <circle cx={posC.x} cy={posC.y} r={rC * 1.6} fill={starC.colorHex} opacity={0.28} filter="url(#hexStarGlow)" />
+        <circle cx={posC.x} cy={posC.y} r={rC} fill={starC.colorHex} stroke="#ffffff" strokeWidth={0.5} />
+
+        <circle cx={posD.x} cy={posD.y} r={rD * 1.6} fill={starD.colorHex} opacity={0.28} filter="url(#hexStarGlow)" />
+        <circle cx={posD.x} cy={posD.y} r={rD} fill={starD.colorHex} stroke="#ffffff" strokeWidth={0.5} />
+      </g>
+    );
+  };
+
+  // ============================================================================
+  // HIGH-PERFORMANCE VIEWPORT CULLING FOR LARGE GRIDS (UP TO 100x100 = 10,000 HEXES!)
+  // ============================================================================
+  const visibleHexCells = useMemo(() => {
+    // If total hexes are small (<= 400), rendering all cells is fast
+    if (config.columns * config.rows <= 400) {
+      return gridData.cells;
+    }
+
+    // For large grids up to 100x100: calculate visible column and row bounds in O(1)
+    const margin = 140; // Pixel padding around screen
+    const viewMinX = -pan.x / zoom - margin;
+    const viewMaxX = (containerSize.width - pan.x) / zoom + margin;
+    const viewMinY = -pan.y / zoom - margin;
+    const viewMaxY = (containerSize.height - pan.y) / zoom + margin;
+
+    const minCol = Math.max(1, Math.floor((viewMinX - 30) / colSpacing));
+    const maxCol = Math.min(config.columns, Math.ceil((viewMaxX - 30) / colSpacing) + 1);
+    const minRow = Math.max(1, Math.floor((viewMinY - 30) / rowSpacing));
+    const maxRow = Math.min(config.rows, Math.ceil((viewMaxY - 30) / rowSpacing) + 1);
+
+    const culled: SectorHexCell[] = [];
+    for (let c = minCol; c <= maxCol; c++) {
+      for (let r = minRow; r <= maxRow; r++) {
+        const idx = (c - 1) * config.rows + (r - 1);
+        const cell = gridData.cells[idx];
+        if (cell) culled.push(cell);
+      }
+    }
+    return culled;
+  }, [gridData.cells, config.columns, config.rows, pan.x, pan.y, zoom, containerSize, colSpacing, rowSpacing]);
+
   return (
     <div className="w-full h-full flex flex-col bg-[#050814] text-slate-100 overflow-hidden font-sans select-none relative">
       {/* ============================================================================ */}
@@ -299,17 +507,17 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               </h2>
             </div>
             <p className="text-[11px] text-slate-400 flex items-center gap-2">
-              <span>{config.columns}&times;{config.rows} Hex Grid</span>
+              <span className="text-cyan-300 font-semibold">{config.columns}&times;{config.rows} Hex Grid</span>
               <span className="text-slate-600">&bull;</span>
-              <span>{gridData.stats.occupiedHexes} Systems ({gridData.stats.occupancyPct}% density)</span>
+              <span>{gridData.stats.occupiedHexes.toLocaleString()} Systems ({gridData.stats.occupancyPct}% density)</span>
               <span className="text-slate-600">&bull;</span>
-              <span>Click any hex to inspect or launch StarGen Lab</span>
+              <span>Multi-Star Depictions Active</span>
             </p>
           </div>
         </div>
 
         {/* Preset Selector Buttons */}
-        <div className="hidden lg:flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800 text-xs font-mono">
+        <div className="hidden xl:flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800 text-xs font-mono">
           {SECTOR_PRESETS.map((p) => (
             <button
               key={p.id}
@@ -326,6 +534,18 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           ))}
         </div>
 
+        {/* Grid Dimensions & Density Button */}
+        <button
+          onClick={() => setShowConfigModal(true)}
+          className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700/80 hover:border-cyan-500 text-xs font-mono font-medium flex items-center gap-2 transition shadow cursor-pointer"
+          title="Customize Hex Grid Dimensions (up to 100x100) and Stellar Density"
+        >
+          <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+          <span>Grid: <strong className="text-white">{config.columns}&times;{config.rows}</strong></span>
+          <span className="text-slate-500">&bull;</span>
+          <span>Density: <strong className="text-emerald-300">{Math.round(config.density * 100)}%</strong></span>
+        </button>
+
         {/* Search Hex Coordinate */}
         <form onSubmit={handleSearchSubmit} className="flex items-center gap-1.5">
           <div className="relative">
@@ -335,7 +555,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               placeholder="Jump to hex (e.g. 0408)..."
               value={searchCoord}
               onChange={(e) => setSearchCoord(e.target.value)}
-              className="w-48 pl-8 pr-2 py-1 text-xs font-mono bg-slate-900/90 border border-slate-800 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
+              className="w-44 pl-8 pr-2 py-1 text-xs font-mono bg-slate-900/90 border border-slate-800 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
             />
           </div>
           <button
@@ -360,11 +580,148 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       </div>
 
       {/* ============================================================================ */}
+      {/* GRID SIZE & DENSITY CUSTOMIZATION MODAL (UP TO 100x100!)                     */}
+      {/* ============================================================================ */}
+      {showConfigModal && (
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="w-full max-w-md bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-2xl flex flex-col gap-4 font-mono text-xs">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Grid className="w-4 h-4 text-cyan-400" />
+                <h3 className="text-sm font-bold text-white tracking-wide">
+                  Customize Grid Size &amp; Density
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowConfigModal(false)}
+                className="text-slate-400 hover:text-white transition p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick Grid Dimension Presets */}
+            <div>
+              <label className="text-[11px] text-slate-400 uppercase font-semibold mb-2 block">
+                Quick Dimension Presets
+              </label>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { label: '10×10', cols: 10, rows: 10, desc: '100 hexes' },
+                  { label: '25×25', cols: 25, rows: 25, desc: '625 hexes' },
+                  { label: '50×50', cols: 50, rows: 50, desc: '2.5k hexes' },
+                  { label: '100×100', cols: 100, rows: 100, desc: '10k hexes!' },
+                ].map((preset) => (
+                  <button
+                    key={preset.label}
+                    onClick={() => {
+                      setDraftCols(preset.cols);
+                      setDraftRows(preset.rows);
+                    }}
+                    className={`p-2 rounded-xl border text-center transition cursor-pointer ${
+                      draftCols === preset.cols && draftRows === preset.rows
+                        ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 font-bold'
+                        : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold">{preset.label}</div>
+                    <div className="text-[9.5px] text-slate-500">{preset.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Columns & Rows Custom Sliders */}
+            <div className="space-y-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+              {/* Columns */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-slate-400">Grid Width (Columns):</span>
+                  <span className="text-cyan-300 font-bold">{draftCols} columns</span>
+                </div>
+                <input
+                  type="range"
+                  min={4}
+                  max={100}
+                  step={1}
+                  value={draftCols}
+                  onChange={(e) => setDraftCols(parseInt(e.target.value))}
+                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                />
+              </div>
+
+              {/* Rows */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-slate-400">Grid Height (Rows):</span>
+                  <span className="text-cyan-300 font-bold">{draftRows} rows</span>
+                </div>
+                <input
+                  type="range"
+                  min={4}
+                  max={100}
+                  step={1}
+                  value={draftRows}
+                  onChange={(e) => setDraftRows(parseInt(e.target.value))}
+                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                />
+              </div>
+
+              {/* Total Hex Count Preview */}
+              <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1 border-t border-slate-800/80">
+                <span>Total Hex Cells:</span>
+                <span className="text-slate-200 font-bold">{(draftCols * draftRows).toLocaleString()} hexes</span>
+              </div>
+            </div>
+
+            {/* Stellar Density Slider */}
+            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-slate-400">Stellar Occupancy Density:</span>
+                <span className="text-emerald-300 font-bold">{Math.round(draftDensity * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min={0.05}
+                max={0.85}
+                step={0.01}
+                value={draftDensity}
+                onChange={(e) => setDraftDensity(parseFloat(e.target.value))}
+                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+              />
+              <div className="text-[10px] text-slate-400 flex items-center justify-between mt-2 pt-1 border-t border-slate-800/80">
+                <span>Estimated Systems:</span>
+                <span className="text-emerald-400 font-bold">
+                  ~{Math.round(draftCols * draftRows * draftDensity).toLocaleString()} star systems
+                </span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setShowConfigModal(false)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleApplyCustomGrid(draftCols, draftRows, draftDensity)}
+                className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold transition shadow-lg shadow-cyan-500/20 cursor-pointer"
+              >
+                Apply &amp; Regenerate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================================ */}
       {/* MAIN VIEWPORT: HEX CANVAS + RIGHT INSPECTOR                                   */}
       {/* ============================================================================ */}
       <div className="w-full flex-1 flex flex-row min-h-0 relative overflow-hidden">
         {/* ============================================================================ */}
-        {/* CENTER VIEWPORT: INTERACTIVE SVG HEX GRID                                     */}
+        {/* CENTER VIEWPORT: INTERACTIVE SVG HEX GRID (WITH MULTI-STAR GRAPHICS)          */}
         {/* ============================================================================ */}
         <div
           ref={containerRef}
@@ -399,18 +756,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             style={{ willChange: 'transform' }}
           >
             <defs>
-              {/* Outer Glow filter for glowing stars */}
-              <filter id="hexStarGlow" x="-50%" y="-50%" width="200%" height="200%">
+              <filter id="hexStarGlow" x="-60%" y="-60%" width="220%" height="220%">
                 <feGaussianBlur in="SourceGraphic" stdDeviation="4.5" result="blur" />
                 <feMerge>
                   <feMergeNode in="blur" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-              <filter id="hexSelectedPulse" x="-30%" y="-30%" width="160%" height="160%">
-                <feGaussianBlur stdDeviation="3" result="glow" />
-                <feMerge>
-                  <feMergeNode in="glow" />
                   <feMergeNode in="SourceGraphic" />
                 </feMerge>
               </filter>
@@ -420,8 +769,8 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}
               style={{ transformOrigin: '0 0' }}
             >
-              {/* Render Hex Cells */}
-              {gridData.cells.map((cell) => {
+              {/* High-Performance Culled Hex Cells Rendering */}
+              {visibleHexCells.map((cell) => {
                 const { cx, cy } = getHexCenter(cell.col, cell.row);
                 const hasSystem = !!cell.system;
                 const isSelected = selectedSystem?.coord === cell.coord;
@@ -439,8 +788,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   }
                 }
 
-                // Opacity modifier for filtering
-                const cellOpacity = matchesFilter ? 1 : 0.22;
+                const cellOpacity = matchesFilter ? 1 : 0.20;
 
                 return (
                   <g
@@ -483,43 +831,32 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       className={isSelected ? 'animate-pulse' : ''}
                     />
 
-                    {/* Coordinate Label at top of hex */}
-                    <text
-                      y={-hexRadius + 14}
-                      textAnchor="middle"
-                      fill={
-                        isSelected
-                          ? '#38bdf8'
-                          : hasSystem
-                          ? '#94a3b8'
-                          : '#475569'
-                      }
-                      fontSize={hasSystem ? 9 : 8}
-                      fontFamily="monospace"
-                      fontWeight={hasSystem ? 'bold' : 'normal'}
-                      letterSpacing="0.05em"
-                    >
-                      {cell.coord}
-                    </text>
+                    {/* Coordinate Label at top of hex (hidden when zoomed very far out for performance) */}
+                    {zoom >= 0.28 && (
+                      <text
+                        y={-hexRadius + 14}
+                        textAnchor="middle"
+                        fill={
+                          isSelected
+                            ? '#38bdf8'
+                            : hasSystem
+                            ? '#94a3b8'
+                            : '#475569'
+                        }
+                        fontSize={hasSystem ? 9 : 8}
+                        fontFamily="monospace"
+                        fontWeight={hasSystem ? 'bold' : 'normal'}
+                        letterSpacing="0.05em"
+                      >
+                        {cell.coord}
+                      </text>
+                    )}
 
-                    {/* Occupied System Representation */}
+                    {/* Occupied System Representation (Depicts Multiple Stars authentically) */}
                     {cell.system && (
                       <g>
-                        {/* Outer Stellar Corona Glow */}
-                        <circle
-                          r={Math.min(18, Math.max(8, 7 * Math.pow(cell.system.primaryMass, 0.35)))}
-                          fill={cell.system.glowColor}
-                          opacity={0.35}
-                          filter="url(#hexStarGlow)"
-                        />
-
-                        {/* Central Star Disc */}
-                        <circle
-                          r={Math.min(9, Math.max(3.5, 4.2 * Math.pow(cell.system.primaryMass, 0.28)))}
-                          fill={cell.system.colorHex}
-                          stroke="#ffffff"
-                          strokeWidth={0.7}
-                        />
+                        {/* Render Multiple Stars (A, B, C, D) with their exact colors and sizes */}
+                        {renderSystemStars(cell.system)}
 
                         {/* Habitable World Green Badge Dot */}
                         {cell.system.candidateHabitable && (
@@ -533,51 +870,43 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                           />
                         )}
 
-                        {/* Binary / Multiple Star Companion Indicator Dot */}
-                        {cell.system.nStars > 1 && (
-                          <circle
-                            cx={-13}
-                            cy={-6}
-                            r={2.2}
-                            fill="#93c5fd"
-                            stroke="#1e3a8a"
-                            strokeWidth={0.5}
-                          />
+                        {/* Star System Name (hidden at extreme zoom out) */}
+                        {zoom >= 0.35 && (
+                          <text
+                            y={14}
+                            textAnchor="middle"
+                            fill="#f8fafc"
+                            fontSize={8.5}
+                            fontWeight="600"
+                            letterSpacing="0.02em"
+                            style={{
+                              textShadow: '0 1px 3px rgba(0,0,0,0.9)',
+                              pointerEvents: 'none',
+                            }}
+                          >
+                            {cell.system.name.length > 12
+                              ? cell.system.name.slice(0, 11) + '…'
+                              : cell.system.name}
+                          </text>
                         )}
 
-                        {/* Star System Name */}
-                        <text
-                          y={14}
-                          textAnchor="middle"
-                          fill="#f8fafc"
-                          fontSize={8.5}
-                          fontWeight="600"
-                          letterSpacing="0.02em"
-                          style={{
-                            textShadow: '0 1px 3px rgba(0,0,0,0.9)',
-                            pointerEvents: 'none',
-                          }}
-                        >
-                          {cell.system.name.length > 12
-                            ? cell.system.name.slice(0, 11) + '…'
-                            : cell.system.name}
-                        </text>
-
                         {/* Spectral Class Pill */}
-                        <text
-                          y={25}
-                          textAnchor="middle"
-                          fill={cell.system.colorHex}
-                          fontSize={7.5}
-                          fontFamily="monospace"
-                          fontWeight="bold"
-                          style={{
-                            textShadow: '0 1px 2px rgba(0,0,0,0.8)',
-                            pointerEvents: 'none',
-                          }}
-                        >
-                          {cell.system.primaryClass.split(' ')[0]} &bull; {cell.system.primaryMass.toFixed(2)}M☉{cell.system.nStars > 1 ? ` +${cell.system.nStars - 1}★` : ''}
-                        </text>
+                        {zoom >= 0.35 && (
+                          <text
+                            y={25}
+                            textAnchor="middle"
+                            fill={cell.system.colorHex}
+                            fontSize={7.5}
+                            fontFamily="monospace"
+                            fontWeight="bold"
+                            style={{
+                              textShadow: '0 1px 2px rgba(0,0,0,0.8)',
+                              pointerEvents: 'none',
+                            }}
+                          >
+                            {cell.system.primaryClass.split(' ')[0]} &bull; {cell.system.primaryMass.toFixed(2)}M☉{cell.system.nStars > 1 ? ` +${cell.system.nStars - 1}★` : ''}
+                          </text>
+                        )}
                       </g>
                     )}
                   </g>
@@ -599,7 +928,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   { id: 'ob', label: 'O/B', color: 'text-blue-400' },
                   { id: 'af', label: 'A/F', color: 'text-cyan-300' },
                   { id: 'g', label: 'G (Sol)', color: 'text-amber-300' },
-                  { id: 'km', label: 'K/M', color: 'text-orange-400' },
+                  { id: 'km', label: 'K/M', color: 'text-red-400' },
                   { id: 'remnant', label: 'Remnants', color: 'text-purple-400' },
                   { id: 'habitable', label: 'Candidate HZ', color: 'text-emerald-400' },
                 ] as const
@@ -621,14 +950,14 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             {/* Canvas Zoom & Reset Controls */}
             <div className="flex items-center gap-1.5 bg-slate-950/90 backdrop-blur-md px-2 py-1.5 rounded-xl border border-slate-800 shadow-xl text-xs font-mono w-fit">
               <button
-                onClick={() => setZoom((z) => Math.min(2.8, z * 1.2))}
+                onClick={() => setZoom((z) => Math.min(2.8, z * 1.25))}
                 className="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white transition"
                 title="Zoom In (+)"
               >
                 <ZoomIn className="w-4 h-4" />
               </button>
               <button
-                onClick={() => setZoom((z) => Math.max(0.35, z * 0.8))}
+                onClick={() => setZoom((z) => Math.max(0.06, z * 0.8))}
                 className="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white transition"
                 title="Zoom Out (-)"
               >
@@ -664,15 +993,20 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   <span className="text-[10px] text-cyan-400 bg-cyan-950/60 px-1 rounded border border-cyan-800">
                     Hex {hoveredCell.coord}
                   </span>
+                  {hoveredCell.system.nStars > 1 && (
+                    <span className="text-[9.5px] text-blue-300 bg-blue-950/70 px-1 rounded border border-blue-800">
+                      {hoveredCell.system.nStars}★ Multiple
+                    </span>
+                  )}
                 </div>
                 <div className="text-[10px] text-slate-400 flex items-center gap-2">
                   <span>{hoveredCell.system.primaryClass}</span>
                   <span>&bull;</span>
-                  <span>{hoveredCell.system.mass} M☉</span>
+                  <span>Star A: {hoveredCell.system.primaryMass.toFixed(2)} M☉</span>
                   <span>&bull;</span>
-                  <span>{hoveredCell.system.age} Gyr</span>
+                  <span>Sys: {hoveredCell.system.mass.toFixed(2)} M☉</span>
                   <span>&bull;</span>
-                  <span>[Fe/H] {hoveredCell.system.metallicity > 0 ? `+${hoveredCell.system.metallicity}` : hoveredCell.system.metallicity}</span>
+                  <span>{hoveredCell.system.planetCount}p</span>
                 </div>
               </div>
             </div>
@@ -728,6 +1062,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       <span className="font-semibold text-slate-300">
                         {selectedSystem.primaryClass}
                       </span>
+                      {selectedSystem.nStars > 1 && (
+                        <span className="text-[10px] text-blue-300 bg-blue-950/80 px-1.5 py-0.2 rounded border border-blue-800">
+                          {selectedSystem.nStars} Stars
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -893,7 +1232,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   </div>
                   <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
                     <span className="text-slate-500">K/M Dwarfs:</span>{' '}
-                    <span className="text-orange-400 font-bold">{gridData.stats.kmCount}</span>
+                    <span className="text-red-400 font-bold">{gridData.stats.kmCount}</span>
                   </div>
                   <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50 col-span-2">
                     <span className="text-slate-500">Remnants (WD/NS/BH):</span>{' '}

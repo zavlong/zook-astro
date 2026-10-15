@@ -15,14 +15,17 @@ export function getStarColorRGB(Teff: number, phase: string): StarColorData {
     return { r: 230, g: 240, b: 255, glow: 'rgba(200, 230, 255, 0.7)', hex: '#f0f9ff', cat: 'remnant' };
   }
 
-  if (Teff < 3200) {
-    return { r: 255, g: 75, b: 35, glow: 'rgba(255, 60, 20, 0.65)', hex: '#ff4d26', cat: 'km' };
+  if (Teff < 2600) {
+    return { r: 215, g: 25, b: 35, glow: 'rgba(220, 38, 38, 0.75)', hex: '#dc2626', cat: 'km' };
   }
-  if (Teff < 4000) {
-    return { r: 255, g: 135, b: 45, glow: 'rgba(255, 120, 30, 0.55)', hex: '#ff8c00', cat: 'km' };
+  if (Teff < 3300) {
+    return { r: 240, g: 45, b: 35, glow: 'rgba(239, 68, 68, 0.70)', hex: '#ef4444', cat: 'km' };
+  }
+  if (Teff < 3900) {
+    return { r: 255, g: 69, b: 0, glow: 'rgba(255, 69, 0, 0.65)', hex: '#ff4500', cat: 'km' };
   }
   if (Teff < 5200) {
-    return { r: 255, g: 195, b: 90, glow: 'rgba(255, 185, 80, 0.45)', hex: '#ffb74d', cat: 'km' };
+    return { r: 255, g: 160, b: 60, glow: 'rgba(255, 152, 0, 0.50)', hex: '#ff9800', cat: 'km' };
   }
   if (Teff < 6200) {
     return { r: 255, g: 245, b: 180, glow: 'rgba(255, 240, 160, 0.40)', hex: '#fff59d', cat: 'g' };
