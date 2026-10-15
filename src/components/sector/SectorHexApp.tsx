@@ -36,6 +36,7 @@ import {
   isBlackHoleStar,
   isSupermassiveBlackHole,
 } from '../../core/generation/sectorHex';
+import { getStarAssetPath, type StarAssetDescriptor } from '../../core/generation/starAssets';
 import { BlackHoleIcon } from '../ui/BlackHoleIcon';
 import {
   SectorEmpire,
@@ -771,56 +772,28 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     const stars = system.sysResult.hierarchy.stars;
     const n = stars.length;
 
-    // Helper to render an individual star node or black hole
+    // Helper to render an individual star node or black hole using scaled star assets
     const renderStarNode = (
       cx: number,
       cy: number,
       r: number,
       glowR: number,
       isBH: boolean,
-      st: { colorHex?: string }
+      st: StarAssetDescriptor
     ) => {
-      if (isBH) {
-        return (
-          <g key={`star-node-${cx}-${cy}`}>
-            {/* Relativistic Accretion Disc Atmospheric Glow */}
-            <circle cx={cx} cy={cy} r={glowR * 1.15} fill="#a855f7" opacity={0.30} />
-            <circle cx={cx} cy={cy} r={glowR * 0.72} fill="#c084fc" opacity={0.42} />
-            {/* Tilted relativistic accretion torus */}
-            <ellipse
-              cx={cx}
-              cy={cy}
-              rx={r * 2.1}
-              ry={r * 0.85}
-              fill="none"
-              stroke="#c084fc"
-              strokeWidth={0.9}
-              opacity={0.88}
-              transform={`rotate(-18, ${cx}, ${cy})`}
-            />
-            <ellipse
-              cx={cx}
-              cy={cy}
-              rx={r * 1.5}
-              ry={r * 0.60}
-              fill="none"
-              stroke="#f3e8ff"
-              strokeWidth={0.65}
-              opacity={0.80}
-              transform={`rotate(-18, ${cx}, ${cy})`}
-            />
-            {/* Event Horizon (Pure Black Singularity Void) */}
-            <circle cx={cx} cy={cy} r={r} fill="#000000" stroke="#c084fc" strokeWidth={0.85} />
-          </g>
-        );
-      }
-      const col = st.colorHex || '#ffffff';
+      const assetPath = getStarAssetPath(st);
+      const renderSize = isBH ? Math.max(18, r * 4.6) : Math.max(11, glowR * 2.1);
       return (
-        <g key={`star-node-${cx}-${cy}`}>
-          <circle cx={cx} cy={cy} r={glowR} fill={col} opacity={0.20} />
-          <circle cx={cx} cy={cy} r={glowR * 0.65} fill={col} opacity={0.35} />
-          <circle cx={cx} cy={cy} r={r} fill={col} stroke="#ffffff" strokeWidth={0.7} />
-        </g>
+        <image
+          key={`star-asset-${cx}-${cy}`}
+          href={assetPath}
+          x={+(cx - renderSize / 2).toFixed(2)}
+          y={+(cy - renderSize / 2).toFixed(2)}
+          width={+renderSize.toFixed(2)}
+          height={+renderSize.toFixed(2)}
+          preserveAspectRatio="xMidYMid meet"
+          className="pointer-events-none"
+        />
       );
     };
 
@@ -907,30 +880,17 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
 
       return (
         <g>
-          {/* Relativistic Accretion Disc Atmospheric Glow */}
-          <circle r={rA * 3.8} fill="#a855f7" opacity={0.25} />
-          <circle r={rA * 2.5} fill="#c084fc" opacity={0.35} />
-
-          {/* Relativistic Accretion Ring / Photon Torus */}
-          <ellipse cx={0} cy={0} rx={rA * 2.1} ry={rA * 0.95} fill="none" stroke="#e9d5ff" strokeWidth={1.4} opacity={0.9} />
-          <ellipse cx={0} cy={0} rx={rA * 1.6} ry={rA * 0.72} fill="none" stroke="#a855f7" strokeWidth={1.8} opacity={0.7} />
-
           {/* S-Star Relativistic Orbital Traces */}
           <ellipse cx={0} cy={0} rx={16} ry={9} fill="none" stroke="rgba(192, 132, 252, 0.35)" strokeWidth={0.6} strokeDasharray="2,2" />
           <ellipse cx={0} cy={0} rx={21} ry={13} fill="none" stroke="rgba(192, 132, 252, 0.30)" strokeWidth={0.6} strokeDasharray="2,2" />
 
-          {/* Event Horizon (Pure Black Singularity Void) */}
-          <circle r={rA} fill="#000000" stroke="#c084fc" strokeWidth={1.2} />
+          {/* Supermassive Black Hole Asset (Sagittarius A*) */}
+          {renderStarNode(0, 0, rA, rA * 2.8, true, starA)}
 
-          {/* Companion S-Stars (B, C, D) */}
-          <circle cx={posB.x} cy={posB.y} r={rB * 1.6} fill={starB.colorHex} opacity={0.35} />
-          <circle cx={posB.x} cy={posB.y} r={rB} fill={starB.colorHex} stroke="#ffffff" strokeWidth={0.5} />
-
-          <circle cx={posC.x} cy={posC.y} r={rC * 1.6} fill={starC.colorHex} opacity={0.35} />
-          <circle cx={posC.x} cy={posC.y} r={rC} fill={starC.colorHex} stroke="#ffffff" strokeWidth={0.5} />
-
-          <circle cx={posD.x} cy={posD.y} r={rD * 1.6} fill={starD.colorHex} opacity={0.35} />
-          <circle cx={posD.x} cy={posD.y} r={rD} fill={starD.colorHex} stroke="#ffffff" strokeWidth={0.5} />
+          {/* Companion S-Stars (B, C, D) Scaled Assets */}
+          {renderStarNode(posB.x, posB.y, rB, rB * 1.8, false, starB)}
+          {renderStarNode(posC.x, posC.y, rC, rC * 1.8, false, starC)}
+          {renderStarNode(posD.x, posD.y, rD, rD * 1.8, false, starD)}
         </g>
       );
     }

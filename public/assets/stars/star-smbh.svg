@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100" width="100" height="100">
+  <defs>
+    <radialGradient id="smbh-glow" cx="0" cy="0" r="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#f43f5e" stop-opacity="0.9" />
+      <stop offset="35%" stop-color="#a855f7" stop-opacity="0.65" />
+      <stop offset="70%" stop-color="#4c1d95" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#1e1b4b" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="smbh-ring" x1="-1" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="25%" stop-color="#f43f5e" />
+      <stop offset="60%" stop-color="#c084fc" />
+      <stop offset="100%" stop-color="#7e22ce" />
+    </linearGradient>
+  </defs>
+  <!-- Huge Relativistic Thermal Envelope -->
+  <circle cx="0" cy="0" r="49" fill="url(#smbh-glow)" />
+  <!-- Relativistic Doppler-Boosted Outer Accretion Torus -->
+  <ellipse cx="0" cy="0" rx="42" ry="17" fill="none" stroke="url(#smbh-ring)" stroke-width="4.5" opacity="0.92" transform="rotate(-22)" />
+  <ellipse cx="0" cy="0" rx="30" ry="11" fill="none" stroke="#fff1f2" stroke-width="2.4" opacity="0.96" transform="rotate(-22)" />
+  <!-- Strong Gravitational Lensing Halo (Einstein Ring) -->
+  <circle cx="0" cy="0" r="20" fill="none" stroke="#fb7185" stroke-width="2.5" opacity="0.80" />
+  <!-- Supermassive Event Horizon (Absolute Singularity Void) -->
+  <circle cx="0" cy="0" r="14.5" fill="#000000" stroke="#fecdd3" stroke-width="1.8" />
+</svg>

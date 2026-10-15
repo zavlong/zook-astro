@@ -30,6 +30,7 @@ import {
   generateBlurredGalaxyBackground,
 } from '../../core/generation/galaxyGen';
 import { getHexGridOverlayUrl } from '../../core/generation/hexGridOverlay';
+import { getStarAssetPath } from '../../core/generation/starAssets';
 import { ImageQuantizerModal } from './ImageQuantizerModal';
 
 interface GalaxyGenAppProps {
@@ -843,25 +844,23 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
 
 
 
-                    {/* Giant Star Systems Dots (Mass 10-50 M☉, count = floor(density% / 10)) */}
-                    {sector.giantStars && sector.giantStars.length > 0 && sector.giantStars.map((star) => (
-                      <g key={star.id} transform={`translate(${star.relX}, ${star.relY})`} className="pointer-events-none">
-                        {/* Radiant halo */}
-                        <circle
-                          r={star.size * 1.8}
-                          fill={star.glowColor}
-                          opacity={0.45}
+                    {/* Giant Star Systems (Mass 10-50 M☉) with scaled star assets */}
+                    {sector.giantStars && sector.giantStars.length > 0 && sector.giantStars.map((star) => {
+                      const assetSize = Math.max(5.5, star.size * 3.2);
+                      const assetPath = getStarAssetPath({ spectralType: star.spectralType, colorHex: star.colorHex });
+                      return (
+                        <image
+                          key={star.id}
+                          href={assetPath}
+                          x={+(star.relX - assetSize / 2).toFixed(2)}
+                          y={+(star.relY - assetSize / 2).toFixed(2)}
+                          width={+assetSize.toFixed(2)}
+                          height={+assetSize.toFixed(2)}
+                          preserveAspectRatio="xMidYMid meet"
+                          className="pointer-events-none"
                         />
-                        {/* Luminous stellar point */}
-                        <circle
-                          r={star.size}
-                          fill={star.colorHex}
-                          stroke="#ffffff"
-                          strokeWidth={0.3}
-                          opacity={0.95}
-                        />
-                      </g>
-                    ))}
+                      );
+                    })}
 
                     {/* Selection Pulse Ring */}
                     {isSelected && (

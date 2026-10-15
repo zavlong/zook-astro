@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100" width="100" height="100">
+  <defs>
+    <radialGradient id="g-glow" cx="0" cy="0" r="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fffbeb" stop-opacity="1" />
+      <stop offset="26%" stop-color="#fde047" stop-opacity="0.88" />
+      <stop offset="55%" stop-color="#f59e0b" stop-opacity="0.48" />
+      <stop offset="84%" stop-color="#d97706" stop-opacity="0.15" />
+      <stop offset="100%" stop-color="#b45309" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="g-core" cx="0" cy="0" r="14" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="45%" stop-color="#fef08a" />
+      <stop offset="100%" stop-color="#facc15" />
+    </radialGradient>
+  </defs>
+  <circle cx="0" cy="0" r="46" fill="url(#g-glow)" />
+  <!-- Solar flare spikes -->
+  <path d="M -24 0 Q 0 -0.7 24 0 Q 0 0.7 -24 0 Z" fill="#fef08a" opacity="0.55" />
+  <path d="M 0 -24 Q -0.7 0 0 24 Q 0.7 0 0 -24 Z" fill="#fef08a" opacity="0.55" />
+  <circle cx="0" cy="0" r="14" fill="url(#g-core)" stroke="#fef9c3" stroke-width="0.8" />
+  <circle cx="0" cy="0" r="6" fill="#ffffff" />
+</svg>

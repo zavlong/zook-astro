@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100" width="100" height="100">
+  <defs>
+    <radialGradient id="o-glow" cx="0" cy="0" r="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="1" />
+      <stop offset="22%" stop-color="#93c5fd" stop-opacity="0.95" />
+      <stop offset="48%" stop-color="#3b82f6" stop-opacity="0.55" />
+      <stop offset="78%" stop-color="#1d4ed8" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#1e3a8a" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="o-core" cx="0" cy="0" r="16" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="65%" stop-color="#dbeafe" />
+      <stop offset="100%" stop-color="#60a5fa" />
+    </radialGradient>
+  </defs>
+  <!-- Volumetric Corona Bloom -->
+  <circle cx="0" cy="0" r="48" fill="url(#o-glow)" />
+  <!-- 4-Point Optical Diffraction Spikes -->
+  <path d="M -46 0 Q 0 -1.5 46 0 Q 0 1.5 -46 0 Z" fill="#93c5fd" opacity="0.75" />
+  <path d="M 0 -46 Q -1.5 0 0 46 Q 1.5 0 0 -46 Z" fill="#93c5fd" opacity="0.75" />
+  <!-- Diagonal subtle spikes -->
+  <path d="M -24 -24 Q 0 0 24 24 Q 0 0 -24 -24 Z" fill="#bfdbfe" opacity="0.35" />
+  <path d="M 24 -24 Q 0 0 -24 24 Q 0 0 24 -24 Z" fill="#bfdbfe" opacity="0.35" />
+  <!-- Dense Photosphere Core -->
+  <circle cx="0" cy="0" r="16" fill="url(#o-core)" />
+  <circle cx="0" cy="0" r="9" fill="#ffffff" />
+</svg>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100" width="100" height="100">
+  <defs>
+    <radialGradient id="m-glow" cx="0" cy="0" r="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fef2f2" stop-opacity="1" />
+      <stop offset="25%" stop-color="#fca5a5" stop-opacity="0.88" />
+      <stop offset="56%" stop-color="#ef4444" stop-opacity="0.52" />
+      <stop offset="82%" stop-color="#b91c1c" stop-opacity="0.18" />
+      <stop offset="100%" stop-color="#7f1d1d" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="m-core" cx="0" cy="0" r="14" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fff1f2" />
+      <stop offset="50%" stop-color="#f87171" />
+      <stop offset="100%" stop-color="#dc2626" />
+    </radialGradient>
+  </defs>
+  <circle cx="0" cy="0" r="46" fill="url(#m-glow)" />
+  <circle cx="0" cy="0" r="14" fill="url(#m-core)" stroke="#fca5a5" stroke-width="0.75" />
+  <circle cx="0" cy="0" r="5" fill="#ffffff" />
+</svg>
