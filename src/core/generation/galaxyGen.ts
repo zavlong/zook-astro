@@ -85,7 +85,154 @@ export function desaturateToWhite(hex: string, factor: number): string {
 }
 
 /**
- * Maps sector mean age and density to color:
+ * Converts hex color string to RGB object
+ */
+export function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const clean = hex.replace('#', '');
+  if (clean.length === 3) {
+    return {
+      r: parseInt(clean[0] + clean[0], 16),
+      g: parseInt(clean[1] + clean[1], 16),
+      b: parseInt(clean[2] + clean[2], 16),
+    };
+  }
+  return {
+    r: parseInt(clean.slice(0, 2), 16) || 128,
+    g: parseInt(clean.slice(2, 4), 16) || 128,
+    b: parseInt(clean.slice(4, 6), 16) || 128,
+  };
+}
+
+/**
+ * Converts RGB numbers to hex string
+ */
+export function rgbToHex(r: number, g: number, b: number): string {
+  const clampR = Math.max(0, Math.min(255, Math.round(r)));
+  const clampG = Math.max(0, Math.min(255, Math.round(g)));
+  const clampB = Math.max(0, Math.min(255, Math.round(b)));
+  return `#${clampR.toString(16).padStart(2, '0')}${clampG.toString(16).padStart(2, '0')}${clampB.toString(16).padStart(2, '0')}`;
+}
+
+/**
+ * Computes the sector's integrated color as a luminosity-weighted average of its constituent stars.
+ * Young sectors containing hot O/B stars emit predominantly luminous blue light.
+ * Older sectors where massive stars have died are dominated by red giants and solar turnoffs (warm gold/red).
+ * When density exceeds 100%, mass overflow spawns massive stars and desaturates towards white.
+ */
+export function computeSectorConstituentColor(
+  secSeed: number,
+  meanAge: number,
+  metallicityMean: number,
+  density: number
+): string {
+  const secRng = new PRNG(secSeed);
+  const nSamples = 32;
+
+  let sumR = 0;
+  let sumG = 0;
+  let sumB = 0;
+  let totalWeight = 0;
+
+  for (let i = 0; i < nSamples; i++) {
+    // 1. Progenitor mass with density overflow
+    const u = secRng.next();
+    let mass: number;
+    const overflow = Math.max(0, density - 1.0);
+    const heavyStarChance = Math.min(0.82, 0.10 + overflow * 0.30);
+
+    if (overflow > 0 && secRng.next() < heavyStarChance) {
+      mass = 3.8 + Math.pow(secRng.next(), 1.2) * (18.0 + overflow * 22.0);
+    } else {
+      if (u < 0.08) mass = 0.08 + (u * 0.04) / 0.08;
+      else if (u < 0.58) mass = 0.12 + Math.pow((u - 0.08) / 0.5, 1.4) * 0.38;
+      else if (u < 0.88) mass = 0.50 + Math.pow((u - 0.58) / 0.3, 1.2) * 0.75;
+      else if (u < 0.97) mass = 1.25 + Math.pow((u - 0.88) / 0.09, 1.3) * 1.55;
+      else mass = 2.8 + Math.pow((u - 0.97) / 0.03, 2.0) * 22.2;
+
+      if (overflow > 0) mass *= 1.0 + overflow * 1.45;
+    }
+
+    // 2. Star Age & Metallicity
+    const starAge = Math.max(0.05, Math.min(12.8, meanAge + secRng.nextGaussian(0, 0.6)));
+    const feh = Math.max(-1.8, Math.min(0.5, metallicityMean + secRng.nextGaussian(0, 0.12)));
+
+    // 3. Stellar Evolution: Optical Luminosity and Teff
+    let lum = 1.0;
+    let Teff = 5778;
+
+    if (mass < 0.075) {
+      lum = 2e-5 * Math.pow(mass / 0.05, 2.6);
+      Teff = 1800;
+    } else {
+      let Lz = mass < 0.43 ? 0.23 * Math.pow(mass, 2.3) : mass < 2.0 ? 0.7 * Math.pow(mass, 4.0) : 1.15 * Math.pow(mass, 3.5);
+      let Rz = mass < 0.43 ? Math.pow(mass, 0.85) : mass < 2.0 ? 0.89 * Math.pow(mass, 0.82) : 0.92 * Math.pow(mass, 0.62);
+      const rW = Math.exp(-Math.pow(Math.log10(mass) / 0.45, 2));
+      Lz *= Math.pow(10, -0.18 * feh * rW);
+      Rz *= Math.pow(10, 0.06 * feh);
+
+      const tMS = Math.max(0.004, Math.min(5000.0, 10.0 * (mass / Lz) * Math.pow(mass, 1.35)));
+      const tau = starAge / tMS;
+
+      if (tau > 1.15) {
+        // Remnant
+        if (mass < 8.0) {
+          const tc = Math.max(0.005, starAge - 1.15 * tMS);
+          lum = 0.08 * Math.pow(tc, -1.4);
+          Teff = 12000;
+        } else {
+          lum = 1e-5;
+          Teff = 90000;
+        }
+      } else if (tau <= 1.0) {
+        // Main sequence
+        lum = Lz * (1.0 + 0.42 * tau + 0.32 * tau * tau);
+        const rad = Rz * (1.0 + 0.25 * tau + 0.14 * Math.pow(tau, 3));
+        Teff = (5778.0 * Math.pow(lum, 0.25)) / Math.sqrt(rad);
+      } else {
+        // Giant branch (Red Giant)
+        const f2 = Math.min(1.0, (tau - 1.05) / 0.1);
+        lum = Lz * 2.35 * Math.pow(35.0, f2);
+        Teff = Math.max(3100, Math.min(4800, 4600 - 1200 * f2));
+      }
+    }
+
+    // 4. Teff to blackbody RGB color
+    let r = 255, g = 255, b = 255;
+    if (Teff >= 25000) { r = 155; g = 176; b = 255; }
+    else if (Teff >= 10000) { r = 170; g = 191; b = 255; }
+    else if (Teff >= 7400) { r = 202; g = 215; b = 255; }
+    else if (Teff >= 6000) { r = 248; g = 247; b = 255; }
+    else if (Teff >= 5200) { r = 255; g = 244; b = 234; }
+    else if (Teff >= 3850) { r = 255; g = 170; b = 85; }
+    else if (Teff >= 3000) { r = 255; g = 68; b = 56; }
+    else if (Teff >= 2200) { r = 230; g = 25; b = 25; }
+    else { r = 200; g = 16; b = 46; }
+
+    // 5. Weight color by optical luminosity
+    const weight = Math.max(1e-4, lum);
+    sumR += weight * r;
+    sumG += weight * g;
+    sumB += weight * b;
+    totalWeight += weight;
+  }
+
+  if (totalWeight <= 0) return '#60a5fa';
+  const avgR = Math.round(sumR / totalWeight);
+  const avgG = Math.round(sumG / totalWeight);
+  const avgB = Math.round(sumB / totalWeight);
+  let hex = rgbToHex(avgR, avgG, avgB);
+
+  // Overdensity desaturation towards white
+  if (density > 1.0) {
+    const desatFactor = Math.min(0.96, Math.pow((density - 1.0) / 2.0, 0.85) * 0.95);
+    hex = desaturateToWhite(hex, desatFactor);
+  }
+
+  return hex;
+}
+
+/**
+ * Maps sector mean age and density to color (simple lookup fallback):
  * - Younger sectors are bluer, older sectors are redder.
  * - When density exceeds 100% (>1.0), saturation decreases towards white!
  *   At 200% or 300% density, sectors become dazzling white-hot luminous cores.
@@ -345,8 +492,8 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
       const meanAge = +Math.max(0.2, Math.min(12.8, baseAge)).toFixed(2);
       const metallicityMean = +Math.max(-1.7, Math.min(0.52, baseFeh)).toFixed(2);
 
-      // Color based on age and density: density > 1.0 desaturates towards luminous white!
-      const colorHex = getSectorColorByAge(meanAge, density);
+      // Color based on luminosity-weighted average of constituent stars:
+      const colorHex = computeSectorConstituentColor(sectorSeedNum, meanAge, metallicityMean, density);
 
       // Opacity based on density: denser = more opaque, sparser = more transparent
       const opacity = getSectorOpacityByDensity(density);

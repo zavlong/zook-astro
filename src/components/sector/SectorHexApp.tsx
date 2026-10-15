@@ -551,12 +551,15 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 </span>
               </h2>
             </div>
-            <p className="text-[11px] text-slate-400 flex items-center gap-2">
+            <p className="text-[11px] text-slate-400 flex items-center gap-2 flex-wrap">
               <span className="text-cyan-300 font-semibold">{config.columns}&times;{config.rows} Hex Grid</span>
               <span className="text-slate-600">&bull;</span>
               <span>{gridData.stats.occupiedHexes.toLocaleString()} Systems ({gridData.stats.occupancyPct}% density)</span>
               <span className="text-slate-600">&bull;</span>
-              <span>Multi-Star Depictions Active</span>
+              <span className="flex items-center gap-1.5 font-mono">
+                <span className="w-2.5 h-2.5 rounded-full border border-white/40 shadow-sm" style={{ backgroundColor: gridData.integratedColorHex }} />
+                <span>Sector Integrated Light: <strong style={{ color: gridData.integratedColorHex }}>{gridData.integratedColorHex}</strong></span>
+              </span>
             </p>
           </div>
         </div>
@@ -1363,9 +1366,16 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     <span className="text-slate-500">Multi-Stars:</span>{' '}
                     <span className="text-indigo-300 font-bold">{gridData.stats.multipleSystemCount}</span>
                   </div>
-                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50 col-span-2">
+                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
                     <span className="text-slate-500">Heavy Stars (&ge;3 M☉):</span>{' '}
                     <span className="text-amber-300 font-bold">{gridData.stats.heavyMassCount}</span>
+                  </div>
+                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50 col-span-2 flex items-center justify-between">
+                    <span className="text-slate-400">Integrated Light (Constituent Stars):</span>
+                    <span className="flex items-center gap-1.5 font-bold" style={{ color: gridData.integratedColorHex }}>
+                      <span className="w-2.5 h-2.5 rounded-full border border-white/40" style={{ backgroundColor: gridData.integratedColorHex }} />
+                      {gridData.integratedColorHex}
+                    </span>
                   </div>
                 </div>
               </div>

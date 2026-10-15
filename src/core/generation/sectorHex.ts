@@ -8,6 +8,7 @@ import {
   RealisticStarNode,
   SpectralCategory,
 } from '../../types/astrophysics';
+import { hexToRgb, rgbToHex, desaturateToWhite } from './galaxyGen';
 
 export interface SectorHexSystem {
   // Required core tuple: { age, mass, metallicity, id }
@@ -62,6 +63,7 @@ export interface SectorHexGridData {
   config: SectorHexConfig;
   cells: SectorHexCell[];
   systems: SectorHexSystem[];
+  integratedColorHex: string; // Luminosity-weighted average color of all constituent stars in sector
   stats: {
     totalHexes: number;
     occupiedHexes: number;
@@ -215,6 +217,11 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
   let multipleSystemCount = 0;
   let heavyMassCount = 0;
 
+  let sumSectorR = 0;
+  let sumSectorG = 0;
+  let sumSectorB = 0;
+  let totalSectorLum = 0;
+
   for (let c = 1; c <= config.columns; c++) {
     for (let r = 1; r <= config.rows; r++) {
       const coord = formatHexCoord(c, r);
@@ -365,8 +372,31 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
         sysResult,
       };
 
+      // Accumulate luminosity-weighted color of all constituent stars in this system
+      for (const st of sysResult.hierarchy.stars) {
+        const lum = Math.max(1e-4, typeof st.lumNum === 'number' ? st.lumNum : 0.001);
+        const rgb = hexToRgb(st.colorHex || '#ffffff');
+        sumSectorR += lum * rgb.r;
+        sumSectorG += lum * rgb.g;
+        sumSectorB += lum * rgb.b;
+        totalSectorLum += lum;
+      }
+
       systems.push(system);
       cells.push({ col: c, row: r, coord, system });
+    }
+  }
+
+  // Compute the sector's integrated color as luminosity-weighted average of all constituent stars
+  let integratedColorHex = '#60a5fa';
+  if (totalSectorLum > 0) {
+    const avgR = Math.round(sumSectorR / totalSectorLum);
+    const avgG = Math.round(sumSectorG / totalSectorLum);
+    const avgB = Math.round(sumSectorB / totalSectorLum);
+    integratedColorHex = rgbToHex(avgR, avgG, avgB);
+    if (config.density > 1.0) {
+      const factor = Math.min(0.96, Math.pow((config.density - 1.0) / 2.0, 0.85) * 0.95);
+      integratedColorHex = desaturateToWhite(integratedColorHex, factor);
     }
   }
 
@@ -378,6 +408,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
     config,
     cells,
     systems,
+    integratedColorHex,
     stats: {
       totalHexes,
       occupiedHexes,

@@ -756,6 +756,20 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                   </p>
                 </div>
 
+                {/* Integrated Photometric Light */}
+                <div className="border-t border-slate-800/80 pt-2.5">
+                  <div className="flex justify-between text-[11px] mb-1">
+                    <span className="text-slate-400">Integrated Photometric Light</span>
+                    <span className="font-bold flex items-center gap-1.5 font-mono" style={{ color: selectedSector.colorHex }}>
+                      <span className="w-2.5 h-2.5 rounded-full border border-white/50 shadow-sm" style={{ backgroundColor: selectedSector.colorHex }} />
+                      {selectedSector.colorHex}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Luminosity-weighted average of all constituent stars in the sector.
+                  </p>
+                </div>
+
                 {/* Mean Metallicity */}
                 <div className="border-t border-slate-800/80 pt-2.5">
                   <div className="flex justify-between text-[11px] mb-1">
