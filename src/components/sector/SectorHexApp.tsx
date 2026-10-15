@@ -135,7 +135,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   // Generated Grid Data
   const gridData = useMemo(() => generateSectorHexGrid(config), [config]);
 
-  // Selected Hex System
+  // Selected Hex System and Selected Coordinate
+  const [selectedCoord, setSelectedCoord] = useState<string | null>(() => {
+    return gridData.systems[0]?.coord || null;
+  });
   const [selectedSystem, setSelectedSystem] = useState<SectorHexSystem | null>(() => {
     return gridData.systems[0] || null;
   });
@@ -146,11 +149,14 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       if (selectedSystem) {
         const stillPresent = gridData.systems.find((s) => s.coord === selectedSystem.coord);
         setSelectedSystem(stillPresent || gridData.systems[0]);
+        setSelectedCoord(stillPresent ? stillPresent.coord : gridData.systems[0]?.coord || null);
       } else {
         setSelectedSystem(gridData.systems[0]);
+        setSelectedCoord(gridData.systems[0]?.coord || null);
       }
     } else {
       setSelectedSystem(null);
+      setSelectedCoord(null);
     }
   }, [gridData]);
 
@@ -324,6 +330,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     const clean = searchCoord.trim().padStart(4, '0');
     const match = gridData.cells.find((c) => c.coord === clean);
     if (match) {
+      setSelectedCoord(match.coord);
       if (match.system) {
         setSelectedSystem(match.system);
       }
@@ -897,7 +904,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               {visibleHexCells.map((cell) => {
                 const { cx, cy } = getHexCenter(cell.col, cell.row);
                 const hasSystem = !!cell.system;
-                const isSelected = selectedSystem?.coord === cell.coord;
+                const isSelected = selectedCoord === cell.coord || selectedSystem?.coord === cell.coord;
                 const isHovered = hoveredCell?.coord === cell.coord;
 
                 // Filter check
@@ -919,6 +926,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     key={cell.coord}
                     transform={`translate(${cx}, ${cy})`}
                     onClick={() => {
+                      setSelectedCoord(cell.coord);
                       if (cell.system) setSelectedSystem(cell.system);
                     }}
                     onDoubleClick={() => {
@@ -955,8 +963,8 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       className={isSelected ? 'animate-pulse' : ''}
                     />
 
-                    {/* Coordinate Label at top of hex (hidden when zoomed very far out for performance) */}
-                    {zoom >= 0.28 && (
+                    {/* Coordinate Label at top of hex - revealed only on mouse over or click/selection */}
+                    {(isSelected || isHovered) && zoom >= 0.28 && (
                       <text
                         y={-hexRadius + 14}
                         textAnchor="middle"
@@ -994,7 +1002,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                           />
                         )}
 
-                        {/* Star System Name (hidden at extreme zoom out) */}
+                        {/* Star System Name (only label shown by default on star hexes) */}
                         {zoom >= 0.35 && (
                           <text
                             y={14}
@@ -1014,8 +1022,8 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                           </text>
                         )}
 
-                        {/* Spectral Class Pill */}
-                        {zoom >= 0.35 && (
+                        {/* Spectral Class Pill - Revealed only on mouse over or click */}
+                        {(isSelected || isHovered) && zoom >= 0.35 && (
                           <text
                             y={25}
                             textAnchor="middle"
