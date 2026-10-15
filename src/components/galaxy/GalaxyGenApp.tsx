@@ -29,6 +29,7 @@ import {
   GalaxyGridData,
   generateBlurredGalaxyBackground,
 } from '../../core/generation/galaxyGen';
+import { getHexGridOverlayUrl } from '../../core/generation/hexGridOverlay';
 import { ImageQuantizerModal } from './ImageQuantizerModal';
 
 interface GalaxyGenAppProps {
@@ -169,6 +170,16 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     }
     return pts.join(' ');
   }, [hexRadius]);
+
+  // Pregenerated 50x50 hex grid overlay image URL (high-performance GPU texture overlay)
+  const hexGridOverlayUrl = useMemo(() => {
+    return getHexGridOverlayUrl({
+      columns: config.columns,
+      rows: config.rows,
+      hexRadius,
+      padding: 40,
+    });
+  }, [config.columns, config.rows, hexRadius]);
 
   // Procedural blurred galaxy background generated from hexes when no custom photo is imported
   const [proceduralBgUrl, setProceduralBgUrl] = useState<string | null>(null);
@@ -830,34 +841,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                       </g>
                     )}
 
-                    {/* Atmospheric Fuzzy Hex Border */}
-                    {showHexBoundaries && (
-                      <polygon
-                        points={hexPoints}
-                        fill="none"
-                        stroke={
-                          isSelected
-                            ? '#38bdf8'
-                            : isCore
-                            ? '#f59e0b'
-                            : sector.density > 1.5
-                            ? 'rgba(255, 255, 255, 0.70)'
-                            : sector.density > 1.0
-                            ? 'rgba(255, 255, 255, 0.40)'
-                            : sector.density > 0.35
-                            ? 'rgba(255, 255, 255, 0.22)'
-                            : sector.density > 0.04
-                            ? 'rgba(148, 163, 184, 0.12)'
-                            : 'transparent'
-                        }
-                        strokeWidth={isSelected ? 3.0 : isCore ? 2.4 : sector.density > 1.2 ? 2.2 : 1.6}
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
-                        filter="url(#fuzzyBorder)"
-                        opacity={isSelected ? 1.0 : 0.85}
-                        className="transition-colors duration-150"
-                      />
-                    )}
+
 
                     {/* Giant Star Systems Dots (Mass 10-50 M☉, count = floor(density% / 10)) */}
                     {sector.giantStars && sector.giantStars.length > 0 && sector.giantStars.map((star) => (
@@ -949,6 +933,82 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                   </g>
                 );
               })}
+
+              {/* Pregenerated 50x50 Hex Grid Boundary Image Overlay */}
+              {showHexBoundaries && hexGridOverlayUrl && (
+                <image
+                  href={hexGridOverlayUrl}
+                  x={0}
+                  y={0}
+                  width={gridBoundingSize.width}
+                  height={gridBoundingSize.height}
+                  preserveAspectRatio="none"
+                  className="pointer-events-none"
+                  opacity={0.80}
+                  style={{ pointerEvents: 'none' }}
+                />
+              )}
+
+              {/* Active Selection Glow Ring & Foreground Highlight (drawn crisp on top of grid lines) */}
+              {selectedSector && (
+                <g
+                  transform={`translate(${getHexCenter(selectedSector.col, selectedSector.row).cx}, ${getHexCenter(selectedSector.col, selectedSector.row).cy})`}
+                  className="pointer-events-none"
+                >
+                  <polygon
+                    points={hexPoints}
+                    fill="none"
+                    stroke="#38bdf8"
+                    strokeWidth={3.0}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    filter="url(#fuzzyBorder)"
+                  />
+                  <polygon
+                    points={hexPoints}
+                    fill="none"
+                    stroke="#38bdf8"
+                    strokeWidth={1.2}
+                    strokeDasharray="4,2"
+                    className="animate-pulse"
+                  />
+                </g>
+              )}
+
+              {/* Central Galactic Nucleus SMBH (Sector 2525) Outline when not selected */}
+              {selectedSector?.coord !== '2525' && (
+                <g
+                  transform={`translate(${getHexCenter(25, 25).cx}, ${getHexCenter(25, 25).cy})`}
+                  className="pointer-events-none"
+                >
+                  <polygon
+                    points={hexPoints}
+                    fill="none"
+                    stroke="#f59e0b"
+                    strokeWidth={2.4}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                </g>
+              )}
+
+              {/* Hovered Sector Feedback Outline */}
+              {hoveredSector && hoveredSector.coord !== selectedSector?.coord && (
+                <g
+                  transform={`translate(${getHexCenter(hoveredSector.col, hoveredSector.row).cx}, ${getHexCenter(hoveredSector.col, hoveredSector.row).cy})`}
+                  className="pointer-events-none"
+                >
+                  <polygon
+                    points={hexPoints}
+                    fill="none"
+                    stroke="#7dd3fc"
+                    strokeWidth={2.0}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    opacity={0.85}
+                  />
+                </g>
+              )}
             </g>
           </svg>
 
