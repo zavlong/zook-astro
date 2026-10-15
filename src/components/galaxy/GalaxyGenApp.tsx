@@ -391,6 +391,28 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     setIsDragging(false);
   };
 
+  // Zoom towards a specific screen coordinate (cursor or center)
+  const zoomAtScreenPoint = useCallback(
+    (screenX: number, screenY: number, factor: number) => {
+      setZoom((prevZoom) => {
+        const newZoom = Math.max(0.08, Math.min(2.5, prevZoom * factor));
+        if (newZoom === prevZoom) return prevZoom;
+
+        setPan((prevPan) => {
+          const worldX = (screenX - prevPan.x) / prevZoom;
+          const worldY = (screenY - prevPan.y) / prevZoom;
+          return {
+            x: screenX - worldX * newZoom,
+            y: screenY - worldY * newZoom,
+          };
+        });
+
+        return newZoom;
+      });
+    },
+    []
+  );
+
   // Zoom handlers with automatic sector entry beyond zoom threshold
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
@@ -419,8 +441,15 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
       }
     }
 
-    const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
-    setZoom((prev) => Math.max(0.08, Math.min(2.5, prev * zoomFactor)));
+    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      zoomAtScreenPoint(mouseX, mouseY, zoomFactor);
+    } else {
+      setZoom((prev) => Math.max(0.08, Math.min(2.5, prev * zoomFactor)));
+    }
   };
 
   // Frustum Culling: Only render visible sectors within viewport + 2 buffer sectors
@@ -1060,6 +1089,9 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               onClick={() => {
                 if (zoom >= 2.05 && selectedSector) {
                   handleTriggerEnterSector(selectedSector);
+                } else if (containerRef.current) {
+                  const rect = containerRef.current.getBoundingClientRect();
+                  zoomAtScreenPoint(rect.width / 2, rect.height / 2, 1.25);
                 } else {
                   setZoom((z) => Math.min(2.5, z * 1.25));
                 }
@@ -1070,7 +1102,14 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               <ZoomIn className="w-4 h-4" />
             </button>
             <button
-              onClick={() => setZoom((z) => Math.max(0.08, z * 0.8))}
+              onClick={() => {
+                if (containerRef.current) {
+                  const rect = containerRef.current.getBoundingClientRect();
+                  zoomAtScreenPoint(rect.width / 2, rect.height / 2, 0.8);
+                } else {
+                  setZoom((z) => Math.max(0.08, z * 0.8));
+                }
+              }}
               className="p-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition cursor-pointer"
               title="Zoom Out"
             >

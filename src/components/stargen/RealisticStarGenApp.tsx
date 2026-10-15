@@ -1830,6 +1830,35 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               setIsDraggingOrrery(false);
               dragStartRef.current = null;
             }}
+            onWheel={(e) => {
+              e.preventDefault();
+              const zoomFactor = e.deltaY < 0 ? 1.22 : 0.82;
+              const newPxPerAU = clamp(orreryPxPerAU * zoomFactor, 0.05, 5000000);
+              if (newPxPerAU === orreryPxPerAU) return;
+
+              if (orrerySvgRef.current) {
+                const rect = orrerySvgRef.current.getBoundingClientRect();
+                const mouseSvgX =
+                  ((e.clientX - rect.left) / Math.max(1, rect.width)) * viewW;
+                const mouseSvgY =
+                  ((e.clientY - rect.top) / Math.max(1, rect.height)) * viewH;
+                const dxSvg = mouseSvgX - cxScreen;
+                const dySvg = mouseSvgY - cyScreen;
+                const cosP = Math.max(0.2, Math.cos(orreryPitch));
+                const xCam = dxSvg / orreryPxPerAU;
+                const yCam = dySvg / (orreryPxPerAU * cosP);
+                const dAU_x = xCam * cosYaw + yCam * sinYaw;
+                const dAU_y = -xCam * sinYaw + yCam * cosYaw;
+                const k = newPxPerAU / orreryPxPerAU;
+
+                setTrackedTarget(null);
+                setOrreryCamAU((prev) => ({
+                  x: prev.x + dAU_x * (1 - 1 / k),
+                  y: prev.y + dAU_y * (1 - 1 / k),
+                }));
+              }
+              setOrreryPxPerAU(newPxPerAU);
+            }}
             xmlns="http://www.w3.org/2000/svg"
           >
             <rect x={0} y={0} width={viewW} height={viewH} fill="#03060c" />

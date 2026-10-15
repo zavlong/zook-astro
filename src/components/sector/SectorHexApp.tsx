@@ -622,7 +622,29 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     }, 350);
   }, [onBackToGalaxy, isExitingToGalaxy]);
 
-  // Zoom with scroll wheel (zooming out below threshold triggers return to galaxy)
+  // Zoom towards a specific screen coordinate (cursor or center)
+  const zoomAtScreenPoint = useCallback(
+    (screenX: number, screenY: number, factor: number) => {
+      setZoom((prevZoom) => {
+        const newZoom = Math.max(0.06, Math.min(2.8, prevZoom * factor));
+        if (newZoom === prevZoom) return prevZoom;
+
+        setPan((prevPan) => {
+          const worldX = (screenX - prevPan.x) / prevZoom;
+          const worldY = (screenY - prevPan.y) / prevZoom;
+          return {
+            x: screenX - worldX * newZoom,
+            y: screenY - worldY * newZoom,
+          };
+        });
+
+        return newZoom;
+      });
+    },
+    []
+  );
+
+  // Zoom with scroll wheel (zooming towards cursor, or zooming out below threshold triggers return to galaxy)
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     if (isExitingToGalaxy) return;
@@ -632,8 +654,15 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       return;
     }
 
-    const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
-    setZoom((prev) => Math.max(0.06, Math.min(2.8, prev * zoomFactor)));
+    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      zoomAtScreenPoint(mouseX, mouseY, zoomFactor);
+    } else {
+      setZoom((prev) => Math.max(0.06, Math.min(2.8, prev * zoomFactor)));
+    }
   };
 
   // Preset Selector
@@ -2227,7 +2256,14 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             {/* Canvas Zoom & Reset Controls */}
             <div className="flex items-center gap-1.5 bg-slate-950/90 backdrop-blur-md px-2 py-1.5 rounded-xl border border-slate-800 shadow-xl text-xs font-mono w-fit">
               <button
-                onClick={() => setZoom((z) => Math.min(2.8, z * 1.25))}
+                onClick={() => {
+                  if (containerRef.current) {
+                    const rect = containerRef.current.getBoundingClientRect();
+                    zoomAtScreenPoint(rect.width / 2, rect.height / 2, 1.25);
+                  } else {
+                    setZoom((z) => Math.min(2.8, z * 1.25));
+                  }
+                }}
                 className="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white transition"
                 title="Zoom In (+)"
               >
@@ -2237,6 +2273,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 onClick={() => {
                   if (zoom <= 0.085 && onBackToGalaxy) {
                     handleBackToGalaxyWithTransition();
+                  } else if (containerRef.current) {
+                    const rect = containerRef.current.getBoundingClientRect();
+                    zoomAtScreenPoint(rect.width / 2, rect.height / 2, 0.8);
                   } else {
                     setZoom((z) => Math.max(0.06, z * 0.8));
                   }
