@@ -60,11 +60,15 @@ import { PlanetDossierModal } from './modals/PlanetDossierModal';
 interface RealisticStarGenAppProps {
   onOpenInArchitect: (archSystem: ArchitectSystem) => void;
   onInspectInSector3D?: (starSystem: StarSystem) => void;
+  initialParams?: StarGenParams | null;
+  onBackToSectorHex?: () => void;
 }
 
 export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   onOpenInArchitect,
   onInspectInSector3D,
+  initialParams,
+  onBackToSectorHex,
 }) => {
   // Step 1-2 Controls
   const [logMass, setLogMass] = useState<number>(0.02);
@@ -152,13 +156,23 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   };
 
   useEffect(() => {
-    triggerRun({
-      sysMass: +Math.pow(10, logMass).toFixed(3),
-      age,
-      feh,
-      forcedMult,
-    });
-  }, []);
+    if (initialParams) {
+      const newLogM = +log10(initialParams.sysMass).toFixed(3);
+      setLogMass(newLogM);
+      setAge(initialParams.age);
+      setFeh(initialParams.feh);
+      setForcedMult(initialParams.forcedMult || 'auto');
+      setPresetKey('');
+      triggerRun(initialParams);
+    } else {
+      triggerRun({
+        sysMass: +Math.pow(10, logMass).toFixed(3),
+        age,
+        feh,
+        forcedMult,
+      });
+    }
+  }, [initialParams]);
 
   // 3D Orrery live Keplerian orbit animation loop (with dynamic speed & camera tracking)
   useEffect(() => {
@@ -2581,8 +2595,23 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       <div className="bg-[#0e131d] border border-[#2a3852] rounded-xl p-3.5 flex flex-col gap-3 shadow-lg">
         <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-800 pb-2.5">
           <div className="flex items-center gap-2.5 flex-wrap">
+            {onBackToSectorHex && (
+              <button
+                type="button"
+                onClick={onBackToSectorHex}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-950/80 hover:bg-indigo-900 text-indigo-200 border border-indigo-700 flex items-center gap-1.5 cursor-pointer transition shadow"
+                title="Return to Sector Hex Grid"
+              >
+                <span>&larr; Back to Sector Hex Map</span>
+              </button>
+            )}
             <h1 className="text-sm md:text-base font-bold text-white flex items-center gap-2">
               <span>2D Astrophysical System Map</span>
+              {systemResult?.step1?.id && (
+                <span className="text-[10.5px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
+                  {systemResult.step1.name || systemResult.step1.id}
+                </span>
+              )}
             </h1>
           </div>
 

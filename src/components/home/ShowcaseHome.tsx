@@ -1018,13 +1018,22 @@ export const ShowcaseHome: React.FC<Props> = ({ onSelectApp }) => {
               Generate complete unary to quadruple star hierarchies from cloud mass, age, and metallicity [Fe/H]. Simulates Holman-Wiegert binary stability zones, 1–2% protoplanetary disk partitioning across 3 snow lines, Type I/II resonant migration convoys, supercritical/Hycean water worlds, and moon systems — with 1-click export to 3D Raytraced Theater and Stellaris!
             </p>
           </div>
-          <button
-            onClick={() => onSelectApp('stargen-lab')}
-            className="px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-mono text-xs font-bold tracking-wider uppercase transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2 flex-shrink-0 cursor-pointer"
-          >
-            <span>Launch StarGen Lab (Steps 1–6)</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
+          <div className="flex flex-col sm:flex-row items-center gap-2.5 flex-shrink-0">
+            <button
+              onClick={() => onSelectApp('sector-hex')}
+              className="w-full sm:w-auto px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-600 via-indigo-600 to-purple-600 hover:from-cyan-500 hover:to-purple-500 text-white font-mono text-xs font-bold tracking-wider uppercase transition-all shadow-lg shadow-cyan-600/30 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <span>Sector Hex Map</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => onSelectApp('stargen-lab')}
+              className="w-full sm:w-auto px-4 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-mono text-xs font-bold tracking-wider uppercase transition-all shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <span>StarGen Lab (Steps 1–6)</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Scientific Observational Overview & Specs Drawer */}

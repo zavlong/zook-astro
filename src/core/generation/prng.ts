@@ -28,3 +28,21 @@ export class PRNG {
     return mean + z * stdev;
   }
 }
+
+/**
+ * Computes a deterministic positive 31-bit integer seed from a string or number ID
+ */
+export function seedFromId(id: string | number): number {
+  if (typeof id === 'number') {
+    const num = Math.floor(Math.abs(id)) % 2147483647;
+    return num === 0 ? 4289 : num;
+  }
+  let hash = 2166136261;
+  for (let i = 0; i < id.length; i++) {
+    hash ^= id.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const positiveHash = (hash >>> 0) % 2147483647;
+  return positiveHash === 0 ? 4289 : positiveHash;
+}
+

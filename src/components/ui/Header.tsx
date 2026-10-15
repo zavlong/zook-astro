@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Compass, Rocket, Wrench, Home, Atom } from 'lucide-react';
+import { Sparkles, Compass, Rocket, Wrench, Home, Atom, Hexagon } from 'lucide-react';
 import { FilterCategory, StarSystem, ActiveAppMode } from '../../types/astrophysics';
 
 interface HeaderProps {
@@ -87,6 +87,19 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <Home className="w-3.5 h-3.5" />
           <span>Home</span>
+        </button>
+
+        <button
+          onClick={() => onSelectApp('sector-hex')}
+          className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition text-[11px] cursor-pointer ${
+            activeApp === 'sector-hex'
+              ? 'bg-gradient-to-r from-cyan-600 via-indigo-600 to-purple-600 text-white font-bold shadow-md shadow-cyan-500/20'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+          }`}
+          title="Procedural Hex Grid Stellar Sector Map with Seeded System Generator"
+        >
+          <Hexagon className="w-3.5 h-3.5" />
+          <span>Sector Hex Map</span>
         </button>
 
         <button

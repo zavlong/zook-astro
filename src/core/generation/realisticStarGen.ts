@@ -1,4 +1,5 @@
-import { PRNG } from './prng';
+import { PRNG, seedFromId } from './prng';
+export { seedFromId };
 import {
   PlanetArchetype,
   RealisticBinarySplit,
@@ -36,6 +37,9 @@ export interface StarGenParams {
   age: number;
   feh: number;
   forcedMult: 'auto' | '1' | '2' | '3' | '4';
+  seed?: number;
+  id?: string;
+  name?: string;
 }
 
 export interface RealisticZoneInput {
@@ -126,6 +130,7 @@ export interface RealisticStarSystemResult {
   step1: StarGenParams;
   hierarchy: RealisticHierarchyResult;
   zones: RealisticPlanetaryZone[];
+  seedUsed?: number;
 }
 
 export const STARGEN_BENCHMARK_PRESETS: Record<
@@ -2694,6 +2699,11 @@ export function runRealisticGenerator(
   params: StarGenParams,
   rng?: PRNG
 ): RealisticStarSystemResult {
+  let seedUsed: number | undefined;
+  if (!rng && (params.id !== undefined || params.seed !== undefined)) {
+    seedUsed = seedFromId(params.id ?? params.seed!);
+    rng = new PRNG(seedUsed);
+  }
   globalRollCounter++;
   const nStars = rollStep2(params.sysMass, params.forcedMult, rng);
   const h = buildHierarchy(params.sysMass, params.age, params.feh, nStars, rng);
@@ -2707,6 +2717,7 @@ export function runRealisticGenerator(
     step1: params,
     hierarchy: h,
     zones: pZones,
+    seedUsed,
   };
 }
 
@@ -2913,7 +2924,9 @@ export function convertRealisticToArchitectSystem(
       : 's_type_binary';
 
   const sysBaseName =
-    customName || `AstroGen-${res.roll} (${primaryStar.spectralType.split(' ')[0]})`;
+    customName ||
+    res.step1.name ||
+    `AstroGen-${res.roll} (${primaryStar.spectralType.split(' ')[0]})`;
 
   const bodies: CelestialBody[] = (zone ? zone.bodies : []).map((b, idx) => {
     if (b.kind === 'belt') {

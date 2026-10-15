@@ -216,5 +216,10 @@ export interface SectorConfiguration {
   seed: number;
 }
 
-export type ActiveAppMode = 'home' | 'sector-3d' | 'astro-architect' | 'stargen-lab';
+export type ActiveAppMode =
+  | 'home'
+  | 'sector-hex'
+  | 'stargen-lab'
+  | 'astro-architect'
+  | 'sector-3d';
 
