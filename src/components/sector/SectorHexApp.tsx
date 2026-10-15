@@ -302,7 +302,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   ) => {
     const clampedCols = Math.max(4, Math.min(100, Math.round(newCols)));
     const clampedRows = Math.max(4, Math.min(100, Math.round(newRows)));
-    const clampedDensity = Math.max(0.05, Math.min(0.85, +newDensity.toFixed(2)));
+    const clampedDensity = Math.max(0.05, Math.min(3.5, +newDensity.toFixed(2)));
     const clampedAge = Math.max(0.2, Math.min(12.8, +newAge.toFixed(2)));
     const clampedFeh = Math.max(-1.7, Math.min(0.5, +newFeh.toFixed(2)));
     setConfig((prev) => ({
@@ -588,7 +588,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           <Sliders className="w-3.5 h-3.5 text-cyan-400" />
           <span>Grid: <strong className="text-white">{config.columns}&times;{config.rows}</strong></span>
           <span className="text-slate-500">&bull;</span>
-          <span>Density: <strong className="text-emerald-300">{Math.round(config.density * 100)}%</strong></span>
+          <span>Density: <strong className={config.density > 1.0 ? 'text-amber-300 font-bold' : 'text-emerald-300'}>{Math.round(config.density * 100)}%{config.density > 1.0 ? ' (Overdensity)' : ''}</strong></span>
           <span className="text-slate-500">&bull;</span>
           <span className="hidden md:inline">Age: <strong className="text-cyan-300">{config.meanAge.toFixed(1)} Gyr</strong></span>
         </button>
@@ -725,23 +725,31 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
               <div className="flex justify-between items-center mb-1">
                 <span className="text-slate-400">Stellar Occupancy Density:</span>
-                <span className="text-emerald-300 font-bold">{Math.round(draftDensity * 100)}%</span>
+                <span className={`font-bold ${draftDensity > 1.0 ? 'text-amber-300' : 'text-emerald-300'}`}>
+                  {Math.round(draftDensity * 100)}%{draftDensity > 1.0 ? ' (Overdensity Overflow)' : ''}
+                </span>
               </div>
               <input
                 type="range"
                 min={0.05}
-                max={0.85}
-                step={0.01}
+                max={3.5}
+                step={0.05}
                 value={draftDensity}
                 onChange={(e) => setDraftDensity(parseFloat(e.target.value))}
                 className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
               />
-              <div className="text-[10px] text-slate-400 flex items-center justify-between mt-2 pt-1 border-t border-slate-800/80">
-                <span>Estimated Systems:</span>
-                <span className="text-emerald-400 font-bold">
-                  ~{Math.round(draftCols * draftRows * draftDensity).toLocaleString()} star systems
-                </span>
-              </div>
+              {draftDensity > 1.0 ? (
+                <div className="mt-2 p-2 rounded-lg bg-amber-950/40 border border-amber-800/60 text-[10px] text-amber-300/90 leading-relaxed font-mono">
+                  🔥 <strong>Overdensity Overflow Active:</strong> 100% of hexes are occupied. The excess density overflows onto mass, spawning heavy O/B stars, multiple-star hierarchies (binaries, trinaries, quadruples), and collapsed stellar remnants (black holes, neutron stars, white dwarfs)!
+                </div>
+              ) : (
+                <div className="text-[10px] text-slate-400 flex items-center justify-between mt-2 pt-1 border-t border-slate-800/80">
+                  <span>Estimated Systems:</span>
+                  <span className="text-emerald-400 font-bold">
+                    ~{Math.round(draftCols * draftRows * draftDensity).toLocaleString()} star systems
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Average Stellar Age Slider */}
@@ -1347,9 +1355,17 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     <span className="text-slate-500">K/M Dwarfs:</span>{' '}
                     <span className="text-red-400 font-bold">{gridData.stats.kmCount}</span>
                   </div>
-                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50 col-span-2">
+                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
                     <span className="text-slate-500">Remnants (WD/NS/BH):</span>{' '}
                     <span className="text-purple-400 font-bold">{gridData.stats.remnantCount}</span>
+                  </div>
+                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
+                    <span className="text-slate-500">Multi-Stars:</span>{' '}
+                    <span className="text-indigo-300 font-bold">{gridData.stats.multipleSystemCount}</span>
+                  </div>
+                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50 col-span-2">
+                    <span className="text-slate-500">Heavy Stars (&ge;3 M☉):</span>{' '}
+                    <span className="text-amber-300 font-bold">{gridData.stats.heavyMassCount}</span>
                   </div>
                 </div>
               </div>

@@ -67,17 +67,47 @@ export const DEFAULT_GALAXY_CONFIG: GalaxyConfig = {
 };
 
 /**
- * Maps sector mean age to color:
- * "younger sectors are bluer and older sectors are redder"
+ * Desaturates a hex color towards pure white (#ffffff) by a factor [0, 1]
  */
-export function getSectorColorByAge(ageGyr: number): string {
-  if (ageGyr < 1.2) return '#00d2ff'; // Extremely young starburst bright cyan
-  if (ageGyr < 2.0) return '#38bdf8'; // Young spiral arm sky blue
-  if (ageGyr < 3.2) return '#60a5fa'; // Blue-white young population
-  if (ageGyr < 4.8) return '#facc15'; // Intermediate solar golden yellow
-  if (ageGyr < 6.8) return '#fb923c'; // Mature disk warm orange
-  if (ageGyr < 8.8) return '#ef4444'; // Older population rich red
-  return '#dc2626'; // Ancient halo / core deep crimson
+export function desaturateToWhite(hex: string, factor: number): string {
+  const clamped = Math.max(0, Math.min(1, factor));
+  if (clamped <= 0) return hex;
+  const cleanHex = hex.replace('#', '');
+  const r = parseInt(cleanHex.slice(0, 2), 16);
+  const g = parseInt(cleanHex.slice(2, 4), 16);
+  const b = parseInt(cleanHex.slice(4, 6), 16);
+
+  const newR = Math.round(r + (255 - r) * clamped);
+  const newG = Math.round(g + (255 - g) * clamped);
+  const newB = Math.round(b + (255 - b) * clamped);
+
+  return `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`;
+}
+
+/**
+ * Maps sector mean age and density to color:
+ * - Younger sectors are bluer, older sectors are redder.
+ * - When density exceeds 100% (>1.0), saturation decreases towards white!
+ *   At 200% or 300% density, sectors become dazzling white-hot luminous cores.
+ */
+export function getSectorColorByAge(ageGyr: number, density: number = 0.5): string {
+  let baseColor: string;
+  if (ageGyr < 1.2) baseColor = '#00d2ff'; // Extremely young starburst bright cyan
+  else if (ageGyr < 2.0) baseColor = '#38bdf8'; // Young spiral arm sky blue
+  else if (ageGyr < 3.2) baseColor = '#60a5fa'; // Blue-white young population
+  else if (ageGyr < 4.8) baseColor = '#facc15'; // Intermediate solar golden yellow
+  else if (ageGyr < 6.8) baseColor = '#fb923c'; // Mature disk warm orange
+  else if (ageGyr < 8.8) baseColor = '#ef4444'; // Older population rich red
+  else baseColor = '#dc2626'; // Ancient halo / core deep crimson
+
+  // Fun Rule: Densities exceeding 100% (1.0) desaturate towards white
+  if (density > 1.0) {
+    // factor: 1.0 -> 0.0, 2.0 -> 0.55, 3.0+ -> 0.95+
+    const desatFactor = Math.min(0.96, Math.pow((density - 1.0) / 2.0, 0.85) * 0.95);
+    return desaturateToWhite(baseColor, desatFactor);
+  }
+
+  return baseColor;
 }
 
 /**
@@ -86,6 +116,7 @@ export function getSectorColorByAge(ageGyr: number): string {
  */
 export function getSectorOpacityByDensity(density: number): number {
   if (density < 0.03) return 0.03; // Nearly transparent void
+  if (density >= 1.0) return 0.98; // Completely opaque for overdensities
   const scaled = Math.min(1.0, density / 0.82);
   const opacity = 0.08 + 0.88 * Math.pow(scaled, 1.15);
   return +Math.min(0.96, Math.max(0.04, opacity)).toFixed(3);
@@ -100,6 +131,8 @@ function getRegionName(
   density: number,
   isArm: boolean
 ): string {
+  if (density >= 2.0) return 'Hyper-Dense Stellar Nexus';
+  if (density >= 1.15) return 'Massive Starburst Overdensity';
   if (rNorm > 1.05 && density < 0.04) return 'Intergalactic Void';
   if (rNorm > 0.92) return 'Galactic Halo Fringe';
   if (rNorm < 0.14) return 'Galactic Core Bulge';
@@ -230,7 +263,7 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
           0.35 * armWeight +
           noise;
 
-        baseDensity = Math.max(0, Math.min(0.85, rawDensity * config.overallDensityScale));
+        baseDensity = Math.max(0, Math.min(3.5, rawDensity * config.overallDensityScale));
         if (rNorm > 1.15) baseDensity *= Math.max(0, 1 - (rNorm - 1.15) * 4);
 
         // Stellar Age (younger in arms, old in bulge/halo)
@@ -248,7 +281,7 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
       } else if (config.morphology === 'elliptical') {
         // de Vaucouleurs profile R^(1/4)
         const sersic = Math.exp(-3.2 * (Math.pow(Math.max(0.02, rNorm), 0.25) - 1));
-        baseDensity = Math.max(0, Math.min(0.85, (0.75 * sersic + noise) * config.overallDensityScale));
+        baseDensity = Math.max(0, Math.min(3.5, (0.75 * sersic + noise) * config.overallDensityScale));
         if (rNorm > 1.2) baseDensity *= Math.max(0, 1 - (rNorm - 1.2) * 3);
 
         // Ellipticals are old Population II stars throughout
@@ -259,7 +292,7 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
         // Bulge + Smooth flat disk without arms
         const bulge = Math.exp(-(rNorm * rNorm) / 0.03);
         const disk = Math.exp(-rNorm / 0.32);
-        baseDensity = Math.max(0, Math.min(0.82, (0.75 * bulge + 0.35 * disk + noise) * config.overallDensityScale));
+        baseDensity = Math.max(0, Math.min(3.5, (0.75 * bulge + 0.35 * disk + noise) * config.overallDensityScale));
         if (rNorm > 1.1) baseDensity *= Math.max(0, 1 - (rNorm - 1.1) * 4);
 
         baseAge = 7.5 + 2.5 * rNorm + secRng.nextGaussian(0, 0.8);
@@ -272,7 +305,7 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
         const ringWeight = Math.exp(-(ringDist * ringDist) / (2 * 0.08 * 0.08));
         const interGap = Math.exp(-rNorm / 0.5) * 0.12;
 
-        baseDensity = Math.max(0, Math.min(0.85, (0.70 * nucleus + 0.65 * ringWeight + interGap + noise) * config.overallDensityScale));
+        baseDensity = Math.max(0, Math.min(3.5, (0.70 * nucleus + 0.65 * ringWeight + interGap + noise) * config.overallDensityScale));
         if (rNorm > 1.1) baseDensity *= Math.max(0, 1 - (rNorm - 1.1) * 3);
 
         if (ringWeight > 0.40) {
@@ -294,7 +327,7 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
         const clump3 = Math.exp(-(Math.pow(dx + 2, 2) + Math.pow(dy + 6, 2)) / 50);
         const diffuse = Math.exp(-rNorm / 0.45);
 
-        baseDensity = Math.max(0, Math.min(0.78, (0.50 * (clump1 + clump2 + clump3) + 0.25 * diffuse + noise) * config.overallDensityScale));
+        baseDensity = Math.max(0, Math.min(3.5, (0.50 * (clump1 + clump2 + clump3) + 0.25 * diffuse + noise) * config.overallDensityScale));
         if (rNorm > 1.1) baseDensity *= Math.max(0, 1 - (rNorm - 1.1) * 3);
 
         if (clump1 > 0.4 || clump2 > 0.4 || clump3 > 0.4) {
@@ -307,13 +340,13 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
         }
       }
 
-      // Final clamping
-      const density = +Math.max(0.01, Math.min(0.85, baseDensity)).toFixed(2);
+      // Final clamping: density can now exceed 100% (up to 3.5 = 350%)!
+      const density = +Math.max(0.01, Math.min(3.5, baseDensity)).toFixed(2);
       const meanAge = +Math.max(0.2, Math.min(12.8, baseAge)).toFixed(2);
       const metallicityMean = +Math.max(-1.7, Math.min(0.52, baseFeh)).toFixed(2);
 
-      // Color based on age: younger = bluer, older = redder
-      const colorHex = getSectorColorByAge(meanAge);
+      // Color based on age and density: density > 1.0 desaturates towards luminous white!
+      const colorHex = getSectorColorByAge(meanAge, density);
 
       // Opacity based on density: denser = more opaque, sparser = more transparent
       const opacity = getSectorOpacityByDensity(density);
@@ -322,7 +355,10 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
       const region = getRegionName(config.morphology, rNorm, density, isArmSector);
 
       // Estimated star systems inside a 50x50 sector (50x50 = 2,500 hexes)
-      const estimatedStars50x50 = Math.round(2500 * density);
+      // When density > 1.0, 100% of hexes are filled, plus multiplicity and mass overflow boost total star bodies!
+      const estimatedStars50x50 = density <= 1.0
+        ? Math.round(2500 * density)
+        : Math.round(2500 * (1.0 + (density - 1.0) * 1.4));
 
       const sectorName = `Sector ${coord} (${region.split(' ')[0]})`;
 

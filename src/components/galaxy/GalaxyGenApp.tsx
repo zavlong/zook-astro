@@ -483,11 +483,15 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                           ? '#38bdf8'
                           : isCore
                           ? '#f59e0b'
+                          : sector.density > 1.5
+                          ? 'rgba(255, 255, 255, 0.65)'
+                          : sector.density > 1.0
+                          ? 'rgba(255, 255, 255, 0.35)'
                           : sector.density > 0.35
                           ? 'rgba(255, 255, 255, 0.18)'
                           : 'rgba(148, 163, 184, 0.08)'
                       }
-                      strokeWidth={isSelected ? 2.8 : isCore ? 1.8 : 0.8}
+                      strokeWidth={isSelected ? 2.8 : isCore ? 1.8 : sector.density > 1.5 ? 1.4 : 0.8}
                       className="transition-colors duration-150"
                     />
 
@@ -500,6 +504,16 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                         strokeWidth={1.2}
                         strokeDasharray="4,2"
                         className="animate-pulse"
+                      />
+                    )}
+
+                    {/* Overdensity Hot Core Glow Marker */}
+                    {sector.density > 1.4 && !isCore && (
+                      <circle
+                        r={2.2}
+                        fill="#ffffff"
+                        opacity={0.8}
+                        filter="url(#galaxyGlow)"
                       />
                     )}
 
@@ -603,8 +617,9 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               <span className="text-cyan-300 font-bold">Young (Blue)</span>
               <span className="text-amber-300 font-bold">Old (Red)</span>
             </div>
-            <div className="text-[9px] text-slate-400 mt-1 border-t border-slate-800/80 pt-1">
-              Opacity: <strong className="text-slate-200">Dense</strong> (Opaque) &rarr; <strong className="text-slate-500">Sparse</strong> (Transparent)
+            <div className="text-[9px] text-slate-400 mt-1 border-t border-slate-800/80 pt-1 space-y-0.5">
+              <div>Opacity: <strong className="text-slate-200">Dense</strong> (Opaque) &rarr; <strong className="text-slate-500">Sparse</strong> (Transparent)</div>
+              <div>Overdensity (&gt;100%): <strong className="text-white">Desaturates to white</strong> &bull; Mass &amp; Remnant overflow</div>
             </div>
           </div>
         </div>
@@ -697,18 +712,30 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                 <div>
                   <div className="flex justify-between text-[11px] mb-1">
                     <span className="text-slate-400">Stellar Density</span>
-                    <span className="text-white font-bold">{Math.round(selectedSector.density * 100)}% ({selectedSector.density})</span>
+                    <span className={`font-bold ${selectedSector.density > 1.0 ? 'text-amber-300' : 'text-white'}`}>
+                      {Math.round(selectedSector.density * 100)}% ({selectedSector.density}){selectedSector.density > 1.0 ? ' 🔥 Overdensity' : ''}
+                    </span>
                   </div>
                   <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-gradient-to-r from-blue-500 to-emerald-400 rounded-full"
-                      style={{ width: `${Math.min(100, selectedSector.density * 100)}%` }}
+                      className={`h-full rounded-full ${
+                        selectedSector.density > 1.0
+                          ? 'bg-gradient-to-r from-blue-400 via-amber-300 to-white'
+                          : 'bg-gradient-to-r from-blue-500 to-emerald-400'
+                      }`}
+                      style={{ width: `${Math.min(100, selectedSector.density <= 1.0 ? selectedSector.density * 100 : (selectedSector.density / 3.0) * 100)}%` }}
                     />
                   </div>
                   <div className="flex justify-between text-[9px] text-slate-500 mt-1">
                     <span>Opacity: {selectedSector.opacity}</span>
                     <span className="text-emerald-400 font-semibold">~{selectedSector.estimatedStars50x50.toLocaleString()} Systems (50&times;50)</span>
                   </div>
+
+                  {selectedSector.density > 1.0 && (
+                    <div className="mt-2.5 p-2 rounded-lg bg-amber-950/40 border border-amber-600/50 text-[10px] text-amber-200/90 leading-relaxed font-mono">
+                      🔥 <strong>Overdensity Overflow Active:</strong> Saturation decreased towards white. Excess density overflows into progenitor mass, spawning heavy O/B stars, multiple-star hierarchies, and stellar remnants!
+                    </div>
+                  )}
                 </div>
 
                 {/* Mean Stellar Age */}
@@ -903,12 +930,14 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                 </div>
                 <div>
                   <label className="text-slate-300 block mb-1">
-                    Density Scale: <strong className="text-emerald-400">{draftConfig.overallDensityScale.toFixed(2)}x</strong>
+                    Density Scale: <strong className={draftConfig.overallDensityScale > 1.2 ? 'text-amber-300' : 'text-emerald-400'}>
+                      {draftConfig.overallDensityScale.toFixed(2)}x{draftConfig.overallDensityScale > 1.2 ? ' (Overdensities Active)' : ''}
+                    </strong>
                   </label>
                   <input
                     type="range"
                     min={0.5}
-                    max={1.5}
+                    max={3.0}
                     step={0.05}
                     value={draftConfig.overallDensityScale}
                     onChange={(e) =>

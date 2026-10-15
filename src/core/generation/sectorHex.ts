@@ -51,7 +51,7 @@ export interface SectorHexConfig {
   name: string;
   columns: number;
   rows: number;
-  density: number; // 0.1 to 0.8
+  density: number; // 0.05 to 3.5 (supports >100% overdensities)
   meanAge: number; // 0.5 to 11 Gyr
   ageSigma: number;
   metallicityMean: number; // -1.5 to +0.4 dex
@@ -71,6 +71,8 @@ export interface SectorHexGridData {
     gCount: number;
     kmCount: number;
     remnantCount: number;
+    multipleSystemCount: number;
+    heavyMassCount: number;
   };
 }
 
@@ -141,6 +143,37 @@ function sampleKroupaMass(rng: PRNG): number {
 }
 
 /**
+ * Samples a progenitor stellar system mass with density overflow.
+ * When density <= 1.0 (<= 100%), follows standard Kroupa IMF (0.08 to 25.0 M_sun, median ~0.3 M_sun).
+ * When density > 1.0, the excess density overflows onto mass!
+ * Densities of 200% or 300% spawn massive stars (4 to 65+ M_sun), multiple systems, and stellar remnants.
+ */
+function sampleSystemMass(rng: PRNG, density: number = 0.5): number {
+  const baseMass = sampleKroupaMass(rng);
+  if (density <= 1.0) {
+    return baseMass;
+  }
+
+  const overflow = density - 1.0; // e.g. 1.0 for 200%, 2.0 for 300%
+
+  // Massive star / supernova progenitor chance surges with overdensity
+  // At 200% (overflow 1.0): ~42% heavy star chance; at 300% (overflow 2.0): ~72% heavy star chance!
+  const heavyRoll = rng.next();
+  const heavyStarChance = Math.min(0.82, 0.12 + overflow * 0.30);
+
+  if (heavyRoll < heavyStarChance) {
+    const u = rng.next();
+    // Heavy mass: 3.8 to 65.0+ M_sun (spawns O/B giants, and collapses to Neutron Stars & Black Holes)
+    const heavyMass = 3.8 + Math.pow(u, 1.2) * (18.0 + overflow * 22.0);
+    return +heavyMass.toFixed(3);
+  }
+
+  // All other stars receive an upward mass shift proportional to density overflow
+  const boosted = baseMass * (1.0 + overflow * 1.45);
+  return +boosted.toFixed(3);
+}
+
+/**
  * Generates a unique, procedural star name based on seed and coordinate
  */
 function generateStarName(col: number, row: number, rng: PRNG): string {
@@ -179,6 +212,8 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
   let gCount = 0;
   let kmCount = 0;
   let remnantCount = 0;
+  let multipleSystemCount = 0;
+  let heavyMassCount = 0;
 
   for (let c = 1; c <= config.columns; c++) {
     for (let r = 1; r <= config.rows; r++) {
@@ -198,8 +233,9 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       // Local PRNG dedicated to this specific system for reproducible parameter sampling
       const sysRng = new PRNG(seedFromId(systemId));
 
-      // 1. Progenitor system mass (sysMass in M_sun)
-      const mass = sampleKroupaMass(sysRng);
+      // 1. Progenitor system mass (sysMass in M_sun) with density overflow
+      const mass = sampleSystemMass(sysRng, config.density);
+      if (mass >= 3.0) heavyMassCount++;
 
       // 2. Age sample (clamped between 0.1 and 12.8 Gyr)
       const rawAge = config.meanAge + sysRng.nextGaussian(0, config.ageSigma);
@@ -212,6 +248,18 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
 
       const name = generateStarName(c, r, sysRng);
 
+      // Fun Rule: Densities > 100% trigger gravitational capture and high multiple-star systems
+      let forcedMult: 'auto' | '1' | '2' | '3' | '4' = 'auto';
+      if (config.density > 1.0) {
+        const multRoll = sysRng.next();
+        // At 200% (overflow 1.0): ~65% forced multiple; at 300%: ~88% forced multiple
+        const multChance = Math.min(0.90, 0.38 + (config.density - 1.0) * 0.26);
+        if (multRoll < multChance) {
+          const mPick = sysRng.next();
+          forcedMult = mPick < 0.40 ? '2' : mPick < 0.75 ? '3' : '4';
+        }
+      }
+
       // 4. CALL SYSTEM GENERATOR DIRECTLY WITH THE { age, mass, metallicity, id } TUPLE!
       const sysGenParams: StarGenParams = {
         sysMass: mass,
@@ -219,7 +267,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
         feh: metallicity,
         id: systemId,
         name,
-        forcedMult: 'auto',
+        forcedMult,
       };
       const sysResult = runRealisticGenerator(sysGenParams);
 
@@ -227,6 +275,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       const primaryStar = sysResult.hierarchy.stars[0];
       const companionStars = sysResult.hierarchy.stars.slice(1);
       const nStars = sysResult.hierarchy.stars.length;
+      if (nStars > 1) multipleSystemCount++;
       const archName = sysResult.hierarchy.archName;
 
       // Classify spectral type and remnant status from primary star
@@ -338,6 +387,8 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       gCount,
       kmCount,
       remnantCount,
+      multipleSystemCount,
+      heavyMassCount,
     },
   };
 }
