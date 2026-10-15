@@ -369,6 +369,52 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     [isEnteringSector, getHexCenter, onSelectSector]
   );
 
+  // Keyboard navigation: Page Down for lower view level (zooms into Sector), Page Up prevents scroll
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'PageDown' && e.code !== 'PageDown' && e.key !== 'PageUp' && e.code !== 'PageUp') return;
+
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (showConfigModal || showSavedGalaxiesModal || showImageModal) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === 'PageDown' || e.code === 'PageDown') {
+        const candidate =
+          hoveredSector ||
+          selectedSector ||
+          galaxyData.sectors.find((s) => s.col === 25 && s.row === 25) ||
+          galaxyData.sectors[0];
+
+        if (candidate) {
+          handleTriggerEnterSector(candidate);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    showConfigModal,
+    showSavedGalaxiesModal,
+    showImageModal,
+    hoveredSector,
+    selectedSector,
+    galaxyData.sectors,
+    handleTriggerEnterSector,
+  ]);
+
   // Pan handlers
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0 || isEnteringSector) return;
@@ -1332,12 +1378,16 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               <button
                 onClick={() => handleTriggerEnterSector(selectedSector)}
                 className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-mono text-xs font-bold uppercase tracking-wider transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer group"
+                title="Enter Sector Hex Map (Hotkey: Page Down)"
               >
                 <span>Enter Sector Hex Map (50&times;50)</span>
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                <kbd className="px-1.5 py-0.5 text-[9px] bg-slate-950/70 border border-slate-700/80 rounded text-slate-300 font-sans normal-case tracking-normal">
+                  PgDn
+                </kbd>
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform ml-1" />
               </button>
               <p className="text-[10px] text-slate-500 font-mono text-center -mt-2">
-                Double-clicking the hex on the galaxy map also opens it directly.
+                Hotkey: <strong className="text-slate-400">Page Down</strong> to zoom in &bull; Double-click hex opens directly
               </p>
 
               {/* Galactic Position & Region */}

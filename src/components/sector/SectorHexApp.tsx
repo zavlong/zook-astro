@@ -761,25 +761,71 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   };
 
   // Launch StarGen Lab
-  const handleLaunchSystemGenerator = (system: SectorHexSystem) => {
-    const systemEmpire = empireMap.get(system.id);
-    const params: StarGenParams = {
-      sysMass: system.mass,
-      age: system.age,
-      feh: system.metallicity,
-      id: system.id,
-      name: system.name,
-      forcedMult: 'auto',
-      sectorSeed: config.seed,
-      sectorColumns: config.columns,
-      sectorRows: config.rows,
-      empireId: systemEmpire?.id || activeEmpire?.id,
+  const handleLaunchSystemGenerator = useCallback(
+    (system: SectorHexSystem) => {
+      const systemEmpire = empireMap.get(system.id);
+      const params: StarGenParams = {
+        sysMass: system.mass,
+        age: system.age,
+        feh: system.metallicity,
+        id: system.id,
+        name: system.name,
+        forcedMult: 'auto',
+        sectorSeed: config.seed,
+        sectorColumns: config.columns,
+        sectorRows: config.rows,
+        empireId: systemEmpire?.id || activeEmpire?.id,
+      };
+      if (system.sysResult && !universeCache.hasCachedSystem(system.id)) {
+        universeCache.cacheLoadedSystem(system.id, system.sysResult);
+      }
+      onLaunchStarGen(params);
+    },
+    [empireMap, activeEmpire, config.seed, config.columns, config.rows, onLaunchStarGen]
+  );
+
+  // Keyboard navigation: Page Up for higher view level (Galaxy), Page Down for lower view level (System / StarGen)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'PageDown' && e.code !== 'PageDown' && e.key !== 'PageUp' && e.code !== 'PageUp') return;
+
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (showConfigModal || isEmpireModalOpen) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === 'PageUp' || e.code === 'PageUp') {
+        handleBackToGalaxyWithTransition();
+      } else if (e.key === 'PageDown' || e.code === 'PageDown') {
+        const targetSys = hoveredSystem || selectedSystem || gridData.systems[0];
+        if (targetSys) {
+          handleLaunchSystemGenerator(targetSys);
+        }
+      }
     };
-    if (system.sysResult && !universeCache.hasCachedSystem(system.id)) {
-      universeCache.cacheLoadedSystem(system.id, system.sysResult);
-    }
-    onLaunchStarGen(params);
-  };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    showConfigModal,
+    isEmpireModalOpen,
+    handleBackToGalaxyWithTransition,
+    hoveredSystem,
+    selectedSystem,
+    gridData.systems,
+    handleLaunchSystemGenerator,
+  ]);
 
   // ============================================================================
   // SCALE STAR RADIUS BY SQUARE ROOT OF PHYSICAL RADIUS (R_sun)
@@ -1034,10 +1080,13 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           <button
             onClick={handleBackToGalaxyWithTransition}
             className="px-2.5 py-1.5 rounded-xl bg-indigo-950/90 hover:bg-indigo-900 text-indigo-200 border border-indigo-700/80 flex items-center gap-1.5 cursor-pointer transition shadow text-xs font-mono font-bold group"
-            title="Return to 50x50 Galaxy Sector Map"
+            title="Return to 50x50 Galaxy Sector Map (Hotkey: Page Up)"
           >
             <span className="group-hover:-translate-x-0.5 transition-transform">&larr;</span>
             <span>Galaxy Map</span>
+            <kbd className="px-1.5 py-0.5 text-[9px] bg-slate-900/90 border border-indigo-500/50 rounded text-indigo-300 font-sans font-normal ml-0.5">
+              PgUp
+            </kbd>
           </button>
         )}
 
@@ -2718,9 +2767,13 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 <button
                   onClick={() => handleLaunchSystemGenerator(selectedSystem)}
                   className="w-full mt-3 py-2.5 px-3 rounded-lg bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-mono font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 border border-emerald-400/40 transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+                  title="Launch StarGen Lab with this System (Hotkey: Page Down)"
                 >
                   <Atom className="w-4 h-4 animate-spin-slow" />
-                  <span>Launch StarGen Lab with this System &rarr;</span>
+                  <span>Launch StarGen Lab &rarr;</span>
+                  <kbd className="px-1.5 py-0.5 text-[9px] bg-slate-950/70 border border-emerald-400/50 rounded text-emerald-200 font-sans font-normal ml-1">
+                    PgDn
+                  </kbd>
                 </button>
               </div>
 

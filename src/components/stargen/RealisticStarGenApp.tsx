@@ -378,6 +378,38 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedEntity, showJsonModal]);
 
+  // Keyboard navigation: Page Up for higher view level (Sector Hex Map), Page Down already at System
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'PageDown' && e.code !== 'PageDown' && e.key !== 'PageUp' && e.code !== 'PageUp') return;
+
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (selectedEntity || showJsonModal) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === 'PageUp' || e.code === 'PageUp') {
+        if (onBackToSectorHex) {
+          onBackToSectorHex();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedEntity, showJsonModal, onBackToSectorHex]);
+
   const handleParamChange = (
     newLogMass: number,
     newAge: number,
@@ -2940,9 +2972,12 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                 type="button"
                 onClick={onBackToSectorHex}
                 className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-950/80 hover:bg-indigo-900 text-indigo-200 border border-indigo-700 flex items-center gap-1.5 cursor-pointer transition shadow"
-                title="Return to Sector Hex Grid"
+                title="Return to Sector Hex Grid (Hotkey: Page Up)"
               >
                 <span>&larr; Back to Sector Hex Map</span>
+                <kbd className="px-1.5 py-0.5 text-[9px] bg-slate-900/90 border border-indigo-500/50 rounded text-indigo-300 font-sans font-normal ml-0.5">
+                  PgUp
+                </kbd>
               </button>
             )}
             <h1 className="text-sm md:text-base font-bold text-white flex items-center gap-2">

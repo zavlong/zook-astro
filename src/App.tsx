@@ -119,6 +119,56 @@ export const App: React.FC = () => {
   const [selectedPlanetIndex, setSelectedPlanetIndex] = useState<number>(0);
   const [activeFilter, setActiveFilter] = useState<FilterCategory>('all');
 
+  // View level hotkeys: Page Up for higher view level (System -> Sector -> Galaxy), Page Down for lower view level
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (e.key === 'PageUp' || e.code === 'PageUp') {
+        if (activeApp === 'sector-3d') {
+          e.preventDefault();
+          handleBackToGalaxy();
+        } else if (activeApp === 'astro-architect') {
+          e.preventDefault();
+          setActiveApp('sector-hex');
+        } else if (activeApp === 'home') {
+          e.preventDefault();
+          setActiveApp('galaxy-gen');
+        }
+      } else if (e.key === 'PageDown' || e.code === 'PageDown') {
+        if (activeApp === 'sector-3d') {
+          e.preventDefault();
+          if (selectedStar) {
+            setStarGenInitialParams({
+              sysMass: selectedStar.progenitorMass,
+              age: selectedStar.starState.ageGyr,
+              feh: selectedStar.metallicityDex ?? 0.0,
+              id: String(selectedStar.id),
+              name: selectedStar.name,
+              forcedMult: 'auto',
+            });
+            setActiveApp('stargen-lab');
+          }
+        } else if (activeApp === 'home') {
+          e.preventDefault();
+          setActiveApp('galaxy-gen');
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeApp, selectedStar]);
+
   // Resizable 3-column layout hook for 3D Sector Sim
   const { colWidths, mainContainerRef, startDrag, resetColWidths } = useResizableColumns();
 
