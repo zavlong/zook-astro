@@ -16,6 +16,8 @@ import {
   Home,
   Image as ImageIcon,
   Undo2,
+  Hexagon,
+  Tag,
 } from 'lucide-react';
 import {
   GalaxyConfig,
@@ -77,6 +79,10 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   // Search input & Copy feedback
   const [searchCoord, setSearchCoord] = useState<string>('');
   const [copiedId, setCopiedId] = useState<boolean>(false);
+
+  // Viewport visibility toggles
+  const [showHexBoundaries, setShowHexBoundaries] = useState<boolean>(true);
+  const [showLabels, setShowLabels] = useState<boolean>(true);
 
   // Sync draft when config changes
   useEffect(() => {
@@ -743,31 +749,33 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                     />
 
                     {/* Atmospheric Fuzzy Hex Border */}
-                    <polygon
-                      points={hexPoints}
-                      fill="none"
-                      stroke={
-                        isSelected
-                          ? '#38bdf8'
-                          : isCore
-                          ? '#f59e0b'
-                          : sector.density > 1.5
-                          ? 'rgba(255, 255, 255, 0.70)'
-                          : sector.density > 1.0
-                          ? 'rgba(255, 255, 255, 0.40)'
-                          : sector.density > 0.35
-                          ? 'rgba(255, 255, 255, 0.22)'
-                          : sector.density > 0.04
-                          ? 'rgba(148, 163, 184, 0.12)'
-                          : 'transparent'
-                      }
-                      strokeWidth={isSelected ? 3.0 : isCore ? 2.4 : sector.density > 1.2 ? 2.2 : 1.6}
-                      strokeLinejoin="round"
-                      strokeLinecap="round"
-                      filter="url(#fuzzyBorder)"
-                      opacity={isSelected ? 1.0 : 0.85}
-                      className="transition-colors duration-150"
-                    />
+                    {showHexBoundaries && (
+                      <polygon
+                        points={hexPoints}
+                        fill="none"
+                        stroke={
+                          isSelected
+                            ? '#38bdf8'
+                            : isCore
+                            ? '#f59e0b'
+                            : sector.density > 1.5
+                            ? 'rgba(255, 255, 255, 0.70)'
+                            : sector.density > 1.0
+                            ? 'rgba(255, 255, 255, 0.40)'
+                            : sector.density > 0.35
+                            ? 'rgba(255, 255, 255, 0.22)'
+                            : sector.density > 0.04
+                            ? 'rgba(148, 163, 184, 0.12)'
+                            : 'transparent'
+                        }
+                        strokeWidth={isSelected ? 3.0 : isCore ? 2.4 : sector.density > 1.2 ? 2.2 : 1.6}
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                        filter="url(#fuzzyBorder)"
+                        opacity={isSelected ? 1.0 : 0.85}
+                        className="transition-colors duration-150"
+                      />
+                    )}
 
                     {/* Giant Star Systems Dots (Mass 10-50 M☉, count = floor(density% / 10)) */}
                     {sector.giantStars && sector.giantStars.length > 0 && sector.giantStars.map((star) => (
@@ -823,7 +831,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                     )}
 
                     {/* LOD Text: Coordinates visible when zoomed in */}
-                    {zoom >= 0.38 && (
+                    {showLabels && zoom >= 0.38 && (
                       <text
                         y={zoom >= 0.8 ? -4 : 3}
                         textAnchor="middle"
@@ -844,7 +852,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                     )}
 
                     {/* Detailed Density / System Badge when zoomed in close */}
-                    {zoom >= 0.85 && (
+                    {showLabels && zoom >= 0.85 && (
                       <text
                         y={8}
                         textAnchor="middle"
@@ -896,6 +904,36 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
             <span className="px-2 text-[10px] text-slate-400 font-mono">
               {Math.round(zoom * 100)}%
             </span>
+
+            <div className="h-4 w-px bg-slate-800 mx-1" />
+
+            {/* Toggle Hex Boundaries */}
+            <button
+              onClick={() => setShowHexBoundaries((v) => !v)}
+              className={`px-2 py-1 rounded-lg transition cursor-pointer flex items-center gap-1.5 text-[10px] ${
+                showHexBoundaries
+                  ? 'text-cyan-300 bg-cyan-950/70 border border-cyan-800/80 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900 border border-transparent'
+              }`}
+              title="Toggle Hex Grid Boundaries (Fuzzy borders)"
+            >
+              <Hexagon className="w-3.5 h-3.5" />
+              <span>Boundaries</span>
+            </button>
+
+            {/* Toggle Labels */}
+            <button
+              onClick={() => setShowLabels((v) => !v)}
+              className={`px-2 py-1 rounded-lg transition cursor-pointer flex items-center gap-1.5 text-[10px] ${
+                showLabels
+                  ? 'text-cyan-300 bg-cyan-950/70 border border-cyan-800/80 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900 border border-transparent'
+              }`}
+              title="Toggle Sector Coordinates & Density Labels"
+            >
+              <Tag className="w-3.5 h-3.5" />
+              <span>Labels</span>
+            </button>
 
             {/* Photo Backdrop Opacity Slider */}
             {bgImageUrl && (

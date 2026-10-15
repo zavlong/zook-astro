@@ -22,6 +22,7 @@ import {
   Trash2,
   Download,
   Upload,
+  Tag,
 } from 'lucide-react';
 import {
   SectorHexConfig,
@@ -223,8 +224,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   // Copied state
   const [copiedId, setCopiedId] = useState<boolean>(false);
 
-  // Hyperlanes visibility toggle
+  // Hyperlanes & visibility toggles
   const [showHyperlanes, setShowHyperlanes] = useState<boolean>(true);
+  const [showHexBoundaries, setShowHexBoundaries] = useState<boolean>(true);
+  const [showLabels, setShowLabels] = useState<boolean>(true);
 
   // Total bounds of the sector space
   const gridBoundingSize = useMemo(() => {
@@ -1496,7 +1499,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                           ? '#38bdf8'
                           : isHovered
                           ? '#7dd3fc'
-                          : 'rgba(100, 116, 139, 0.22)'
+                          : showHexBoundaries
+                          ? 'rgba(100, 116, 139, 0.22)'
+                          : 'transparent'
                       }
                       strokeWidth={systemEmpire ? (isSelected || isHovered ? 1.5 : 1.0) : 0.8}
                       strokeDasharray="2,3"
@@ -1529,7 +1534,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                           ? 'rgba(14, 165, 233, 0.22)'
                           : isHovered
                           ? 'rgba(56, 189, 248, 0.12)'
-                          : 'rgba(15, 23, 42, 0.50)'
+                          : showHexBoundaries
+                          ? 'rgba(15, 23, 42, 0.50)'
+                          : 'rgba(15, 23, 42, 0.08)'
                       }
                       stroke={
                         systemEmpire
@@ -1538,7 +1545,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                           ? '#38bdf8'
                           : isHovered
                           ? '#7dd3fc'
-                          : 'rgba(148, 163, 184, 0.35)'
+                          : showHexBoundaries
+                          ? 'rgba(148, 163, 184, 0.35)'
+                          : 'transparent'
                       }
                       strokeWidth={
                         systemEmpire
@@ -1597,7 +1606,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     )}
 
                     {/* Coordinate / Catalog Label at top of zone - revealed only on mouse over or click/selection */}
-                    {(isSelected || isHovered) && zoom >= 0.26 && (
+                    {showLabels && (isSelected || isHovered) && zoom >= 0.26 && (
                       <text
                         y={-system.influenceRadius - 6}
                         textAnchor="middle"
@@ -1616,7 +1625,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     )}
 
                     {/* Star System Name (only label shown by default on star hexes) */}
-                    {zoom >= 0.30 && (
+                    {showLabels && zoom >= 0.30 && (
                       <text
                         y={system.influenceRadius + 13}
                         textAnchor="middle"
@@ -1733,6 +1742,31 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               >
                 <Route className="w-3.5 h-3.5" />
                 <span>Lanes {showHyperlanes ? 'ON' : 'OFF'}</span>
+              </button>
+              <div className="w-[1px] h-3.5 bg-slate-800 mx-0.5" />
+              <button
+                onClick={() => setShowHexBoundaries((v) => !v)}
+                className={`px-2 py-1 hover:bg-slate-800 rounded text-[10.5px] transition flex items-center gap-1 ${
+                  showHexBoundaries
+                    ? 'text-cyan-400 bg-cyan-950/40 border border-cyan-800/60'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+                title="Toggle System Influence Boundaries"
+              >
+                <Hexagon className="w-3.5 h-3.5" />
+                <span>Boundaries</span>
+              </button>
+              <button
+                onClick={() => setShowLabels((v) => !v)}
+                className={`px-2 py-1 hover:bg-slate-800 rounded text-[10.5px] transition flex items-center gap-1 ${
+                  showLabels
+                    ? 'text-cyan-400 bg-cyan-950/40 border border-cyan-800/60'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+                title="Toggle Star System & Coordinate Labels"
+              >
+                <Tag className="w-3.5 h-3.5" />
+                <span>Labels</span>
               </button>
               <span className="text-[10px] text-slate-500 pl-1">
                 {Math.round(zoom * 100)}%
