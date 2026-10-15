@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import {
   FilterCategory,
   SectorConfiguration,
@@ -24,6 +25,32 @@ import { GalaxySectorHex } from './core/generation/galaxyGen';
 import { SectorHexConfig } from './core/generation/sectorHex';
 
 export const App: React.FC = () => {
+  // Global HUD UI toggle state (Off by default for full-screen edge-to-edge immersion)
+  const [showUI, setShowUI] = useState<boolean>(false);
+
+  // Global hotkey 'u' or 'h' toggles the UI
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (e.key === 'u' || e.key === 'U' || e.key === 'h' || e.key === 'H') {
+        setShowUI((prev) => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Application mode starts at the sensational homepage showcase
   const [activeApp, setActiveApp] = useState<ActiveAppMode>('home');
   const [architectInitialSystem, setArchitectInitialSystem] =
@@ -171,35 +198,68 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col p-2 gap-2 bg-[#03050c] overflow-hidden">
-      {/* Top Header Command Bar */}
-      <Header
-        stars={stars}
-        activeFilter={activeFilter}
-        onFilterChange={setActiveFilter}
-        onRandomTarget={handleRandomTarget}
-        starCount={config.starCount}
-        morphologyLabel={morphologyLabels[config.morphology] || 'Sector'}
-        activeApp={activeApp}
-        onSelectApp={setActiveApp}
-      />
+    <div className={`h-screen w-screen flex flex-col ${showUI ? 'p-2 gap-2' : 'p-0 gap-0'} bg-[#03050c] overflow-hidden relative`}>
+      {/* Universal Floating HUD Toggle Button */}
+      <button
+        type="button"
+        onClick={() => setShowUI((v) => !v)}
+        className={`fixed top-3 right-3 z-50 px-2.5 py-1.5 rounded-xl border backdrop-blur-md shadow-2xl flex items-center gap-2 text-xs font-mono transition cursor-pointer select-none ${
+          showUI
+            ? 'bg-slate-950/85 hover:bg-slate-900 border-slate-700/80 text-slate-300 hover:text-white'
+            : 'bg-slate-950/65 hover:bg-slate-900/90 border-slate-800/80 text-slate-400 hover:text-cyan-300 opacity-80 hover:opacity-100 shadow-cyan-950/40'
+        }`}
+        title="Toggle User Interface (Hotkey: U or H)"
+      >
+        {showUI ? (
+          <>
+            <EyeOff className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Hide UI</span>
+            <kbd className="px-1 py-0.5 text-[9px] bg-slate-800 rounded text-slate-300 border border-slate-700 font-sans">
+              U
+            </kbd>
+          </>
+        ) : (
+          <>
+            <Eye className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">Show UI</span>
+            <kbd className="px-1 py-0.5 text-[9px] bg-slate-800/80 rounded text-slate-400 border border-slate-700 font-sans">
+              U
+            </kbd>
+          </>
+        )}
+      </button>
+
+      {/* Top Header Command Bar (Visible when UI is ON) */}
+      {showUI && (
+        <Header
+          stars={stars}
+          activeFilter={activeFilter}
+          onFilterChange={setActiveFilter}
+          onRandomTarget={handleRandomTarget}
+          starCount={config.starCount}
+          morphologyLabel={morphologyLabels[config.morphology] || 'Sector'}
+          activeApp={activeApp}
+          onSelectApp={setActiveApp}
+        />
+      )}
 
       {/* Main Multi-App Viewport */}
       {activeApp === 'home' ? (
-        <main className="w-full flex-1 min-h-0 relative rounded-xl overflow-hidden glass-hud border border-slate-800/80">
+        <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
           <ShowcaseHome onSelectApp={setActiveApp} />
         </main>
       ) : activeApp === 'galaxy-gen' ? (
-        <main className="w-full flex-1 min-h-0 relative rounded-xl overflow-hidden glass-hud border border-slate-800/80">
+        <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
           <GalaxyGenApp
             onSelectSector={handleSelectGalaxySector}
             onGoHome={() => setActiveApp('home')}
             initialSelectedCoord={lastGalaxySector?.coord}
             returnTransition={returnToGalaxyTransition}
+            showUI={showUI}
           />
         </main>
       ) : activeApp === 'sector-hex' ? (
-        <main className="w-full flex-1 min-h-0 relative rounded-xl overflow-hidden glass-hud border border-slate-800/80">
+        <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
           <SectorHexApp
             initialConfig={sectorInitialConfig}
             onBackToGalaxy={handleBackToGalaxy}
@@ -207,6 +267,7 @@ export const App: React.FC = () => {
               setStarGenInitialParams(params);
               setActiveApp('stargen-lab');
             }}
+            showUI={showUI}
           />
         </main>
       ) : activeApp === 'sector-3d' ? (
@@ -215,35 +276,39 @@ export const App: React.FC = () => {
           className="w-full flex-1 flex flex-row gap-0 min-h-0 relative overflow-hidden select-none"
         >
           {/* SEC-02: LEFT PANEL - Sector Controls */}
-          <div
-            style={{ width: `${colWidths.left}%` }}
-            className="h-full flex flex-col min-w-[210px] flex-shrink-0"
-          >
-            <SectorControls
-              config={config}
-              onChangeConfig={(newCfg) => {
-                setConfig(newCfg);
-                handleRegenerate(newCfg);
-              }}
-              onRegenerate={() => handleRegenerate(config)}
-              onNewSeed={handleNewSeed}
-            />
-          </div>
+          {showUI && (
+            <div
+              style={{ width: `${colWidths.left}%` }}
+              className="h-full flex flex-col min-w-[210px] flex-shrink-0"
+            >
+              <SectorControls
+                config={config}
+                onChangeConfig={(newCfg) => {
+                  setConfig(newCfg);
+                  handleRegenerate(newCfg);
+                }}
+                onRegenerate={() => handleRegenerate(config)}
+                onNewSeed={handleNewSeed}
+              />
+            </div>
+          )}
 
           {/* DRAGGABLE RESIZE DIVIDER 1 */}
-          <div
-            onMouseDown={() => startDrag('left')}
-            onDoubleClick={resetColWidths}
-            title="Drag horizontally to resize Left & Center panels • Double-click to reset"
-            className="w-2 hover:w-2.5 h-full cursor-col-resize flex items-center justify-center group z-30 transition-all flex-shrink-0 px-0.5"
-          >
-            <div className="w-1 h-12 bg-slate-700/80 group-hover:bg-cyan-400 group-hover:h-20 group-hover:w-1.5 rounded-full transition-all shadow-sm" />
-          </div>
+          {showUI && (
+            <div
+              onMouseDown={() => startDrag('left')}
+              onDoubleClick={resetColWidths}
+              title="Drag horizontally to resize Left & Center panels • Double-click to reset"
+              className="w-2 hover:w-2.5 h-full cursor-col-resize flex items-center justify-center group z-30 transition-all flex-shrink-0 px-0.5"
+            >
+              <div className="w-1 h-12 bg-slate-700/80 group-hover:bg-cyan-400 group-hover:h-20 group-hover:w-1.5 rounded-full transition-all shadow-sm" />
+            </div>
+          )}
 
           {/* SEC-03: CENTER PANEL - 3D Three.js Interactive Sector Canvas */}
           <section
-            style={{ width: `${colWidths.center}%` }}
-            className="h-full flex-1 rounded-xl glass-hud border border-slate-800/80 flex flex-col relative overflow-hidden min-w-[240px]"
+            style={{ width: showUI ? `${colWidths.center}%` : '100%' }}
+            className={`h-full flex-1 ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'} flex flex-col relative overflow-hidden min-w-[240px]`}
           >
             <SectorView3D
               stars={stars}
@@ -258,30 +323,34 @@ export const App: React.FC = () => {
           </section>
 
           {/* DRAGGABLE RESIZE DIVIDER 2 */}
-          <div
-            onMouseDown={() => startDrag('right')}
-            onDoubleClick={resetColWidths}
-            title="Drag horizontally to resize Center & Right panels • Double-click to reset"
-            className="w-2 hover:w-2.5 h-full cursor-col-resize flex items-center justify-center group z-30 transition-all flex-shrink-0 px-0.5"
-          >
-            <div className="w-1 h-12 bg-slate-700/80 group-hover:bg-cyan-400 group-hover:h-20 group-hover:w-1.5 rounded-full transition-all shadow-sm" />
-          </div>
+          {showUI && (
+            <div
+              onMouseDown={() => startDrag('right')}
+              onDoubleClick={resetColWidths}
+              title="Drag horizontally to resize Center & Right panels • Double-click to reset"
+              className="w-2 hover:w-2.5 h-full cursor-col-resize flex items-center justify-center group z-30 transition-all flex-shrink-0 px-0.5"
+            >
+              <div className="w-1 h-12 bg-slate-700/80 group-hover:bg-cyan-400 group-hover:h-20 group-hover:w-1.5 rounded-full transition-all shadow-sm" />
+            </div>
+          )}
 
           {/* SEC-04 through SEC-09: RIGHT PANEL - Deep Stellar & Planetary System Inspector */}
-          <div
-            style={{ width: `${colWidths.right}%` }}
-            className="h-full flex flex-col min-w-[280px] flex-shrink-0"
-          >
-            <StellarInspector
-              selectedStar={selectedStar}
-              onScrubProgress={handleScrubProgress}
-              selectedPlanetIndex={selectedPlanetIndex}
-              onSelectPlanet={setSelectedPlanetIndex}
-            />
-          </div>
+          {showUI && (
+            <div
+              style={{ width: `${colWidths.right}%` }}
+              className="h-full flex flex-col min-w-[280px] flex-shrink-0"
+            >
+              <StellarInspector
+                selectedStar={selectedStar}
+                onScrubProgress={handleScrubProgress}
+                selectedPlanetIndex={selectedPlanetIndex}
+                onSelectPlanet={setSelectedPlanetIndex}
+              />
+            </div>
+          )}
         </main>
       ) : activeApp === 'stargen-lab' ? (
-        <main className="w-full flex-1 min-h-0 relative rounded-xl overflow-hidden glass-hud border border-slate-800/80">
+        <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
           <RealisticStarGenApp
             initialParams={starGenInitialParams}
             onBackToSectorHex={() => setActiveApp('sector-hex')}
@@ -295,15 +364,17 @@ export const App: React.FC = () => {
               setSelectedPlanetIndex(0);
               setActiveApp('sector-3d');
             }}
+            showUI={showUI}
           />
         </main>
       ) : (
-        <main className="w-full flex-1 min-h-0 relative rounded-xl overflow-hidden glass-hud border border-slate-800/80">
+        <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
           <AstroArchitectApp
             onBackToSectorSim={() => setActiveApp('sector-3d')}
             onGoHome={() => setActiveApp('home')}
             initialSystem={architectInitialSystem}
             onOpenStarGenLab={() => setActiveApp('stargen-lab')}
+            showUI={showUI}
           />
         </main>
       )}

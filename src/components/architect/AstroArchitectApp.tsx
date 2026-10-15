@@ -23,6 +23,7 @@ interface Props {
   onGoHome: () => void;
   initialSystem?: ArchitectSystem | null;
   onOpenStarGenLab?: () => void;
+  showUI?: boolean;
 }
 
 export const AstroArchitectApp: React.FC<Props> = ({
@@ -30,6 +31,7 @@ export const AstroArchitectApp: React.FC<Props> = ({
   onGoHome,
   initialSystem,
   onOpenStarGenLab,
+  showUI = false,
 }) => {
   // Application State
   const [galaxySystems, setGalaxySystems] = useState<GalaxySystemNode[]>(INITIAL_GALAXY_SYSTEMS);
@@ -307,11 +309,13 @@ export const AstroArchitectApp: React.FC<Props> = ({
   return (
     <div className="w-full h-full flex flex-row overflow-hidden bg-[#03050c] select-none text-slate-200">
       {/* LEFT PANEL: Resizable System Architect & Hierarchy Editor */}
-      <aside
-        ref={sidebarContainerRef}
-        style={{ width: `${sidebarWidth}px` }}
-        className="h-full flex flex-col flex-shrink-0 bg-slate-950/95 border-r border-slate-800/80 z-20 shadow-2xl overflow-hidden"
-      >
+      {showUI && (
+        <>
+        <aside
+          ref={sidebarContainerRef}
+          style={{ width: `${sidebarWidth}px` }}
+          className="h-full flex flex-col flex-shrink-0 bg-slate-950/95 border-r border-slate-800/80 z-20 shadow-2xl overflow-hidden"
+        >
         {/* Header Bar */}
         <div className="p-3 border-b border-slate-800/80 flex items-center justify-between gap-2 bg-slate-900/60">
           <div className="flex items-center gap-2">
@@ -963,11 +967,14 @@ export const AstroArchitectApp: React.FC<Props> = ({
       >
         <div className="w-1 h-16 bg-slate-700/80 group-hover:bg-amber-400 group-hover:h-24 group-hover:w-1.5 rounded-full transition-all shadow-md" />
       </div>
+      </>
+      )}
 
       {/* RIGHT VIEWPORT: 3D Three.js Interactive Galaxy & Orrery Canvas */}
       <main className="flex-1 h-full flex flex-col relative overflow-hidden">
         {/* Top 3D Control Ribbon */}
-        <div className="h-11 px-4 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md flex items-center justify-between z-10 font-mono text-xs">
+        {showUI && (
+          <div className="h-11 px-4 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md flex items-center justify-between z-10 font-mono text-xs">
           {/* Mode Switcher */}
           <div className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-lg border border-slate-800">
             <button
@@ -1060,6 +1067,7 @@ export const AstroArchitectApp: React.FC<Props> = ({
             </div>
           </div>
         </div>
+        )}
 
         {/* 3D Viewport Component */}
         <div className="flex-1 w-full relative">

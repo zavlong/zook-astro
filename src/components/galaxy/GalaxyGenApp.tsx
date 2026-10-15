@@ -41,6 +41,7 @@ interface GalaxyGenAppProps {
   initialConfig?: Partial<GalaxyConfig>;
   initialSelectedCoord?: string | null;
   returnTransition?: boolean;
+  showUI?: boolean;
 }
 
 interface MorphologyOption {
@@ -65,6 +66,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   initialConfig,
   initialSelectedCoord,
   returnTransition,
+  showUI = false,
 }) => {
   // Galaxy configuration state initialized from persistent cache or initialConfig
   const [config, setConfig] = useState<GalaxyConfig>(() => {
@@ -557,7 +559,8 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
       {/* ============================================================================ */}
       {/* TOP COMMAND BAR                                                              */}
       {/* ============================================================================ */}
-      <div className="w-full px-4 py-2.5 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 z-20">
+      {showUI && (
+        <div className="w-full px-4 py-2.5 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 z-20">
         {/* Left: Branding & Core Stats */}
         <div className="flex items-center gap-3">
           {onGoHome && (
@@ -708,6 +711,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
           </button>
         </div>
       </div>
+      )}
 
       {/* ============================================================================ */}
       {/* MAIN VIEWPORT: 50x50 HEX GALAXY MAP + SECTOR INSPECTOR                       */}
@@ -1050,7 +1054,8 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
           </svg>
 
           {/* Viewport Floating Zoom & Fit Controls */}
-          <div className="absolute bottom-5 left-5 flex items-center gap-1.5 bg-slate-950/85 backdrop-blur-md p-1.5 rounded-xl border border-slate-800 text-xs font-mono shadow-xl z-10">
+          {showUI && (
+            <div className="absolute bottom-5 left-5 flex items-center gap-1.5 bg-slate-950/85 backdrop-blur-md p-1.5 rounded-xl border border-slate-800 text-xs font-mono shadow-xl z-10">
             <button
               onClick={() => {
                 if (zoom >= 2.05 && selectedSector) {
@@ -1160,6 +1165,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               </>
             )}
           </div>
+          )}
 
           {/* High Zoom Threshold Indicator Pill */}
           {zoom >= 1.6 && selectedSector && !isEnteringSector && (
@@ -1208,38 +1214,41 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
           )}
 
           {/* Color & Opacity Astrophysics Legend Overlay */}
-          <div className="absolute top-4 left-4 bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-xl border border-slate-800 text-[10px] font-mono shadow-lg pointer-events-none hidden sm:block">
-            <div className="text-slate-400 font-bold mb-1 uppercase tracking-wider flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-cyan-400" />
-              <span>Astrophysical Color Scale</span>
+          {showUI && (
+            <div className="absolute top-4 left-4 bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-xl border border-slate-800 text-[10px] font-mono shadow-lg pointer-events-none hidden sm:block">
+              <div className="text-slate-400 font-bold mb-1 uppercase tracking-wider flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                <span>Astrophysical Color Scale</span>
+              </div>
+              <div className="flex items-center gap-1 mb-1.5">
+                <span className="w-3 h-2 rounded-sm bg-[#00d2ff]" />
+                <span className="w-3 h-2 rounded-sm bg-[#38bdf8]" />
+                <span className="w-3 h-2 rounded-sm bg-[#60a5fa]" />
+                <span className="w-3 h-2 rounded-sm bg-[#facc15]" />
+                <span className="w-3 h-2 rounded-sm bg-[#fb923c]" />
+                <span className="w-3 h-2 rounded-sm bg-[#ef4444]" />
+                <span className="w-3 h-2 rounded-sm bg-[#dc2626]" />
+              </div>
+              <div className="flex justify-between text-[9px] text-slate-500">
+                <span className="text-cyan-300 font-bold">Young (Blue)</span>
+                <span className="text-amber-300 font-bold">Old (Red)</span>
+              </div>
+              <div className="text-[9px] text-slate-400 mt-1 border-t border-slate-800/80 pt-1 space-y-0.5">
+                <div>Opacity: <strong className="text-slate-200">Dense</strong> (Opaque) &rarr; <strong className="text-slate-500">Sparse</strong> (Transparent)</div>
+                <div>Overdensity (&gt;100%): <strong className="text-white">Desaturates to white</strong> &bull; Mass &amp; Remnant overflow</div>
+              </div>
             </div>
-            <div className="flex items-center gap-1 mb-1.5">
-              <span className="w-3 h-2 rounded-sm bg-[#00d2ff]" />
-              <span className="w-3 h-2 rounded-sm bg-[#38bdf8]" />
-              <span className="w-3 h-2 rounded-sm bg-[#60a5fa]" />
-              <span className="w-3 h-2 rounded-sm bg-[#facc15]" />
-              <span className="w-3 h-2 rounded-sm bg-[#fb923c]" />
-              <span className="w-3 h-2 rounded-sm bg-[#ef4444]" />
-              <span className="w-3 h-2 rounded-sm bg-[#dc2626]" />
-            </div>
-            <div className="flex justify-between text-[9px] text-slate-500">
-              <span className="text-cyan-300 font-bold">Young (Blue)</span>
-              <span className="text-amber-300 font-bold">Old (Red)</span>
-            </div>
-            <div className="text-[9px] text-slate-400 mt-1 border-t border-slate-800/80 pt-1 space-y-0.5">
-              <div>Opacity: <strong className="text-slate-200">Dense</strong> (Opaque) &rarr; <strong className="text-slate-500">Sparse</strong> (Transparent)</div>
-              <div>Overdensity (&gt;100%): <strong className="text-white">Desaturates to white</strong> &bull; Mass &amp; Remnant overflow</div>
-            </div>
-          </div>
+          )}
         </div>
 
         {/* ============================================================================ */}
         {/* RIGHT SECTOR INSPECTOR PANEL                                                 */}
         {/* ============================================================================ */}
-        <aside
-          style={{ containIntrinsicSize: 'auto 380px' }}
-          className="w-80 md:w-96 h-full flex flex-col bg-slate-950/95 backdrop-blur-xl border-l border-slate-800/90 z-10 overflow-y-auto"
-        >
+        {showUI && (
+          <aside
+            style={{ containIntrinsicSize: 'auto 380px' }}
+            className="w-80 md:w-96 h-full flex flex-col bg-slate-950/95 backdrop-blur-xl border-l border-slate-800/90 z-10 overflow-y-auto"
+          >
           {selectedSector ? (
             <div className="p-4 flex flex-col gap-4">
               {/* Sector Header Card */}
@@ -1490,6 +1499,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
             </div>
           )}
         </aside>
+        )}
       </div>
 
       {/* ============================================================================ */}

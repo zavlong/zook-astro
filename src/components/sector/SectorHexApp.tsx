@@ -57,6 +57,7 @@ interface SectorHexAppProps {
   onLaunchStarGen: (params: StarGenParams) => void;
   onBackToGalaxy?: () => void;
   initialConfig?: Partial<SectorHexConfig> | null;
+  showUI?: boolean;
 }
 
 export type SectorFilterCategory =
@@ -148,6 +149,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   onLaunchStarGen,
   onBackToGalaxy,
   initialConfig,
+  showUI = false,
 }) => {
   // Sector Configuration state initialized with initialConfig if provided, or last saved sector
   const [config, setConfig] = useState<SectorHexConfig>(() => {
@@ -996,7 +998,8 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       {/* ============================================================================ */}
       {/* TOP COMMAND & SECTOR CONFIGURATION TOOLBAR                                   */}
       {/* ============================================================================ */}
-      <div className="w-full px-4 py-2.5 bg-slate-950/85 backdrop-blur-md border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 z-20">
+      {showUI && (
+        <div className="w-full px-4 py-2.5 bg-slate-950/85 backdrop-blur-md border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 z-20">
         {/* Back to Galaxy Map button if opened from GalaxyGen */}
         {onBackToGalaxy && (
           <button
@@ -1134,6 +1137,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           </button>
         </div>
       </div>
+      )}
 
       {/* ============================================================================ */}
       {/* GRID SIZE, DENSITY, AGE & METALLICITY CUSTOMIZATION MODAL (UP TO 100x100!)   */}
@@ -2045,9 +2049,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           </svg>
 
           {/* Bottom Left Floating Navigation & View Controls */}
-          <div className="absolute bottom-4 left-4 flex flex-col gap-2 z-10 pointer-events-auto">
-            {/* Spectral Filter Chips Bar */}
-            <div className="flex items-center gap-1 bg-slate-950/90 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-slate-800 shadow-xl text-xs font-mono">
+          {showUI && (
+            <div className="absolute bottom-4 left-4 flex flex-col gap-2 z-10 pointer-events-auto">
+              {/* Spectral Filter Chips Bar */}
+              <div className="flex items-center gap-1 bg-slate-950/90 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-slate-800 shadow-xl text-xs font-mono">
               <span className="text-[10px] text-slate-500 uppercase mr-1 flex items-center gap-1">
                 <Filter className="w-3 h-3 text-cyan-400" /> Filter:
               </span>
@@ -2316,6 +2321,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               </span>
             </div>
           </div>
+          )}
 
           {/* Low Zoom Indicator Pill to Return to Galaxy */}
           {zoom <= 0.10 && onBackToGalaxy && !isExitingToGalaxy && (
@@ -2359,7 +2365,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           )}
 
           {/* Active Empire Floating Realm Bar */}
-          {empires.length > 0 && !isSpawnEmpireMode && (
+          {showUI && empires.length > 0 && !isSpawnEmpireMode && (
             <div className="absolute top-4 right-4 bg-slate-950/90 backdrop-blur-md border border-slate-800/90 px-3 py-2 rounded-2xl text-xs font-mono shadow-2xl z-20 flex items-center gap-3 pointer-events-auto">
               {/* Empire Color & Icon */}
               <div
@@ -2513,10 +2519,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
         {/* ============================================================================ */}
         {/* RIGHT SIDEBAR: DEEP HEX SYSTEM INSPECTOR & TUPLET LAUNCHER                   */}
         {/* ============================================================================ */}
-        <div
-          className="w-[380px] h-full flex flex-col bg-slate-950/95 border-l border-slate-800 flex-shrink-0 z-10 overflow-y-auto"
-          style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 380px auto 800px' }}
-        >
+        {showUI && (
+          <div
+            className="w-[380px] h-full flex flex-col bg-slate-950/95 border-l border-slate-800 flex-shrink-0 z-10 overflow-y-auto"
+            style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 380px auto 800px' }}
+          >
           {selectedSystem ? (
             <div className="p-4 flex flex-col gap-4">
               {/* Header: System Name & Hex Coordinate */}
@@ -3068,6 +3075,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* Spawn Alien Empire Dialog Modal */}

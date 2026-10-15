@@ -71,6 +71,7 @@ interface RealisticStarGenAppProps {
   onInspectInSector3D?: (starSystem: StarSystem) => void;
   initialParams?: StarGenParams | null;
   onBackToSectorHex?: () => void;
+  showUI?: boolean;
 }
 
 export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
@@ -78,6 +79,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   onInspectInSector3D,
   initialParams,
   onBackToSectorHex,
+  showUI = false,
 }) => {
   // Step 1-2 Controls
   const [logMass, setLogMass] = useState<number>(0.02);
@@ -89,8 +91,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   // Generated System Result
   const [systemResult, setSystemResult] = useState<RealisticStarSystemResult | null>(null);
 
-  // 2D Map View Mode & Zoom
-  const [mapMode, setMapMode] = useState<'schematic' | 'orrery2d'>('schematic');
+  // 2D Map View Mode & Zoom (Orrery is the default view)
+  const [mapMode, setMapMode] = useState<'schematic' | 'orrery2d'>('orrery2d');
   const [mapZoom, setMapZoom] = useState<number>(1.0);
 
   // Proportional 3D Orrery Camera State (pxPerAU, center in AU, 3D Yaw & Pitch, Orbit Animation)
@@ -1510,13 +1512,14 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     const depthNodes: Array<{ zCam: number; key: string; node: React.ReactNode }> = [];
 
     return (
-      <div className="w-full flex flex-col gap-2.5 bg-[#04070e] rounded-xl border border-slate-800/90 p-3">
+      <div className={`w-full flex flex-col ${showUI ? 'gap-2.5 bg-[#04070e] rounded-xl border border-slate-800/90 p-3' : 'gap-0 bg-transparent border-0 rounded-none p-0'}`}>
         {/* Top Interactive 3D Camera, Orientation & Zoom Control Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-2 bg-[#0b111e] px-3 py-2 rounded-lg border border-slate-800">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-mono text-slate-400 mr-1">
-              Camera Focus:
-            </span>
+        {showUI && (
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-[#0b111e] px-3 py-2 rounded-lg border border-slate-800">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-mono text-slate-400 mr-1">
+                Camera Focus:
+              </span>
             <button
               type="button"
               onClick={() => {
@@ -1760,6 +1763,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             </span>
           </div>
         </div>
+        )}
 
         {/* Interactive 3D Proportional SVG Orrery (Drag to Rotate 3D, Shift+Drag/Right-Drag to Pan, Scroll to Zoom) */}
         <div className="relative w-full overflow-hidden rounded-xl border border-slate-800/80 bg-[#03060c]">
@@ -2819,9 +2823,9 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   };
 
   return (
-    <div className="w-full h-full overflow-y-auto p-3 bg-[#060911] text-slate-100 custom-scrollbar flex flex-col gap-3">
+    <div className={`w-full h-full ${showUI ? 'overflow-y-auto p-3 gap-3' : 'overflow-hidden p-0 gap-0'} bg-[#060911] text-slate-100 custom-scrollbar flex flex-col`}>
       {/* Imperial Sovereignty & Realm Banner */}
-      {currentEmpire && (
+      {showUI && currentEmpire && (
         <div
           className="rounded-xl p-3 border font-mono text-xs flex flex-wrap items-center justify-between gap-3 shadow-lg relative overflow-hidden"
           style={{
@@ -2898,7 +2902,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       )}
 
       {/* Compact Top Control & Slider Deck */}
-      <div className="bg-[#0e131d] border border-[#2a3852] rounded-xl p-3.5 flex flex-col gap-3 shadow-lg">
+      {showUI && (
+        <div className="bg-[#0e131d] border border-[#2a3852] rounded-xl p-3.5 flex flex-col gap-3 shadow-lg">
         <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-800 pb-2.5">
           <div className="flex items-center gap-2.5 flex-wrap">
             {onBackToSectorHex && (
@@ -3091,71 +3096,74 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
           </div>
         </div>
       </div>
+      )}
 
       {/* Main Unified 2D System Map Box */}
       {systemResult && (
-        <div className="bg-[#0e131d] border border-[#2a3852] rounded-xl p-3.5 flex-1 flex flex-col gap-3 shadow-lg">
-          <div className="flex flex-wrap justify-between items-center gap-2">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase text-sky-400 tracking-wider font-mono">
-                Interactive Map — Click Object for Details
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {/* Map View Switcher */}
-              <div className="flex items-center bg-[#151d2c] p-0.5 rounded-lg border border-[#2a3852] text-xs font-mono">
-                <button
-                  type="button"
-                  onClick={() => setMapMode('schematic')}
-                  className={`px-2.5 py-1 rounded-md flex items-center gap-1 cursor-pointer transition ${
-                    mapMode === 'schematic'
-                      ? 'bg-sky-600 text-white font-bold'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Layers className="w-3.5 h-3.5" />
-                  Schematic
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMapMode('orrery2d')}
-                  className={`px-2.5 py-1 rounded-md flex items-center gap-1 cursor-pointer transition ${
-                    mapMode === 'orrery2d'
-                      ? 'bg-sky-600 text-white font-bold'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Compass className="w-3.5 h-3.5" />
-                  Orrery
-                </button>
+        <div className={`flex-1 flex flex-col ${showUI ? 'bg-[#0e131d] border border-[#2a3852] rounded-xl p-3.5 gap-3 shadow-lg' : 'bg-transparent border-0 rounded-none p-0 gap-0 h-full w-full'}`}>
+          {showUI && (
+            <div className="flex flex-wrap justify-between items-center gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase text-sky-400 tracking-wider font-mono">
+                  Interactive Map — Click Object for Details
+                </span>
               </div>
 
-              {mapMode === 'schematic' && (
-                <div className="flex items-center gap-1 bg-[#151d2c] px-2 py-1 rounded-lg border border-[#2a3852] text-xs font-mono">
+              <div className="flex items-center gap-2">
+                {/* Map View Switcher */}
+                <div className="flex items-center bg-[#151d2c] p-0.5 rounded-lg border border-[#2a3852] text-xs font-mono">
                   <button
                     type="button"
-                    onClick={() => setMapZoom((z) => clamp(+(z - 0.2).toFixed(1), 1.0, 2.4))}
-                    className="text-slate-300 hover:text-white cursor-pointer"
-                    title="Zoom Out"
+                    onClick={() => setMapMode('schematic')}
+                    className={`px-2.5 py-1 rounded-md flex items-center gap-1 cursor-pointer transition ${
+                      mapMode === 'schematic'
+                        ? 'bg-sky-600 text-white font-bold'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
                   >
-                    <ZoomOut className="w-3.5 h-3.5" />
+                    <Layers className="w-3.5 h-3.5" />
+                    Schematic
                   </button>
-                  <span className="text-[11px] text-sky-400 px-1">
-                    {Math.round(mapZoom * 100)}%
-                  </span>
                   <button
                     type="button"
-                    onClick={() => setMapZoom((z) => clamp(+(z + 0.2).toFixed(1), 1.0, 2.4))}
-                    className="text-slate-300 hover:text-white cursor-pointer"
-                    title="Zoom In"
+                    onClick={() => setMapMode('orrery2d')}
+                    className={`px-2.5 py-1 rounded-md flex items-center gap-1 cursor-pointer transition ${
+                      mapMode === 'orrery2d'
+                        ? 'bg-sky-600 text-white font-bold'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
                   >
-                    <ZoomIn className="w-3.5 h-3.5" />
+                    <Compass className="w-3.5 h-3.5" />
+                    Orrery
                   </button>
                 </div>
-              )}
+
+                {mapMode === 'schematic' && (
+                  <div className="flex items-center gap-1 bg-[#151d2c] px-2 py-1 rounded-lg border border-[#2a3852] text-xs font-mono">
+                    <button
+                      type="button"
+                      onClick={() => setMapZoom((z) => clamp(+(z - 0.2).toFixed(1), 1.0, 2.4))}
+                      className="text-slate-300 hover:text-white cursor-pointer"
+                      title="Zoom Out"
+                    >
+                      <ZoomOut className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="text-[11px] text-sky-400 px-1">
+                      {Math.round(mapZoom * 100)}%
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setMapZoom((z) => clamp(+(z + 0.2).toFixed(1), 1.0, 2.4))}
+                      className="text-slate-300 hover:text-white cursor-pointer"
+                      title="Zoom In"
+                    >
+                      <ZoomIn className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Render Unified 2D System Map */}
           {mapMode === 'schematic'
@@ -3163,44 +3171,46 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             : render2DTopDownOrrery(systemResult)}
 
           {/* Quick Clickable Summary Strip of All Worlds & Moons */}
-          <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs font-mono">
-            <span className="text-[10px] uppercase text-slate-400 mr-1">
-              Quick Jump to World:
-            </span>
-            {systemResult.zones.map((z, zIdx) =>
-              z.bodies.map((b, bIdx) => {
-                if (b.kind === 'belt') return null;
-                return (
-                  <button
-                    key={`${zIdx}-${bIdx}`}
-                    type="button"
-                    onClick={() =>
-                      handleSelectBody({
-                        kind: 'planet',
-                        zoneIdx: zIdx,
-                        bodyIdx: bIdx,
-                      })
-                    }
-                    className="px-2.5 py-1 rounded-lg bg-[#151d2c] hover:bg-slate-800 border border-[#2a3852] hover:border-sky-400 flex items-center gap-1.5 text-[11px] text-slate-200 cursor-pointer transition"
-                  >
-                    <span
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: getPlanetVisualColor(b) }}
-                    />
-                    <span>
-                      #{bIdx + 1} {shortClassLabel(b.planetClass)}
-                    </span>
-                    {b.moons.length > 0 && (
-                      <span className="text-[10px] text-indigo-300 bg-indigo-950/80 px-1.5 rounded">
-                        {b.moons.length}☾
+          {showUI && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs font-mono">
+              <span className="text-[10px] uppercase text-slate-400 mr-1">
+                Quick Jump to World:
+              </span>
+              {systemResult.zones.map((z, zIdx) =>
+                z.bodies.map((b, bIdx) => {
+                  if (b.kind === 'belt') return null;
+                  return (
+                    <button
+                      key={`${zIdx}-${bIdx}`}
+                      type="button"
+                      onClick={() =>
+                        handleSelectBody({
+                          kind: 'planet',
+                          zoneIdx: zIdx,
+                          bodyIdx: bIdx,
+                        })
+                      }
+                      className="px-2.5 py-1 rounded-lg bg-[#151d2c] hover:bg-slate-800 border border-[#2a3852] hover:border-sky-400 flex items-center gap-1.5 text-[11px] text-slate-200 cursor-pointer transition"
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: getPlanetVisualColor(b) }}
+                      />
+                      <span>
+                        #{bIdx + 1} {shortClassLabel(b.planetClass)}
                       </span>
-                    )}
-                    <Maximize2 className="w-2.5 h-2.5 text-slate-400" />
-                  </button>
-                );
-              })
-            )}
-          </div>
+                      {b.moons.length > 0 && (
+                        <span className="text-[10px] text-indigo-300 bg-indigo-950/80 px-1.5 rounded">
+                          {b.moons.length}☾
+                        </span>
+                      )}
+                      <Maximize2 className="w-2.5 h-2.5 text-slate-400" />
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          )}
         </div>
       )}
 
