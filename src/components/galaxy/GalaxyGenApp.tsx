@@ -671,6 +671,20 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                   <feMergeNode in="SourceGraphic" />
                 </feMerge>
               </filter>
+              <filter id="fuzzyBorder" x="-35%" y="-35%" width="170%" height="170%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="1.8" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" opacity="0.30" />
+                </feMerge>
+              </filter>
+              <filter id="giantStarGlow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="1.2" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
             </defs>
 
             <g
@@ -725,24 +739,55 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                       points={hexPoints}
                       fill={sector.colorHex}
                       fillOpacity={sector.opacity}
+                      stroke="none"
+                    />
+
+                    {/* Atmospheric Fuzzy Hex Border */}
+                    <polygon
+                      points={hexPoints}
+                      fill="none"
                       stroke={
                         isSelected
                           ? '#38bdf8'
                           : isCore
                           ? '#f59e0b'
                           : sector.density > 1.5
-                          ? 'rgba(255, 255, 255, 0.65)'
+                          ? 'rgba(255, 255, 255, 0.70)'
                           : sector.density > 1.0
-                          ? 'rgba(255, 255, 255, 0.35)'
+                          ? 'rgba(255, 255, 255, 0.40)'
                           : sector.density > 0.35
-                          ? 'rgba(255, 255, 255, 0.18)'
+                          ? 'rgba(255, 255, 255, 0.22)'
                           : sector.density > 0.04
-                          ? 'rgba(148, 163, 184, 0.07)'
+                          ? 'rgba(148, 163, 184, 0.12)'
                           : 'transparent'
                       }
-                      strokeWidth={isSelected ? 2.8 : isCore ? 1.8 : sector.density > 1.5 ? 1.4 : 0.8}
+                      strokeWidth={isSelected ? 3.0 : isCore ? 2.4 : sector.density > 1.2 ? 2.2 : 1.6}
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                      filter="url(#fuzzyBorder)"
+                      opacity={isSelected ? 1.0 : 0.85}
                       className="transition-colors duration-150"
                     />
+
+                    {/* Giant Star Systems Dots (Mass 10-50 M☉, count = floor(density% / 10)) */}
+                    {sector.giantStars && sector.giantStars.length > 0 && sector.giantStars.map((star) => (
+                      <g key={star.id} transform={`translate(${star.relX}, ${star.relY})`} className="pointer-events-none">
+                        {/* Radiant halo */}
+                        <circle
+                          r={star.size * 1.8}
+                          fill={star.glowColor}
+                          opacity={0.45}
+                        />
+                        {/* Luminous stellar point */}
+                        <circle
+                          r={star.size}
+                          fill={star.colorHex}
+                          stroke="#ffffff"
+                          strokeWidth={0.3}
+                          opacity={0.95}
+                        />
+                      </g>
+                    ))}
 
                     {/* Selection Pulse Ring */}
                     {isSelected && (
@@ -1123,6 +1168,41 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                       : 'Sub-solar / metal-poor: terrestrial planets are smaller; gas giants rare.'}
                   </p>
                 </div>
+              </div>
+
+              {/* Giant Star Systems Card */}
+              <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 font-mono space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                    <span>⭐</span> Giant Star Systems (10–50 M☉)
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-400 border border-amber-800/80 font-bold">
+                    {selectedSector.giantStars?.length || 0} Systems
+                  </span>
+                </div>
+                <div className="text-[10.5px] text-slate-400">
+                  Calculated as: <span className="text-cyan-300 font-semibold">{Math.round(selectedSector.density * 100)}% density &divide; 10 &rarr; {Math.floor(Math.round(selectedSector.density * 100) / 10)} giant stars</span>. Rendered as spectral-coded stellar points distributed within this sector hex.
+                </div>
+                {selectedSector.giantStars && selectedSector.giantStars.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1 max-h-32 overflow-y-auto pr-1">
+                    {selectedSector.giantStars.map((gs) => (
+                      <span
+                        key={gs.id}
+                        className="px-2 py-0.5 rounded-md text-[10px] flex items-center gap-1.5 border"
+                        style={{
+                          backgroundColor: `${gs.colorHex}15`,
+                          borderColor: `${gs.colorHex}45`,
+                          color: gs.colorHex,
+                        }}
+                        title={`${gs.spectralType} • Mass: ${gs.mass} M☉`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: gs.colorHex }} />
+                        <span className="font-semibold">{gs.spectralType.split(' ')[0]}</span>
+                        <span className="text-slate-400 font-mono text-[9px]">{gs.mass} M☉</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Seed & Transfer Metadata */}

@@ -23,6 +23,18 @@ export interface GalaxyConfig {
   overallDensityScale: number; // 0.5 to 3.0
 }
 
+export interface GalaxyGiantStar {
+  id: string;
+  relX: number; // offset from hex center in pixels (-hexRadius to +hexRadius)
+  relY: number; // offset from hex center in pixels (-hexRadius to +hexRadius)
+  mass: number; // 10 to 50 M_sun
+  spectralType: string;
+  spectralCat: 'ob' | 'af' | 'g' | 'km' | 'remnant';
+  colorHex: string;
+  glowColor: string;
+  size: number;
+}
+
 export interface GalaxySectorHex {
   col: number; // 1 to 50
   row: number; // 1 to 50
@@ -44,6 +56,7 @@ export interface GalaxySectorHex {
   opacity: number; // More opaque for dense, transparent for sparse
   region: string; // "Galactic Bulge", "Spiral Arm Ridge", "Inter-arm Disk", etc.
   estimatedStars50x50: number; // Stars if generated at 50x50
+  giantStars: GalaxyGiantStar[]; // Giant star systems (mass 10 to 50 M_sun)
 }
 
 export interface GalaxyGridData {
@@ -324,6 +337,133 @@ function getRegionName(
  * Generates the full 50x50 Galaxy Grid with physical radius scaling, gradual edge fading,
  * spiral arm width/strength parameters, and dual mean-age + age-range astrophysics.
  */
+/**
+ * Generates giant star systems (mass 10 to 50 M_sun) inside a hex.
+ * Number of giant systems = floor(density in percent / 10).
+ * Positioned randomly within the pointy-topped hexagon.
+ */
+export function generateGalaxyGiantStars(
+  density: number,
+  _meanAge: number,
+  seed: number | string,
+  hexRadius: number = 26
+): GalaxyGiantStar[] {
+  const densityPct = Math.round(density * 100);
+  const count = Math.floor(densityPct / 10);
+  if (count <= 0) return [];
+
+  const rng = new PRNG(seedFromId(`GIANT-${seed}-${count}`));
+  const stars: GalaxyGiantStar[] = [];
+
+  // Pointy-topped hexagon bounds (slightly inset to stay strictly inside border)
+  const maxW = (Math.sqrt(3) / 2) * hexRadius * 0.80;
+  const maxH = hexRadius * 0.80;
+
+  for (let i = 0; i < count; i++) {
+    // 1. Mass between 10 and 50 times solar
+    const mass = +(10.0 + rng.next() * 40.0).toFixed(1);
+
+    // 2. Random point inside pointy-topped hex: |y| <= R - |x| / sqrt(3)
+    let relX = 0;
+    let relY = 0;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const rx = (rng.next() * 2 - 1) * maxW;
+      const ry = (rng.next() * 2 - 1) * maxH;
+      if (Math.abs(ry) <= (hexRadius * 0.80) - Math.abs(rx) / Math.sqrt(3)) {
+        relX = +rx.toFixed(1);
+        relY = +ry.toFixed(1);
+        break;
+      }
+    }
+
+    // 3. Spectral type, color, and phase based on mass & evolutionary stage
+    const roll = rng.next();
+    let spectralType: string;
+    let spectralCat: 'ob' | 'af' | 'g' | 'km' | 'remnant';
+    let colorHex: string;
+    let glowColor: string;
+    let size: number;
+
+    if (roll < 0.55) {
+      // Hot Main Sequence O/B Giants & Supergiants
+      if (mass >= 28) {
+        spectralType = `O${Math.floor(rng.next() * 6 + 3)}Ia`;
+        spectralCat = 'ob';
+        colorHex = '#93c5fd';
+        glowColor = '#38bdf8';
+        size = 1.6;
+      } else {
+        spectralType = `B${Math.floor(rng.next() * 8)}Ib`;
+        spectralCat = 'ob';
+        colorHex = '#bae6fd';
+        glowColor = '#60a5fa';
+        size = 1.4;
+      }
+    } else if (roll < 0.78) {
+      // Luminous Evolved Red / Yellow / Blue Supergiants
+      const subRoll = rng.next();
+      if (subRoll < 0.55) {
+        // Red Supergiant (like Betelgeuse or Antares)
+        spectralType = `M${Math.floor(rng.next() * 4)}Ia Red Supergiant`;
+        spectralCat = 'km';
+        colorHex = '#f87171';
+        glowColor = '#ef4444';
+        size = 1.8;
+      } else if (subRoll < 0.80) {
+        // Luminous Blue Variable (LBV, like Eta Carinae)
+        spectralType = `LBV Hypergiant`;
+        spectralCat = 'ob';
+        colorHex = '#22d3ee';
+        glowColor = '#06b6d4';
+        size = 1.9;
+      } else {
+        // Yellow Supergiant / Cepheid
+        spectralType = `F8Ia Yellow Supergiant`;
+        spectralCat = 'af';
+        colorHex = '#fde047';
+        glowColor = '#eab308';
+        size = 1.5;
+      }
+    } else {
+      // High-energy compact remnants or Wolf-Rayet
+      const remRoll = rng.next();
+      if (remRoll < 0.40) {
+        spectralType = `Wolf-Rayet (WR)`;
+        spectralCat = 'ob';
+        colorHex = '#a78bfa';
+        glowColor = '#818cf8';
+        size = 1.3;
+      } else if (remRoll < 0.75) {
+        spectralType = `Pulsar / Neutron Star`;
+        spectralCat = 'remnant';
+        colorHex = '#67e8f9';
+        glowColor = '#06b6d4';
+        size = 1.1;
+      } else {
+        spectralType = `Stellar Black Hole`;
+        spectralCat = 'remnant';
+        colorHex = '#c084fc';
+        glowColor = '#9333ea';
+        size = 1.2;
+      }
+    }
+
+    stars.push({
+      id: `GS-${seed}-${i + 1}`,
+      relX,
+      relY,
+      mass,
+      spectralType,
+      spectralCat,
+      colorHex,
+      glowColor,
+      size,
+    });
+  }
+
+  return stars;
+}
+
 export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG): GalaxyGridData {
   const galaxySeedInt = seedFromId(config.seed);
   const rng = new PRNG(galaxySeedInt);
@@ -592,6 +732,8 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
         totalEstimatedStars += estimatedStars50x50;
       }
 
+      const giantStars = generateGalaxyGiantStars(density, meanAge, sectorSeedNum, 26);
+
       sectors.push({
         col: c,
         row: r,
@@ -613,6 +755,7 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
         opacity,
         region,
         estimatedStars50x50,
+        giantStars,
       });
     }
   }

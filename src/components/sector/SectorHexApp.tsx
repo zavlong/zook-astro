@@ -1584,6 +1584,18 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       />
                     )}
 
+                    {/* Giant Star System Gold Badge Dot (Mass 10 to 50 M☉) */}
+                    {system.isGiantSystem && (
+                      <circle
+                        cx={-system.influenceRadius * 0.65}
+                        cy={-system.influenceRadius * 0.65}
+                        r={2.8}
+                        fill="#f59e0b"
+                        stroke="#78350f"
+                        strokeWidth={0.5}
+                      />
+                    )}
+
                     {/* Coordinate / Catalog Label at top of zone - revealed only on mouse over or click/selection */}
                     {(isSelected || isHovered) && zoom >= 0.26 && (
                       <text
@@ -1977,6 +1989,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       {selectedSystem.nStars > 1 && (
                         <span className="text-[10px] text-blue-300 bg-blue-950/80 px-1.5 py-0.2 rounded border border-blue-800">
                           {selectedSystem.nStars} Stars
+                        </span>
+                      )}
+                      {selectedSystem.isGiantSystem && (
+                        <span className="text-[10px] text-amber-300 bg-amber-950/80 px-1.5 py-0.2 rounded border border-amber-800 font-bold flex items-center gap-1">
+                          <span>⭐</span>
+                          <span>Giant System ({selectedSystem.mass.toFixed(1)} M☉)</span>
                         </span>
                       )}
                     </div>

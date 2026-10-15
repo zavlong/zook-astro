@@ -5,6 +5,7 @@ import {
   DEFAULT_GALAXY_CONFIG,
   rgbToHex,
   getSectorOpacityByDensity,
+  generateGalaxyGiantStars,
 } from './galaxyGen';
 import { PRNG, seedFromId } from './prng';
 
@@ -291,6 +292,8 @@ export function quantizeImageToGalaxy(
         totalEstimatedStars += estimatedStars50x50;
       }
 
+      const giantStars = generateGalaxyGiantStars(density, meanAge, sectorSeedNum, 26);
+
       sectors.push({
         col: c,
         row: r,
@@ -312,6 +315,7 @@ export function quantizeImageToGalaxy(
         opacity,
         region,
         estimatedStars50x50,
+        giantStars,
       });
     }
   }

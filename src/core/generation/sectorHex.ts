@@ -46,6 +46,7 @@ export interface SectorHexSystem {
   candidateHabitable: boolean;
   habitableWorldCount?: number;
   habitableTypes?: string[];
+  isGiantSystem?: boolean; // Giant star system (mass 10 to 50 M_sun)
   sysResult: RealisticStarSystemResult; // The full system generation result
 }
 
@@ -107,6 +108,7 @@ export interface SectorHexGridData {
     remnantCount: number;
     multipleSystemCount: number;
     heavyMassCount: number;
+    giantCount: number;
     habitableCount: number;
   };
 }
@@ -246,9 +248,16 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
   const parsecWidth = +(config.columns * 2.5).toFixed(1);
   const parsecHeight = +(config.rows * 2.5).toFixed(1);
 
+  // Number of giant star systems (mass 10 to 50 times solar): density in percent, divide by 10, round down
+  const densityPct = Math.round(config.density * 100);
+  const numGiantSystems = Math.floor(densityPct / 10);
+
   // Total stars in sector: baseline density of stars reduced by half (effective density of 50% before overflow at 100%)
   const effectiveDensity = config.density * 0.5;
-  const targetStarCount = Math.max(1, Math.round(config.columns * config.rows * effectiveDensity));
+  const targetStarCount = Math.max(
+    Math.max(1, numGiantSystems),
+    Math.round(config.columns * config.rows * effectiveDensity)
+  );
 
   const padding = 55;
   const usableW = sectorWidth - padding * 2;
@@ -305,6 +314,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
   let remnantCount = 0;
   let multipleSystemCount = 0;
   let heavyMassCount = 0;
+  let giantCount = 0;
   let habitableCount = 0;
 
   let sumSectorR = 0;
@@ -324,19 +334,45 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
     const systemId = `SYS-${coord}-${cellSeedNum.toString(16).toUpperCase()}`;
     const sysRng = new PRNG(seedFromId(systemId));
 
-    // 1. Progenitor mass with density overflow
-    const mass = sampleSystemMass(sysRng, config.density);
-    if (mass >= 3.0) heavyMassCount++;
+    // Giant star systems: density in percent / 10 rounded down
+    const isGiantSystem = i < numGiantSystems;
+    let mass: number;
+    let age: number;
 
-    // 2. Age sample (clamped between 0.1 and 12.8 Gyr, honoring uniform distribution for galactic bulge)
-    let rawAge: number;
-    if (config.ageDistribution === 'uniform' && config.ageRange) {
-      rawAge = config.meanAge + (sysRng.next() - 0.5) * config.ageRange;
+    if (isGiantSystem) {
+      // Giant star system: Mass between 10 and 50 times solar
+      mass = +(10.0 + sysRng.next() * 40.0).toFixed(3);
+      // High variety: O/B supergiant, red supergiant, blue hypergiant, pulsar, or black hole
+      const Lz = 1.15 * Math.pow(mass, 3.5);
+      const tMS = Math.max(0.005, 10.0 * (mass / Lz) * Math.pow(mass, 1.35));
+      const lifeRoll = sysRng.next();
+      if (lifeRoll < 0.60) {
+        // Main sequence O/B star
+        age = +(sysRng.next() * tMS * 0.90).toFixed(4);
+      } else if (lifeRoll < 0.85) {
+        // Post-main-sequence supergiant stage
+        age = +(tMS * (1.01 + sysRng.next() * 0.12)).toFixed(4);
+      } else {
+        // High-energy compact remnant (Neutron Star / Black Hole)
+        age = +(tMS * (1.18 + sysRng.next() * 0.50)).toFixed(4);
+      }
+      heavyMassCount++;
+      giantCount++;
     } else {
-      const sigma = config.ageSigma || (config.ageRange ? config.ageRange / 3.2 : 1.0);
-      rawAge = config.meanAge + sysRng.nextGaussian(0, sigma);
+      // 1. Standard progenitor mass with density overflow
+      mass = sampleSystemMass(sysRng, config.density);
+      if (mass >= 3.0) heavyMassCount++;
+
+      // 2. Age sample (clamped between 0.1 and 12.8 Gyr, honoring uniform distribution for galactic bulge)
+      let rawAge: number;
+      if (config.ageDistribution === 'uniform' && config.ageRange) {
+        rawAge = config.meanAge + (sysRng.next() - 0.5) * config.ageRange;
+      } else {
+        const sigma = config.ageSigma || (config.ageRange ? config.ageRange / 3.2 : 1.0);
+        rawAge = config.meanAge + sysRng.nextGaussian(0, sigma);
+      }
+      age = +Math.max(0.1, Math.min(12.8, rawAge)).toFixed(2);
     }
-    const age = +Math.max(0.1, Math.min(12.8, rawAge)).toFixed(2);
 
     // 3. Metallicity sample (with cosmic age anti-correlation)
     const ageDrift = -0.04 * (age - config.meanAge);
@@ -516,6 +552,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       candidateHabitable,
       habitableWorldCount,
       habitableTypes,
+      isGiantSystem,
       sysResult,
     };
 
@@ -576,6 +613,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       remnantCount,
       multipleSystemCount,
       heavyMassCount,
+      giantCount,
       habitableCount,
     },
   };
