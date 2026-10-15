@@ -27,6 +27,8 @@ interface GalaxyGenAppProps {
   onSelectSector: (sector: GalaxySectorHex) => void;
   onGoHome?: () => void;
   initialConfig?: Partial<GalaxyConfig>;
+  initialSelectedCoord?: string | null;
+  returnTransition?: boolean;
 }
 
 interface MorphologyOption {
@@ -49,6 +51,8 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   onSelectSector,
   onGoHome,
   initialConfig,
+  initialSelectedCoord,
+  returnTransition,
 }) => {
   // Galaxy configuration state
   const [config, setConfig] = useState<GalaxyConfig>(() => ({
@@ -72,8 +76,28 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   // Generate full 50x50 Galaxy Grid (2,500 sectors)
   const galaxyData = useMemo(() => generateGalaxyGrid(config), [config]);
 
+  // Transition and Interaction state
+  const [hoveredSector, setHoveredSector] = useState<GalaxySectorHex | null>(null);
+  const [isEnteringSector, setIsEnteringSector] = useState<boolean>(false);
+  const [transitionSector, setTransitionSector] = useState<GalaxySectorHex | null>(null);
+  const [isReturningFromSector, setIsReturningFromSector] = useState<boolean>(false);
+  const transitionTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup any pending transition timers on unmount
+  useEffect(() => {
+    return () => {
+      if (transitionTimerRef.current) {
+        clearTimeout(transitionTimerRef.current);
+      }
+    };
+  }, []);
+
   // Selected Sector
   const [selectedSector, setSelectedSector] = useState<GalaxySectorHex | null>(() => {
+    if (initialSelectedCoord) {
+      const match = galaxyData.sectors.find((s) => s.coord === initialSelectedCoord);
+      if (match) return match;
+    }
     // Default to central core or first active sector
     const coreSector = galaxyData.sectors.find((s) => s.col === 25 && s.row === 25);
     return coreSector || galaxyData.sectors[0] || null;
@@ -173,21 +197,119 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     });
   }, [gridBoundingSize]);
 
-  // Initial fit on mount
+  // Initial fit or sector return animation on mount
   useEffect(() => {
-    handleFitGalaxy();
-  }, [handleFitGalaxy]);
+    if (returnTransition && initialSelectedCoord) {
+      const match = galaxyData.sectors.find((s) => s.coord === initialSelectedCoord);
+      if (match && containerRef.current) {
+        setSelectedSector(match);
+        const { clientWidth, clientHeight } = containerRef.current;
+        const { cx, cy } = getHexCenter(match.col, match.row);
+        setIsReturningFromSector(true);
+        const startZoom = 1.35;
+        setZoom(startZoom);
+        setPan({
+          x: clientWidth / 2 - cx * startZoom,
+          y: clientHeight / 2 - cy * startZoom,
+        });
+
+        const timer1 = setTimeout(() => {
+          const finalZoom = 0.58;
+          setZoom(finalZoom);
+          setPan({
+            x: clientWidth / 2 - cx * finalZoom,
+            y: clientHeight / 2 - cy * finalZoom,
+          });
+        }, 40);
+
+        const timer2 = setTimeout(() => {
+          setIsReturningFromSector(false);
+        }, 500);
+
+        return () => {
+          clearTimeout(timer1);
+          clearTimeout(timer2);
+        };
+      }
+    } else {
+      handleFitGalaxy();
+    }
+  }, [returnTransition, initialSelectedCoord, galaxyData, getHexCenter, handleFitGalaxy]);
+
+  // Find sector near SVG world coordinates (for wheel zoom trigger)
+  const findSectorNearWorldPos = useCallback(
+    (worldX: number, worldY: number): GalaxySectorHex | null => {
+      const approxRow = Math.round((worldY - 40 - hexRadius) / rowSpacing) + 1;
+      let closest: GalaxySectorHex | null = null;
+      let minDistSq = Infinity;
+      for (let r = Math.max(1, approxRow - 2); r <= Math.min(config.rows, approxRow + 2); r++) {
+        const xOffset = r % 2 === 1 ? hexWidth * 0.5 : 0;
+        const approxCol = Math.round((worldX - 40 - hexRadius - xOffset) / colSpacing) + 1;
+        for (let c = Math.max(1, approxCol - 2); c <= Math.min(config.columns, approxCol + 2); c++) {
+          const { cx, cy } = getHexCenter(c, r);
+          const dSq = (worldX - cx) ** 2 + (worldY - cy) ** 2;
+          if (dSq < minDistSq) {
+            minDistSq = dSq;
+            const match = galaxyData.sectors.find((s) => s.col === c && s.row === r);
+            if (match) closest = match;
+          }
+        }
+      }
+      return closest;
+    },
+    [config.rows, config.columns, hexRadius, rowSpacing, hexWidth, colSpacing, getHexCenter, galaxyData.sectors]
+  );
+
+  // Cinematic transition into 50x50 Sector Map
+  const handleTriggerEnterSector = useCallback(
+    (sector: GalaxySectorHex) => {
+      if (isEnteringSector) return;
+
+      const prefersReducedMotion =
+        typeof window !== 'undefined' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      if (prefersReducedMotion) {
+        onSelectSector(sector);
+        return;
+      }
+
+      setIsEnteringSector(true);
+      setTransitionSector(sector);
+      setSelectedSector(sector);
+
+      if (containerRef.current) {
+        const { clientWidth, clientHeight } = containerRef.current;
+        const { cx, cy } = getHexCenter(sector.col, sector.row);
+        const targetZoom = 3.6;
+        setZoom(targetZoom);
+        setPan({
+          x: clientWidth / 2 - cx * targetZoom,
+          y: clientHeight / 2 - cy * targetZoom,
+        });
+      }
+
+      if (transitionTimerRef.current) {
+        clearTimeout(transitionTimerRef.current);
+      }
+
+      transitionTimerRef.current = setTimeout(() => {
+        onSelectSector(sector);
+      }, 450);
+    },
+    [isEnteringSector, getHexCenter, onSelectSector]
+  );
 
   // Pan handlers
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || isEnteringSector) return;
     setIsDragging(true);
     dragStartRef.current = { x: e.clientX, y: e.clientY };
     panStartRef.current = { ...pan };
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return;
+    if (!isDragging || isEnteringSector) return;
     const dx = e.clientX - dragStartRef.current.x;
     const dy = e.clientY - dragStartRef.current.y;
     setPan({
@@ -200,15 +322,54 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     setIsDragging(false);
   };
 
-  // Zoom handlers
+  // Zoom handlers with automatic sector entry beyond zoom threshold
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
+    if (isEnteringSector) return;
+
+    // Zooming in past threshold triggers transition into sector
+    if (e.deltaY < 0 && zoom >= 2.05) {
+      let candidate = hoveredSector;
+      if (!candidate && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const worldX = (mouseX - pan.x) / zoom;
+        const worldY = (mouseY - pan.y) / zoom;
+        candidate = findSectorNearWorldPos(worldX, worldY);
+      }
+      if (!candidate) {
+        candidate =
+          selectedSector ||
+          galaxyData.sectors.find((s) => s.col === 25 && s.row === 25) ||
+          galaxyData.sectors[0];
+      }
+      if (candidate) {
+        handleTriggerEnterSector(candidate);
+        return;
+      }
+    }
+
     const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
     setZoom((prev) => Math.max(0.08, Math.min(2.5, prev * zoomFactor)));
   };
 
   // Frustum Culling: Only render visible sectors within viewport + 2 buffer sectors
   const visibleSectors = useMemo(() => {
+    if (isEnteringSector && transitionSector) {
+      const minCol = Math.max(1, transitionSector.col - 4);
+      const maxCol = Math.min(config.columns, transitionSector.col + 4);
+      const minRow = Math.max(1, transitionSector.row - 4);
+      const maxRow = Math.min(config.rows, transitionSector.row + 4);
+      return galaxyData.sectors.filter(
+        (s) =>
+          s.col >= minCol &&
+          s.col <= maxCol &&
+          s.row >= minRow &&
+          s.row <= maxRow
+      );
+    }
+
     const minX = -pan.x / zoom;
     const maxX = (containerSize.width - pan.x) / zoom;
     const minY = -pan.y / zoom;
@@ -232,6 +393,8 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     }
     return culled;
   }, [
+    isEnteringSector,
+    transitionSector,
     galaxyData.sectors,
     config.columns,
     config.rows,
@@ -441,6 +604,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
           <svg
             className="w-full h-full absolute inset-0"
             style={{ touchAction: 'none' }}
+            onMouseLeave={() => setHoveredSector(null)}
           >
             <defs>
               <filter id="galaxyGlow" x="-30%" y="-30%" width="160%" height="160%">
@@ -452,7 +616,15 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               </filter>
             </defs>
 
-            <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
+            <g
+              transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}
+              style={{
+                transition:
+                  isEnteringSector || isReturningFromSector
+                    ? 'transform 450ms cubic-bezier(0.2, 0.8, 0.2, 1)'
+                    : 'none',
+              }}
+            >
               {/* Render visible sector hexes */}
               {visibleSectors.map((sector) => {
                 const { cx, cy } = getHexCenter(sector.col, sector.row);
@@ -463,13 +635,17 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                   <g
                     key={sector.coord}
                     transform={`translate(${cx}, ${cy})`}
+                    onMouseEnter={() => setHoveredSector(sector)}
+                    onMouseLeave={() =>
+                      setHoveredSector((prev) => (prev?.coord === sector.coord ? null : prev))
+                    }
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelectedSector(sector);
                     }}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      onSelectSector(sector);
+                      handleTriggerEnterSector(sector);
                     }}
                     className="cursor-pointer group"
                   >
@@ -571,9 +747,15 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
           {/* Viewport Floating Zoom & Fit Controls */}
           <div className="absolute bottom-5 left-5 flex items-center gap-1.5 bg-slate-950/85 backdrop-blur-md p-1.5 rounded-xl border border-slate-800 text-xs font-mono shadow-xl z-10">
             <button
-              onClick={() => setZoom((z) => Math.min(2.5, z * 1.25))}
+              onClick={() => {
+                if (zoom >= 2.05 && selectedSector) {
+                  handleTriggerEnterSector(selectedSector);
+                } else {
+                  setZoom((z) => Math.min(2.5, z * 1.25));
+                }
+              }}
               className="p-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition cursor-pointer"
-              title="Zoom In"
+              title={zoom >= 2.05 ? 'Zoom beyond threshold to enter sector' : 'Zoom In'}
             >
               <ZoomIn className="w-4 h-4" />
             </button>
@@ -597,6 +779,52 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               {Math.round(zoom * 100)}%
             </span>
           </div>
+
+          {/* High Zoom Threshold Indicator Pill */}
+          {zoom >= 1.6 && selectedSector && !isEnteringSector && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-blue-950/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-cyan-500/50 text-[11px] font-mono text-cyan-200 shadow-xl flex items-center gap-2 pointer-events-none animate-pulse z-10">
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Zoom further or double-click to enter Sector <strong>{selectedSector.coord}</strong></span>
+            </div>
+          )}
+
+          {/* Cinematic Warp / Zoom Transition Overlay */}
+          {isEnteringSector && transitionSector && (
+            <div
+              className="absolute inset-0 z-30 pointer-events-none flex flex-col items-center justify-center transition-all duration-500 ease-out"
+              style={{
+                backgroundColor: 'rgba(3, 6, 17, 0.70)',
+                backdropFilter: 'blur(4px)',
+              }}
+            >
+              <div
+                className="w-40 h-40 rounded-full border-2 animate-ping opacity-60 absolute"
+                style={{ borderColor: transitionSector.colorHex }}
+              />
+              <div
+                className="w-24 h-24 rounded-full border border-cyan-400/80 animate-pulse flex items-center justify-center shadow-2xl relative"
+                style={{
+                  boxShadow: `0 0 50px ${transitionSector.colorHex}`,
+                  backgroundColor: 'rgba(5, 8, 20, 0.85)',
+                }}
+              >
+                <Compass className="w-9 h-9 text-cyan-300 animate-spin" style={{ animationDuration: '3s' }} />
+              </div>
+
+              <div className="mt-6 text-center space-y-1 font-mono">
+                <div className="text-[11px] uppercase tracking-widest text-cyan-400 font-bold flex items-center justify-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 animate-bounce" />
+                  <span>WARP TRANSITION &bull; ENTERING SECTOR {transitionSector.coord}</span>
+                </div>
+                <h3 className="text-xl font-extrabold text-white tracking-wide">
+                  {transitionSector.name}
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Generating 50&times;50 Sector Hex Grid &bull; {Math.round(transitionSector.density * 100)}% Stellar Density
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Color & Opacity Astrophysics Legend Overlay */}
           <div className="absolute top-4 left-4 bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-xl border border-slate-800 text-[10px] font-mono shadow-lg pointer-events-none hidden sm:block">
@@ -666,7 +894,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
 
               {/* PRIMARY ACTION BUTTON: ENTER 50x50 SECTOR MAP */}
               <button
-                onClick={() => onSelectSector(selectedSector)}
+                onClick={() => handleTriggerEnterSector(selectedSector)}
                 className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-mono text-xs font-bold uppercase tracking-wider transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer group"
               >
                 <span>Enter Sector Hex Map (50&times;50)</span>

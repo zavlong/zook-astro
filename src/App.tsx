@@ -33,7 +33,12 @@ export const App: React.FC = () => {
   const [sectorInitialConfig, setSectorInitialConfig] =
     useState<Partial<SectorHexConfig> | null>(null);
 
+  const [lastGalaxySector, setLastGalaxySector] = useState<GalaxySectorHex | null>(null);
+  const [returnToGalaxyTransition, setReturnToGalaxyTransition] = useState<boolean>(false);
+
   const handleSelectGalaxySector = (sector: GalaxySectorHex) => {
+    setLastGalaxySector(sector);
+    setReturnToGalaxyTransition(false);
     setSectorInitialConfig({
       seed: sector.seed,
       name: sector.name,
@@ -43,7 +48,25 @@ export const App: React.FC = () => {
       meanAge: sector.meanAge,
       metallicityMean: sector.metallicityMean,
     });
-    setActiveApp('sector-hex');
+
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      (document as unknown as { startViewTransition: (cb: () => void) => void }).startViewTransition(() => {
+        setActiveApp('sector-hex');
+      });
+    } else {
+      setActiveApp('sector-hex');
+    }
+  };
+
+  const handleBackToGalaxy = () => {
+    setReturnToGalaxyTransition(true);
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      (document as unknown as { startViewTransition: (cb: () => void) => void }).startViewTransition(() => {
+        setActiveApp('galaxy-gen');
+      });
+    } else {
+      setActiveApp('galaxy-gen');
+    }
   };
 
   const [config, setConfig] = useState<SectorConfiguration>({
@@ -163,13 +186,15 @@ export const App: React.FC = () => {
           <GalaxyGenApp
             onSelectSector={handleSelectGalaxySector}
             onGoHome={() => setActiveApp('home')}
+            initialSelectedCoord={lastGalaxySector?.coord}
+            returnTransition={returnToGalaxyTransition}
           />
         </main>
       ) : activeApp === 'sector-hex' ? (
         <main className="w-full flex-1 min-h-0 relative rounded-xl overflow-hidden glass-hud border border-slate-800/80">
           <SectorHexApp
             initialConfig={sectorInitialConfig}
-            onBackToGalaxy={() => setActiveApp('galaxy-gen')}
+            onBackToGalaxy={handleBackToGalaxy}
             onLaunchStarGen={(params) => {
               setStarGenInitialParams(params);
               setActiveApp('stargen-lab');

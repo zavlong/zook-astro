@@ -468,9 +468,49 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     setIsDragging(false);
   };
 
-  // Zoom with scroll wheel
+  // Transition state when returning to Galaxy Map
+  const [isExitingToGalaxy, setIsExitingToGalaxy] = useState<boolean>(false);
+  const exitTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (exitTimerRef.current) {
+        clearTimeout(exitTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleBackToGalaxyWithTransition = useCallback(() => {
+    if (!onBackToGalaxy || isExitingToGalaxy) return;
+
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (prefersReducedMotion) {
+      onBackToGalaxy();
+      return;
+    }
+
+    setIsExitingToGalaxy(true);
+    if (exitTimerRef.current) {
+      clearTimeout(exitTimerRef.current);
+    }
+    exitTimerRef.current = setTimeout(() => {
+      onBackToGalaxy();
+    }, 350);
+  }, [onBackToGalaxy, isExitingToGalaxy]);
+
+  // Zoom with scroll wheel (zooming out below threshold triggers return to galaxy)
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
+    if (isExitingToGalaxy) return;
+
+    if (e.deltaY > 0 && zoom <= 0.085 && onBackToGalaxy) {
+      handleBackToGalaxyWithTransition();
+      return;
+    }
+
     const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
     setZoom((prev) => Math.max(0.06, Math.min(2.8, prev * zoomFactor)));
   };
@@ -803,7 +843,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   }, [gridData.systems, pan.x, pan.y, zoom, containerSize]);
 
   return (
-    <div className="w-full h-full flex flex-col bg-[#050814] text-slate-100 overflow-hidden font-sans select-none relative">
+    <div
+      className={`w-full h-full flex flex-col bg-[#050814] text-slate-100 overflow-hidden font-sans select-none relative ${
+        isExitingToGalaxy ? 'animate-sector-exit' : 'animate-sector-enter'
+      }`}
+    >
       {/* ============================================================================ */}
       {/* TOP COMMAND & SECTOR CONFIGURATION TOOLBAR                                   */}
       {/* ============================================================================ */}
@@ -811,11 +855,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
         {/* Back to Galaxy Map button if opened from GalaxyGen */}
         {onBackToGalaxy && (
           <button
-            onClick={onBackToGalaxy}
-            className="px-2.5 py-1.5 rounded-xl bg-indigo-950/90 hover:bg-indigo-900 text-indigo-200 border border-indigo-700/80 flex items-center gap-1.5 cursor-pointer transition shadow text-xs font-mono font-bold"
+            onClick={handleBackToGalaxyWithTransition}
+            className="px-2.5 py-1.5 rounded-xl bg-indigo-950/90 hover:bg-indigo-900 text-indigo-200 border border-indigo-700/80 flex items-center gap-1.5 cursor-pointer transition shadow text-xs font-mono font-bold group"
             title="Return to 50x50 Galaxy Sector Map"
           >
-            <span>&larr; Galaxy Map</span>
+            <span className="group-hover:-translate-x-0.5 transition-transform">&larr;</span>
+            <span>Galaxy Map</span>
           </button>
         )}
 
@@ -1556,9 +1601,15 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 <ZoomIn className="w-4 h-4" />
               </button>
               <button
-                onClick={() => setZoom((z) => Math.max(0.06, z * 0.8))}
-                className="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white transition"
-                title="Zoom Out (-)"
+                onClick={() => {
+                  if (zoom <= 0.085 && onBackToGalaxy) {
+                    handleBackToGalaxyWithTransition();
+                  } else {
+                    setZoom((z) => Math.max(0.06, z * 0.8));
+                  }
+                }}
+                className="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white transition cursor-pointer"
+                title={zoom <= 0.085 && onBackToGalaxy ? 'Zoom out to return to Galaxy Map' : 'Zoom Out (-)'}
               >
                 <ZoomOut className="w-4 h-4" />
               </button>
@@ -1589,6 +1640,14 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               </span>
             </div>
           </div>
+
+          {/* Low Zoom Indicator Pill to Return to Galaxy */}
+          {zoom <= 0.10 && onBackToGalaxy && !isExitingToGalaxy && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-indigo-950/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-indigo-500/50 text-[11px] font-mono text-indigo-200 shadow-xl flex items-center gap-2 pointer-events-none animate-pulse z-10">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Zoom out further or click <strong>&larr; Galaxy Map</strong> to return to galaxy overview</span>
+            </div>
+          )}
 
           {/* Spawn Empire Mode Banner */}
           {isSpawnEmpireMode && (
