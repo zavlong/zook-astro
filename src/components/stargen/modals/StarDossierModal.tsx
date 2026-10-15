@@ -1,6 +1,6 @@
-import React from 'react';
 import { Crosshair, X } from 'lucide-react';
 import { RealisticStarNode, RealisticStarSystemResult } from '../types';
+import { BlackHoleIcon } from '../../ui/BlackHoleIcon';
 
 interface StarDossierModalProps {
   star: RealisticStarNode;
@@ -19,6 +19,17 @@ export const StarDossierModal: React.FC<StarDossierModalProps> = ({
   onTrackInOrrery,
   onClose,
 }) => {
+  const catLower = (star.category || '').toLowerCase();
+  const spLower = (star.spectralType || '').toLowerCase();
+  const isSMBH = catLower.includes('supermassive') || spLower.includes('smbh') || star.mass > 999999;
+  const isBlackHole =
+    isSMBH ||
+    catLower.includes('black hole') ||
+    spLower.includes('black hole') ||
+    spLower === 'bh' ||
+    spLower.startsWith('bh ') ||
+    spLower.includes('/ bh');
+
   return (
     <div
       className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
@@ -30,13 +41,19 @@ export const StarDossierModal: React.FC<StarDossierModalProps> = ({
       >
         <div className="flex justify-between items-center border-b border-slate-800 pb-3">
           <div className="flex items-center gap-3">
-            <div
-              className="w-10 h-10 rounded-full"
-              style={{
-                backgroundColor: star.colorHex,
-                boxShadow: `0 0 20px ${star.colorHex}`,
-              }}
-            />
+            {isBlackHole ? (
+              <div className="w-10 h-10 flex items-center justify-center shrink-0">
+                <BlackHoleIcon isSupermassive={isSMBH} size={42} />
+              </div>
+            ) : (
+              <div
+                className="w-10 h-10 rounded-full shrink-0"
+                style={{
+                  backgroundColor: star.colorHex,
+                  boxShadow: `0 0 20px ${star.colorHex}`,
+                }}
+              />
+            )}
             <div>
               <h2 className="text-base font-bold text-white">
                 Star {star.label} &bull; {star.spectralType}

@@ -786,21 +786,44 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                         stroke={isSelected ? '#38bdf8' : '#2a3852'}
                         strokeWidth={isSelected ? 2 : 1.2}
                       />
-                      <circle
-                        cx={74}
-                        cy={midY}
-                        r={sRad * 1.55}
-                        fill={st.colorHex}
-                        fillOpacity={0.22}
-                      />
-                      <circle
-                        cx={74}
-                        cy={midY}
-                        r={sRad}
-                        fill={st.colorHex}
-                        stroke="#ffffff"
-                        strokeWidth={1}
-                      />
+                      {(() => {
+                        const catLower = (st.category || '').toLowerCase();
+                        const spLower = (st.spectralType || '').toLowerCase();
+                        const isSMBH = catLower.includes('supermassive') || spLower.includes('smbh') || st.mass > 999999;
+                        const isBH = isSMBH || catLower.includes('black hole') || spLower.includes('black hole') || spLower === 'bh' || spLower.startsWith('bh ');
+                        if (isBH) {
+                          const rH = isSMBH ? 8.0 : 4.2;
+                          const rxD = isSMBH ? 15 : 9.5;
+                          const ryD = isSMBH ? 5.5 : 3.5;
+                          return (
+                            <g>
+                              <circle cx={74} cy={midY} r={rxD * 1.3} fill="#a855f7" opacity={0.25} />
+                              <ellipse cx={74} cy={midY} rx={rxD} ry={ryD} stroke="#c084fc" strokeWidth={1.2} fill="none" transform={`rotate(-18, 74, ${midY})`} />
+                              <ellipse cx={74} cy={midY} rx={rxD * 0.75} ry={ryD * 0.75} stroke="#f3e8ff" strokeWidth={0.8} fill="none" transform={`rotate(-18, 74, ${midY})`} />
+                              <circle cx={74} cy={midY} r={rH} fill="#000000" stroke="#c084fc" strokeWidth={1} />
+                            </g>
+                          );
+                        }
+                        return (
+                          <g>
+                            <circle
+                              cx={74}
+                              cy={midY}
+                              r={sRad * 1.55}
+                              fill={st.colorHex}
+                              fillOpacity={0.22}
+                            />
+                            <circle
+                              cx={74}
+                              cy={midY}
+                              r={sRad}
+                              fill={st.colorHex}
+                              stroke="#ffffff"
+                              strokeWidth={1}
+                            />
+                          </g>
+                        );
+                      })()}
                       <text
                         x={104}
                         y={midY - 4}
@@ -2566,29 +2589,56 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                           />
                         </radialGradient>
                       </defs>
-                      {/* Corona halo glow */}
-                      <circle
-                        cx={sProj.x}
-                        cy={sProj.y}
-                        r={sRad * 2.2}
-                        fill={st.colorHex}
-                        fillOpacity={0.16}
-                      />
-                      <circle
-                        cx={sProj.x}
-                        cy={sProj.y}
-                        r={sRad * 1.4}
-                        fill={st.colorHex}
-                        fillOpacity={0.3}
-                      />
-                      <circle
-                        cx={sProj.x}
-                        cy={sProj.y}
-                        r={sRad}
-                        fill={`url(#${starGradId})`}
-                        stroke="#ffffff"
-                        strokeWidth={clamp(sRad * 0.08, 0.7, 2.2)}
-                      />
+                      {(() => {
+                        const catLower = (st.category || '').toLowerCase();
+                        const spLower = (st.spectralType || '').toLowerCase();
+                        const isSMBH = catLower.includes('supermassive') || spLower.includes('smbh') || st.mass > 999999;
+                        const isBH = isSMBH || catLower.includes('black hole') || spLower.includes('black hole') || spLower === 'bh' || spLower.startsWith('bh ');
+                        if (isBH) {
+                          const rH = isSMBH ? Math.max(12, sRad * 1.2) : Math.max(6, sRad * 0.9);
+                          const rxD = isSMBH ? rH * 2.4 : rH * 2.1;
+                          const ryD = isSMBH ? rH * 0.95 : rH * 0.8;
+                          return (
+                            <g>
+                              {/* Accretion disk atmospheric glow */}
+                              <circle cx={sProj.x} cy={sProj.y} r={rxD * 1.4} fill="#a855f7" fillOpacity={0.25} />
+                              <circle cx={sProj.x} cy={sProj.y} r={rxD * 0.9} fill="#c084fc" fillOpacity={0.35} />
+                              {/* Tilted relativistic accretion torus */}
+                              <ellipse cx={sProj.x} cy={sProj.y} rx={rxD} ry={ryD} fill="none" stroke="#c084fc" strokeWidth={isSMBH ? 2.0 : 1.3} opacity={0.88} transform={`rotate(-18, ${sProj.x}, ${sProj.y})`} />
+                              <ellipse cx={sProj.x} cy={sProj.y} rx={rxD * 0.72} ry={ryD * 0.72} fill="none" stroke="#f3e8ff" strokeWidth={isSMBH ? 1.4 : 0.8} opacity={0.8} transform={`rotate(-18, ${sProj.x}, ${sProj.y})`} />
+                              {/* Event Horizon (Pure Black Void) */}
+                              <circle cx={sProj.x} cy={sProj.y} r={rH} fill="#000000" stroke="#c084fc" strokeWidth={isSMBH ? 1.6 : 1.0} />
+                            </g>
+                          );
+                        }
+                        return (
+                          <g>
+                            {/* Corona halo glow */}
+                            <circle
+                              cx={sProj.x}
+                              cy={sProj.y}
+                              r={sRad * 2.2}
+                              fill={st.colorHex}
+                              fillOpacity={0.16}
+                            />
+                            <circle
+                              cx={sProj.x}
+                              cy={sProj.y}
+                              r={sRad * 1.4}
+                              fill={st.colorHex}
+                              fillOpacity={0.3}
+                            />
+                            <circle
+                              cx={sProj.x}
+                              cy={sProj.y}
+                              r={sRad}
+                              fill={`url(#${starGradId})`}
+                              stroke="#ffffff"
+                              strokeWidth={clamp(sRad * 0.08, 0.7, 2.2)}
+                            />
+                          </g>
+                        );
+                      })()}
                       <text
                         x={sProj.x}
                         y={sProj.y + sRad + 10}

@@ -24,6 +24,7 @@ import {
   Upload,
   Tag,
   ChevronDown,
+  Cloud,
 } from 'lucide-react';
 import {
   SectorHexConfig,
@@ -32,7 +33,10 @@ import {
   DEFAULT_SECTOR_CONFIG,
   generateSectorHexGrid,
   isNonMainSequenceSystem,
+  isBlackHoleStar,
+  isSupermassiveBlackHole,
 } from '../../core/generation/sectorHex';
+import { BlackHoleIcon } from '../ui/BlackHoleIcon';
 import {
   SectorEmpire,
   loadEmpiresForSector,
@@ -299,6 +303,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   const [showHyperlanes, setShowHyperlanes] = useState<boolean>(true);
   const [showHexBoundaries, setShowHexBoundaries] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
+  const [showNebulae, setShowNebulae] = useState<boolean>(true);
 
   // Total bounds of the sector space
   const gridBoundingSize = useMemo(() => {
@@ -726,9 +731,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     const MIN_BROWN_DWARF_RADIUS = 0.08; // Physical radius of smallest sub-stellar brown dwarf (~0.8 R_jup)
 
     // Check if star is a white dwarf, neutron star, or black hole
+    const isBlackHole = isBlackHoleStar(star);
     const typeLower = (star.spectralType || '').toLowerCase();
     const catLower = (star.category || '').toLowerCase();
-    const isBlackHole = typeLower.includes('black hole');
     const isCompactRemnant =
       catLower.includes('remnant') ||
       typeLower.includes('white dwarf') ||
@@ -761,23 +766,64 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     const stars = system.sysResult.hierarchy.stars;
     const n = stars.length;
 
+    // Helper to render an individual star node or black hole
+    const renderStarNode = (
+      cx: number,
+      cy: number,
+      r: number,
+      glowR: number,
+      isBH: boolean,
+      st: { colorHex?: string }
+    ) => {
+      if (isBH) {
+        return (
+          <g key={`star-node-${cx}-${cy}`}>
+            {/* Relativistic Accretion Disc Atmospheric Glow */}
+            <circle cx={cx} cy={cy} r={glowR * 1.15} fill="#a855f7" opacity={0.30} />
+            <circle cx={cx} cy={cy} r={glowR * 0.72} fill="#c084fc" opacity={0.42} />
+            {/* Tilted relativistic accretion torus */}
+            <ellipse
+              cx={cx}
+              cy={cy}
+              rx={r * 2.1}
+              ry={r * 0.85}
+              fill="none"
+              stroke="#c084fc"
+              strokeWidth={0.9}
+              opacity={0.88}
+              transform={`rotate(-18, ${cx}, ${cy})`}
+            />
+            <ellipse
+              cx={cx}
+              cy={cy}
+              rx={r * 1.5}
+              ry={r * 0.60}
+              fill="none"
+              stroke="#f3e8ff"
+              strokeWidth={0.65}
+              opacity={0.80}
+              transform={`rotate(-18, ${cx}, ${cy})`}
+            />
+            {/* Event Horizon (Pure Black Singularity Void) */}
+            <circle cx={cx} cy={cy} r={r} fill="#000000" stroke="#c084fc" strokeWidth={0.85} />
+          </g>
+        );
+      }
+      const col = st.colorHex || '#ffffff';
+      return (
+        <g key={`star-node-${cx}-${cy}`}>
+          <circle cx={cx} cy={cy} r={glowR} fill={col} opacity={0.20} />
+          <circle cx={cx} cy={cy} r={glowR * 0.65} fill={col} opacity={0.35} />
+          <circle cx={cx} cy={cy} r={r} fill={col} stroke="#ffffff" strokeWidth={0.7} />
+        </g>
+      );
+    };
+
     // Single Star
     if (n <= 1 || !stars || stars.length === 0) {
       const star = stars[0] || { mass: system.primaryMass, colorHex: system.colorHex, radius: system.primaryMass };
       const { r, glowR, isBlackHole } = getStarScaledRadius(star, 1.0);
-      return (
-        <g>
-          {/* High-Performance Lightweight Vector Glow */}
-          <circle r={glowR} fill={star.colorHex} opacity={isBlackHole ? 0.35 : 0.20} />
-          <circle r={glowR * 0.65} fill={star.colorHex} opacity={isBlackHole ? 0.45 : 0.35} />
-          <circle
-            r={r}
-            fill={isBlackHole ? '#000000' : star.colorHex}
-            stroke={isBlackHole ? '#38bdf8' : '#ffffff'}
-            strokeWidth={0.7}
-          />
-        </g>
-      );
+      return renderStarNode(0, 0, r, glowR, isBlackHole, star);
     }
 
     // Binary System (Star A & Star B side-by-side with gravitational bridge)
@@ -802,27 +848,8 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             strokeWidth={0.8}
             strokeDasharray="2,2"
           />
-          {/* Star A */}
-          <circle cx={posA.x} cy={posA.y} r={rA * 1.8} fill={starA.colorHex} opacity={isBHA ? 0.35 : 0.22} />
-          <circle
-            cx={posA.x}
-            cy={posA.y}
-            r={rA}
-            fill={isBHA ? '#000000' : starA.colorHex}
-            stroke={isBHA ? '#38bdf8' : '#ffffff'}
-            strokeWidth={0.6}
-          />
-
-          {/* Star B */}
-          <circle cx={posB.x} cy={posB.y} r={rB * 1.8} fill={starB.colorHex} opacity={isBHB ? 0.35 : 0.22} />
-          <circle
-            cx={posB.x}
-            cy={posB.y}
-            r={rB}
-            fill={isBHB ? '#000000' : starB.colorHex}
-            stroke={isBHB ? '#38bdf8' : '#ffffff'}
-            strokeWidth={0.6}
-          />
+          {renderStarNode(posA.x, posA.y, rA, rA * 1.8, isBHA, starA)}
+          {renderStarNode(posB.x, posB.y, rB, rB * 1.8, isBHB, starB)}
         </g>
       );
     }
@@ -850,38 +877,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             strokeWidth={0.7}
             strokeDasharray="2,2"
           />
-          {/* Star A */}
-          <circle cx={posA.x} cy={posA.y} r={rA * 1.7} fill={starA.colorHex} opacity={isBHA ? 0.35 : 0.22} />
-          <circle
-            cx={posA.x}
-            cy={posA.y}
-            r={rA}
-            fill={isBHA ? '#000000' : starA.colorHex}
-            stroke={isBHA ? '#38bdf8' : '#ffffff'}
-            strokeWidth={0.6}
-          />
-
-          {/* Star B */}
-          <circle cx={posB.x} cy={posB.y} r={rB * 1.7} fill={starB.colorHex} opacity={isBHB ? 0.35 : 0.22} />
-          <circle
-            cx={posB.x}
-            cy={posB.y}
-            r={rB}
-            fill={isBHB ? '#000000' : starB.colorHex}
-            stroke={isBHB ? '#38bdf8' : '#ffffff'}
-            strokeWidth={0.6}
-          />
-
-          {/* Star C */}
-          <circle cx={posC.x} cy={posC.y} r={rC * 1.7} fill={starC.colorHex} opacity={isBHC ? 0.35 : 0.22} />
-          <circle
-            cx={posC.x}
-            cy={posC.y}
-            r={rC}
-            fill={isBHC ? '#000000' : starC.colorHex}
-            stroke={isBHC ? '#38bdf8' : '#ffffff'}
-            strokeWidth={0.6}
-          />
+          {renderStarNode(posA.x, posA.y, rA, rA * 1.7, isBHA, starA)}
+          {renderStarNode(posB.x, posB.y, rB, rB * 1.7, isBHB, starB)}
+          {renderStarNode(posC.x, posC.y, rC, rC * 1.7, isBHC, starC)}
         </g>
       );
     }
@@ -893,7 +891,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     const starD = stars[3];
 
     // Special: Supermassive Black Hole + 3 S-Stars (Sagittarius A* Galactic Center S-Cluster)
-    if (system.mass > 999999 || starA.category?.includes('Supermassive') || starA.spectralType?.includes('SMBH')) {
+    if (system.mass > 999999 || isSupermassiveBlackHole(starA)) {
       const { r: rA } = getStarScaledRadius(starA, 1.45);
       const { r: rB } = getStarScaledRadius(starB, 0.75);
       const { r: rC } = getStarScaledRadius(starC, 0.65);
@@ -952,17 +950,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           strokeWidth={0.7}
           strokeDasharray="2,2"
         />
-        <circle cx={posA.x} cy={posA.y} r={rA * 1.5} fill={starA.colorHex} opacity={isBHA ? 0.35 : 0.22} />
-        <circle cx={posA.x} cy={posA.y} r={rA} fill={isBHA ? '#000000' : starA.colorHex} stroke={isBHA ? '#38bdf8' : '#ffffff'} strokeWidth={0.5} />
-
-        <circle cx={posB.x} cy={posB.y} r={rB * 1.5} fill={starB.colorHex} opacity={isBHB ? 0.35 : 0.22} />
-        <circle cx={posB.x} cy={posB.y} r={rB} fill={isBHB ? '#000000' : starB.colorHex} stroke={isBHB ? '#38bdf8' : '#ffffff'} strokeWidth={0.5} />
-
-        <circle cx={posC.x} cy={posC.y} r={rC * 1.5} fill={starC.colorHex} opacity={isBHC ? 0.35 : 0.22} />
-        <circle cx={posC.x} cy={posC.y} r={rC} fill={isBHC ? '#000000' : starC.colorHex} stroke={isBHC ? '#38bdf8' : '#ffffff'} strokeWidth={0.5} />
-
-        <circle cx={posD.x} cy={posD.y} r={rD * 1.5} fill={starD.colorHex} opacity={isBHD ? 0.35 : 0.22} />
-        <circle cx={posD.x} cy={posD.y} r={rD} fill={isBHD ? '#000000' : starD.colorHex} stroke={isBHD ? '#38bdf8' : '#ffffff'} strokeWidth={0.5} />
+        {renderStarNode(posA.x, posA.y, rA, rA * 1.5, isBHA, starA)}
+        {renderStarNode(posB.x, posB.y, rB, rB * 1.5, isBHB, starB)}
+        {renderStarNode(posC.x, posC.y, rC, rC * 1.5, isBHC, starC)}
+        {renderStarNode(posD.x, posD.y, rD, rD * 1.5, isBHD, starD)}
       </g>
     );
   };
@@ -1032,6 +1023,15 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 <span className="w-2.5 h-2.5 rounded-full border border-white/40 shadow-sm" style={{ backgroundColor: gridData.integratedColorHex }} />
                 <span>Sector Integrated Light: <strong style={{ color: gridData.integratedColorHex }}>{gridData.integratedColorHex}</strong></span>
               </span>
+              {gridData.nebula && (
+                <>
+                  <span className="text-slate-600">&bull;</span>
+                  <span className="text-fuchsia-300 font-semibold bg-fuchsia-950/70 border border-fuchsia-800/80 px-2 py-0.5 rounded-full text-[10.5px] flex items-center gap-1 shadow-sm">
+                    <span>🌌</span>
+                    <span>{gridData.nebula.name}</span>
+                  </span>
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -1264,6 +1264,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   <span>Solar (4.8 Gyr)</span>
                   <span>Ancient Halo (12.0 Gyr)</span>
                 </div>
+                {draftAge < 1.0 && (
+                  <div className="mt-1.5 p-1.5 rounded bg-fuchsia-950/60 border border-fuchsia-800/60 text-[10px] text-fuchsia-300 flex items-center gap-1.5">
+                    <span>🌌</span>
+                    <span>Young Sector (&lt;1.0 Gyr): Qualifies for procedural purple-red H-II emission nebulae clouds.</span>
+                  </div>
+                )}
               </div>
 
               <div className="border-t border-slate-800/80 pt-2">
@@ -1428,6 +1434,30 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             className="w-full h-full absolute inset-0 pointer-events-auto"
             style={{ willChange: 'transform' }}
           >
+            <defs>
+              <filter id="nebula-soft-blur" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="36" result="blur" />
+              </filter>
+              <filter id="nebula-dust-blur" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="7" result="blur" />
+              </filter>
+
+              {gridData.nebula?.blobs.map((blob, idx) => (
+                <radialGradient
+                  key={`nebula-grad-${idx}`}
+                  id={`nebula-blob-grad-${idx}`}
+                  cx="50%"
+                  cy="50%"
+                  r="50%"
+                >
+                  <stop offset="0%" stopColor={blob.coreColor} stopOpacity={blob.opacity} />
+                  <stop offset="35%" stopColor={blob.midColor} stopOpacity={blob.opacity * 0.78} />
+                  <stop offset="70%" stopColor="#4a044e" stopOpacity={blob.opacity * 0.40} />
+                  <stop offset="100%" stopColor="#080314" stopOpacity="0" />
+                </radialGradient>
+              ))}
+            </defs>
+
             <g
               transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}
               style={{ transformOrigin: '0 0' }}
@@ -1444,6 +1474,39 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 strokeWidth={1.5}
                 strokeDasharray="6,4"
               />
+
+              {/* Procedural H-II Purple-Red Cloud Nebula (Young Sectors < 1.0 Gyr) */}
+              {showNebulae && gridData.nebula && (
+                <g className="sector-nebula-layer pointer-events-none" style={{ mixBlendMode: 'screen' }}>
+                  {gridData.nebula.blobs.map((blob, idx) => (
+                    <ellipse
+                      key={`nebula-blob-${idx}`}
+                      cx={blob.cx}
+                      cy={blob.cy}
+                      rx={blob.rx}
+                      ry={blob.ry}
+                      transform={`rotate(${blob.rotation}, ${blob.cx}, ${blob.cy})`}
+                      fill={`url(#nebula-blob-grad-${idx})`}
+                      filter="url(#nebula-soft-blur)"
+                    />
+                  ))}
+                  {/* Subtle dark interstellar dust absorption filaments */}
+                  {gridData.nebula.dustLanes.map((dust, idx) => (
+                    <line
+                      key={`nebula-dust-${idx}`}
+                      x1={dust.x1}
+                      y1={dust.y1}
+                      x2={dust.x2}
+                      y2={dust.y2}
+                      stroke="#05030a"
+                      strokeWidth={dust.strokeWidth}
+                      opacity={dust.opacity}
+                      strokeLinecap="round"
+                      filter="url(#nebula-dust-blur)"
+                    />
+                  ))}
+                </g>
+              )}
 
               {/* Subtle Astronomical Parsec Coordinate Grid Lines */}
               {Array.from({ length: 9 }).map((_, idx) => {
@@ -1765,6 +1828,31 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       </g>
                     )}
 
+                    {/* Stellar Black Hole Badge (Mass >= 20 M☉ / BH Remnant: same icon as SMBH, but smaller) */}
+                    {system.mass <= 999999 &&
+                      (system.remnantType === 'BH' ||
+                        system.primaryClass?.includes('BH') ||
+                        system.sysResult?.hierarchy?.stars?.some((s) => isBlackHoleStar(s))) && (
+                        <g>
+                          <circle
+                            cx={0}
+                            cy={-system.influenceRadius - 8}
+                            r={5.2}
+                            fill="#3b0764"
+                            stroke="#c084fc"
+                            strokeWidth={0.8}
+                          />
+                          <text
+                            y={-system.influenceRadius - 5.5}
+                            textAnchor="middle"
+                            fontSize={6.5}
+                            style={{ pointerEvents: 'none' }}
+                          >
+                            🌀
+                          </text>
+                        </g>
+                      )}
+
                     {/* Coordinate / Catalog Label at top of zone - revealed only on mouse over or click/selection */}
                     {showLabels && (isSelected || isHovered) && zoom >= 0.26 && (
                       <text
@@ -2071,6 +2159,20 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 <Tag className="w-3.5 h-3.5" />
                 <span>Labels</span>
               </button>
+              {gridData.nebula && (
+                <button
+                  onClick={() => setShowNebulae((v) => !v)}
+                  className={`px-2 py-1 hover:bg-slate-800 rounded text-[10.5px] transition flex items-center gap-1 ${
+                    showNebulae
+                      ? 'text-fuchsia-400 bg-fuchsia-950/40 border border-fuchsia-800/60'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                  title="Toggle Purple-Red Emission Nebula Cloud"
+                >
+                  <Cloud className="w-3.5 h-3.5" />
+                  <span>Nebula</span>
+                </button>
+              )}
               <span className="text-[10px] text-slate-500 pl-1">
                 {Math.round(zoom * 100)}%
               </span>
@@ -2289,13 +2391,20 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       borderColor: selectedSystem.colorHex,
                     }}
                   >
-                    <div
-                      className="w-6 h-6 rounded-full shadow-inner"
-                      style={{
-                        backgroundColor: selectedSystem.colorHex,
-                        boxShadow: `0 0 16px ${selectedSystem.glowColor}`,
-                      }}
-                    />
+                    {isBlackHoleStar({ category: selectedSystem.remnantType || '', spectralType: selectedSystem.primaryClass }) ? (
+                      <BlackHoleIcon
+                        isSupermassive={selectedSystem.mass > 999999}
+                        size={32}
+                      />
+                    ) : (
+                      <div
+                        className="w-6 h-6 rounded-full shadow-inner"
+                        style={{
+                          backgroundColor: selectedSystem.colorHex,
+                          boxShadow: `0 0 16px ${selectedSystem.glowColor}`,
+                        }}
+                      />
+                    )}
                     {selectedSystem.candidateHabitable && (
                       <div
                         className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-500 border border-slate-950 flex items-center justify-center text-[9px] text-white font-bold"
@@ -2638,12 +2747,25 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 {selectedSystem.companionStars.length > 0 && (
                   <div className="flex items-start justify-between py-1 border-b border-slate-800/60">
                     <span className="text-slate-400">Companions</span>
-                    <div className="text-right text-slate-300 font-medium space-y-0.5">
-                      {selectedSystem.companionStars.map((cs) => (
-                        <div key={cs.label}>
-                          {cs.label}: {cs.spectralType} ({cs.mass.toFixed(3)} M☉)
-                        </div>
-                      ))}
+                    <div className="text-right text-slate-300 font-medium space-y-1">
+                      {selectedSystem.companionStars.map((cs) => {
+                        const isBH = isBlackHoleStar({ spectralType: cs.spectralType });
+                        return (
+                          <div key={cs.label} className="flex items-center justify-end gap-1.5 text-xs">
+                            {isBH ? (
+                              <BlackHoleIcon isSupermassive={cs.mass > 999999} size={15} />
+                            ) : (
+                              <span
+                                className="w-2 h-2 rounded-full shrink-0 shadow-sm"
+                                style={{ backgroundColor: cs.colorHex }}
+                              />
+                            )}
+                            <span>
+                              {cs.label}: {cs.spectralType} ({cs.mass.toFixed(3)} M☉)
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

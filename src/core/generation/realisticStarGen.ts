@@ -352,18 +352,19 @@ export function getStarStats(
         colorHex: starColorHex(Twd),
       };
     }
+    const isBH = mass >= 20;
     return {
       label,
-      category: mass < 20 ? 'Neutron Star' : 'Stellar Black Hole',
-      mass: mass < 20 ? 1.45 : +(0.32 * mass).toFixed(2),
+      category: isBH ? 'Stellar Black Hole' : 'Neutron Star',
+      mass: isBH ? +(0.32 * mass).toFixed(2) : 1.45,
       lum: '1.0e-5',
       lumNum: 1e-5,
       radius: 0.0002,
-      Teff: 95000,
+      Teff: isBH ? 80000 : 95000,
       logg: 14.2,
       tau: +tau.toFixed(2),
-      spectralType: mass < 20 ? 'PSR / NS' : 'BH',
-      colorHex: '#a5f3fc',
+      spectralType: isBH ? 'BH' : 'PSR / NS',
+      colorHex: isBH ? '#c084fc' : '#a5f3fc',
     };
   }
 

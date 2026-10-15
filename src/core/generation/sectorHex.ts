@@ -86,6 +86,36 @@ export interface SectorHyperlane {
   lengthLy: number;
 }
 
+export interface SectorNebulaBlob {
+  cx: number;
+  cy: number;
+  rx: number;
+  ry: number;
+  rotation: number;
+  coreColor: string;
+  midColor: string;
+  opacity: number;
+}
+
+export interface SectorNebulaDustLane {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  cx: number;
+  cy: number;
+  strokeWidth: number;
+  opacity: number;
+}
+
+export interface SectorNebula {
+  name: string;
+  type: string; // "H II Emission Nursery"
+  description: string;
+  blobs: SectorNebulaBlob[];
+  dustLanes: SectorNebulaDustLane[];
+}
+
 export interface SectorHexGridData {
   config: SectorHexConfig;
   sectorWidth: number;
@@ -96,6 +126,7 @@ export interface SectorHexGridData {
   systems: SectorHexSystem[];
   hyperlanes: SectorHyperlane[]; // Procedural hyperlanes connecting neighboring stars
   integratedColorHex: string; // Luminosity-weighted average color of all constituent stars in sector
+  nebula: SectorNebula | null; // Procedural purple-red cloud nebula (only present in young sectors < 1.0 Gyr)
   stats: {
     totalHexes: number;
     occupiedHexes: number;
@@ -686,6 +717,9 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
     }
   }
 
+  // Procedural H-II Purple-Red Cloud Nebula (Only young sectors < 1.0 Gyr qualify)
+  const nebula = generateSectorNebula(config.seed, sectorWidth, sectorHeight, config.meanAge);
+
   return {
     config,
     sectorWidth,
@@ -696,6 +730,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
     systems,
     hyperlanes,
     integratedColorHex,
+    nebula,
     stats: {
       totalHexes,
       occupiedHexes,
@@ -713,6 +748,161 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       habitableCount,
       nonMsCount,
     },
+  };
+}
+
+/**
+ * Returns true if the star or system is a Black Hole (Stellar Black Hole or Supermassive Black Hole).
+ */
+export function isBlackHoleStar(star: { category?: string; spectralType?: string }): boolean {
+  const cat = (star.category || '').toLowerCase();
+  const sp = (star.spectralType || '').toLowerCase();
+  return (
+    cat.includes('black hole') ||
+    sp.includes('black hole') ||
+    sp.includes('smbh') ||
+    sp === 'bh' ||
+    sp.startsWith('bh ') ||
+    sp.startsWith('bh(') ||
+    sp.includes('/ bh')
+  );
+}
+
+/**
+ * Returns true if the star is specifically a Supermassive Black Hole.
+ */
+export function isSupermassiveBlackHole(star: { category?: string; spectralType?: string; mass?: number }): boolean {
+  const cat = (star.category || '').toLowerCase();
+  const sp = (star.spectralType || '').toLowerCase();
+  return (
+    cat.includes('supermassive') ||
+    sp.includes('smbh') ||
+    (typeof star.mass === 'number' && star.mass > 999999)
+  );
+}
+
+/**
+ * Generates procedural H-II purple-red gas cloud nebulae for young sectors (< 1.0 Gyr).
+ * Produces organic gaseous lobes and dust filaments with vivid crimson, magenta, and violet hues.
+ */
+export function generateSectorNebula(
+  seed: number,
+  sectorWidth: number,
+  sectorHeight: number,
+  meanAge: number
+): SectorNebula | null {
+  // STRICT RULE: Can only generate in young sectors (< 1.0 Gyr)
+  if (meanAge >= 1.0) return null;
+
+  const rng = new PRNG(seed + 9999);
+  // ~65% probability of a young sector (<1 Gy) harboring an active nebula complex
+  if (rng.next() >= 0.65) return null;
+
+  const NEBULA_NAMES = [
+    'Carina Starburst Complex',
+    'Tarantula Ionization Nursery',
+    'Orion H-II Emission Complex',
+    'Rosette Molecular Cloud',
+    'Eagle Star-Forming Nebula',
+    'Lagoon Photo-Ionized Cloud',
+    'Trifid Relativistic Gas Complex',
+    'Omega Starburst Cloud',
+    'Cygnus-OB Emission Cloud',
+    'Vela Ionized Shroud',
+    'Perseus Starburst Veil',
+    'Centaurus Primordial Cloud',
+  ];
+  const name = NEBULA_NAMES[Math.floor(rng.next() * NEBULA_NAMES.length)];
+
+  // Distinct purple-red color palettes typical of ionized hydrogen-alpha (656.3 nm) and young stellar winds
+  const CORE_COLORS = [
+    '#e11d48', // Crimson rose
+    '#f43f5e', // Hot pink / rose
+    '#be123c', // Deep crimson
+    '#c026d3', // Electric fuchsia
+    '#db2777', // Vivid magenta
+    '#e879f9', // Bright lilac-pink
+  ];
+  const MID_COLORS = [
+    '#9333ea', // Deep violet
+    '#7e22ce', // Royal purple
+    '#a855f7', // Electric purple
+    '#581c87', // Dark cosmic plum
+    '#6b21a8', // Rich violet
+  ];
+
+  const blobCount = Math.floor(rng.next() * 6) + 8; // 8 to 13 cloud lobes
+  const blobs: SectorNebulaBlob[] = [];
+
+  // Anchor primary cloud centers around 1 or 2 focal regions in the sector
+  const focalCenters = [
+    {
+      x: sectorWidth * (0.3 + rng.next() * 0.4),
+      y: sectorHeight * (0.3 + rng.next() * 0.4),
+    },
+    {
+      x: sectorWidth * (0.2 + rng.next() * 0.6),
+      y: sectorHeight * (0.2 + rng.next() * 0.6),
+    },
+  ];
+
+  for (let i = 0; i < blobCount; i++) {
+    const focal = focalCenters[i % focalCenters.length];
+    const offsetX = (rng.next() - 0.5) * (sectorWidth * 0.65);
+    const offsetY = (rng.next() - 0.5) * (sectorHeight * 0.65);
+    const cx = Math.max(0, Math.min(sectorWidth, focal.x + offsetX));
+    const cy = Math.max(0, Math.min(sectorHeight, focal.y + offsetY));
+
+    const rx = Math.max(80, (0.18 + rng.next() * 0.32) * sectorWidth);
+    const ry = Math.max(60, (0.14 + rng.next() * 0.28) * sectorHeight);
+    const rotation = Math.floor(rng.next() * 180);
+
+    const coreColor = CORE_COLORS[Math.floor(rng.next() * CORE_COLORS.length)];
+    const midColor = MID_COLORS[Math.floor(rng.next() * MID_COLORS.length)];
+    const opacity = +(0.32 + rng.next() * 0.35).toFixed(2);
+
+    blobs.push({
+      cx: +cx.toFixed(1),
+      cy: +cy.toFixed(1),
+      rx: +rx.toFixed(1),
+      ry: +ry.toFixed(1),
+      rotation,
+      coreColor,
+      midColor,
+      opacity,
+    });
+  }
+
+  // Generate 3 to 6 dark dust absorption filaments
+  const dustLaneCount = Math.floor(rng.next() * 4) + 3;
+  const dustLanes: SectorNebulaDustLane[] = [];
+  for (let i = 0; i < dustLaneCount; i++) {
+    const focal = focalCenters[i % focalCenters.length];
+    const x1 = focal.x + (rng.next() - 0.5) * (sectorWidth * 0.45);
+    const y1 = focal.y + (rng.next() - 0.5) * (sectorHeight * 0.45);
+    const angle = rng.next() * Math.PI * 2;
+    const len = 70 + rng.next() * 180;
+    const x2 = x1 + Math.cos(angle) * len;
+    const y2 = y1 + Math.sin(angle) * len;
+
+    dustLanes.push({
+      x1: +x1.toFixed(1),
+      y1: +y1.toFixed(1),
+      x2: +x2.toFixed(1),
+      y2: +y2.toFixed(1),
+      cx: +((x1 + x2) / 2).toFixed(1),
+      cy: +((y1 + y2) / 2).toFixed(1),
+      strokeWidth: +(14 + rng.next() * 26).toFixed(1),
+      opacity: +(0.25 + rng.next() * 0.35).toFixed(2),
+    });
+  }
+
+  return {
+    name,
+    type: 'H II Emission Nursery',
+    description: `Young star-forming gas cloud (<1.0 Gyr). Intense stellar winds and ultraviolet radiation excite ionized hydrogen and interstellar dust into glowing purple-red filaments.`,
+    blobs,
+    dustLanes,
   };
 }
 
