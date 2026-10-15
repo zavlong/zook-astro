@@ -20,6 +20,8 @@ import {
   Shield,
   Flag,
   Trash2,
+  Download,
+  Upload,
 } from 'lucide-react';
 import {
   SectorHexConfig,
@@ -28,7 +30,15 @@ import {
   DEFAULT_SECTOR_CONFIG,
   generateSectorHexGrid,
 } from '../../core/generation/sectorHex';
-import { SectorEmpire } from '../../core/generation/empireGen';
+import {
+  SectorEmpire,
+  loadEmpiresForSector,
+  saveEmpiresForSector,
+  loadLastSectorConfig,
+  saveLastSectorConfig,
+  downloadEmpiresJSON,
+  importEmpiresFromJSON,
+} from '../../core/generation/empireGen';
 import { SpawnEmpireModal } from './SpawnEmpireModal';
 import { StarGenParams } from '../../core/generation/realisticStarGen';
 import { SpectralCategory } from '../../types/astrophysics';
@@ -100,11 +110,23 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   onBackToGalaxy,
   initialConfig,
 }) => {
-  // Sector Configuration state initialized with initialConfig if provided
-  const [config, setConfig] = useState<SectorHexConfig>(() => ({
-    ...DEFAULT_SECTOR_CONFIG,
-    ...(initialConfig || {}),
-  }));
+  // Sector Configuration state initialized with initialConfig if provided, or last saved sector
+  const [config, setConfig] = useState<SectorHexConfig>(() => {
+    if (initialConfig && Object.keys(initialConfig).length > 0) {
+      return {
+        ...DEFAULT_SECTOR_CONFIG,
+        ...initialConfig,
+      };
+    }
+    const saved = loadLastSectorConfig();
+    if (saved && typeof saved === 'object' && saved.seed) {
+      return {
+        ...DEFAULT_SECTOR_CONFIG,
+        ...saved,
+      };
+    }
+    return DEFAULT_SECTOR_CONFIG;
+  });
 
   // Re-sync if initialConfig updates
   useEffect(() => {
@@ -115,6 +137,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       }));
     }
   }, [initialConfig]);
+
+  // Persist current sector config to localStorage
+  useEffect(() => {
+    saveLastSectorConfig(config);
+  }, [config]);
 
   const [activePreset, setActivePreset] = useState<SectorPresetKey>('disk');
   const [searchCoord, setSearchCoord] = useState<string>('');
@@ -200,14 +227,76 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   }, [selectedSystem, gridData.hyperlanes]);
 
   // ============================================================================
-  // ALIEN EMPIRE & TERRITORY MANAGEMENT STATE
+  // ALIEN EMPIRE & TERRITORY MANAGEMENT STATE (PERSISTED IN LOCALSTORAGE)
   // ============================================================================
-  const [empires, setEmpires] = useState<SectorEmpire[]>([]);
-  const [activeEmpireId, setActiveEmpireId] = useState<string | null>(null);
+  const [empires, setEmpires] = useState<SectorEmpire[]>(() => {
+    const loaded = loadEmpiresForSector(config.seed, config.columns, config.rows);
+    return loaded.empires;
+  });
+  const [activeEmpireId, setActiveEmpireId] = useState<string | null>(() => {
+    const loaded = loadEmpiresForSector(config.seed, config.columns, config.rows);
+    return loaded.activeEmpireId;
+  });
   const [isSpawnEmpireMode, setIsSpawnEmpireMode] = useState<boolean>(false);
   const [isEmpireModalOpen, setIsEmpireModalOpen] = useState<boolean>(false);
   const [empireTargetSystem, setEmpireTargetSystem] = useState<SectorHexSystem | null>(null);
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
+
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  // Synchronize empires from localStorage whenever sector seed or scale changes
+  useEffect(() => {
+    const loaded = loadEmpiresForSector(config.seed, config.columns, config.rows);
+    setEmpires(loaded.empires);
+    setActiveEmpireId(loaded.activeEmpireId);
+  }, [config.seed, config.columns, config.rows]);
+
+  // Persist empires to localStorage on every change
+  useEffect(() => {
+    saveEmpiresForSector(config.seed, empires, activeEmpireId, config.columns, config.rows);
+  }, [empires, activeEmpireId, config.seed, config.columns, config.rows]);
+
+  // Export empires JSON backup
+  const handleExportEmpires = useCallback(() => {
+    downloadEmpiresJSON(config.seed);
+    setBannerNotice('💾 Downloaded alien empires backup JSON.');
+  }, [config.seed]);
+
+  // Import empires from JSON file
+  const handleImportFile = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
+        if (content) {
+          const ok = importEmpiresFromJSON(content);
+          if (ok) {
+            const loaded = loadEmpiresForSector(config.seed, config.columns, config.rows);
+            setEmpires(loaded.empires);
+            setActiveEmpireId(loaded.activeEmpireId);
+            setBannerNotice('✅ Successfully restored empires from backup file!');
+          } else {
+            setBannerNotice('❌ Invalid empires JSON backup file.');
+          }
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    },
+    [config.seed, config.columns, config.rows]
+  );
+
+  // Clear all empires in current sector
+  const handleClearSectorEmpires = useCallback(() => {
+    if (window.confirm(`Disband and remove all ${empires.length} empires in this sector?`)) {
+      setEmpires([]);
+      setActiveEmpireId(null);
+      saveEmpiresForSector(config.seed, [], null, config.columns, config.rows);
+      setBannerNotice('All empires in this sector disbanded.');
+    }
+  }, [empires.length, config.seed, config.columns, config.rows]);
 
   // Active empire lookup
   const activeEmpire = useMemo(() => {
@@ -1566,6 +1655,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   <span className="text-[10px] text-slate-400">
                     &bull; {activeEmpire?.claimedSystemIds.length} {activeEmpire?.claimedSystemIds.length === 1 ? 'system' : 'systems'}
                   </span>
+                  <span className="text-[9.5px] text-emerald-400/90 bg-emerald-950/60 px-1 py-0.2 rounded border border-emerald-800/60 ml-1">
+                    💾 Saved
+                  </span>
                 </div>
                 <div className="text-[9.5px] text-slate-400 flex items-center gap-1 mt-0.5">
                   <span>Shift+Click star to claim</span>
@@ -1579,16 +1671,50 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 </div>
               </div>
 
-              {/* Disband Empire */}
-              {activeEmpire && (
+              {/* Persistence Actions: Export & Import Backup */}
+              <div className="flex items-center gap-1 pl-1 border-l border-slate-800">
                 <button
-                  onClick={() => handleDeleteEmpire(activeEmpire.id)}
-                  className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-900 rounded-lg transition cursor-pointer"
-                  title="Disband active empire"
+                  onClick={handleExportEmpires}
+                  className="p-1.5 text-slate-400 hover:text-cyan-300 hover:bg-slate-900 rounded-lg transition cursor-pointer"
+                  title="Export Empires Backup (.json)"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Download className="w-3.5 h-3.5" />
                 </button>
-              )}
+                <button
+                  onClick={() => importInputRef.current?.click()}
+                  className="p-1.5 text-slate-400 hover:text-emerald-300 hover:bg-slate-900 rounded-lg transition cursor-pointer"
+                  title="Import Empires Backup (.json)"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                </button>
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={handleImportFile}
+                  className="hidden"
+                />
+
+                {/* Disband Active Empire */}
+                {activeEmpire && (
+                  <button
+                    onClick={() => handleDeleteEmpire(activeEmpire.id)}
+                    className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-900 rounded-lg transition cursor-pointer"
+                    title={`Disband ${activeEmpire.name}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+
+                {/* Clear All Empires in Sector */}
+                <button
+                  onClick={handleClearSectorEmpires}
+                  className="px-1.5 py-1 text-slate-500 hover:text-rose-400 hover:bg-slate-900 rounded-lg transition cursor-pointer text-[9.5px] font-mono"
+                  title="Disband all empires in this sector"
+                >
+                  Clear
+                </button>
+              </div>
             </div>
           )}
 
@@ -2055,6 +2181,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
                     <span className="text-slate-500">Hyperlanes:</span>{' '}
                     <span className="text-cyan-400 font-bold">{gridData.stats.hyperlaneCount}</span>
+                  </div>
+                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
+                    <span className="text-slate-500">Empires:</span>{' '}
+                    <span className="text-emerald-400 font-bold">{empires.length}</span>
                   </div>
                   <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50 col-span-2 flex items-center justify-between">
                     <span className="text-slate-400">Integrated Light (Constituent Stars):</span>

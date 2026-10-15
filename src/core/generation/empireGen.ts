@@ -201,3 +201,164 @@ export function generateRandomEmpire(
     createdAt: Date.now(),
   };
 }
+
+// ============================================================================
+// PERSISTENT STORAGE FOR SECTOR EMPIRES
+// ============================================================================
+
+export const STORAGE_KEY_EMPIRES = 'zook_astro_sector_empires_v1';
+export const STORAGE_KEY_LAST_CONFIG = 'zook_astro_last_sector_config';
+
+export interface SectorEmpireStore {
+  version: 1;
+  sectors: Record<string, SectorEmpire[]>;
+  lastActiveEmpireBySector: Record<string, string>;
+}
+
+export function getSectorStorageKey(seed: number, columns?: number, rows?: number): string {
+  if (columns && rows) {
+    return `seed_${seed}_${columns}x${rows}`;
+  }
+  return `seed_${seed}`;
+}
+
+export function loadEmpireStore(): SectorEmpireStore {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return { version: 1, sectors: {}, lastActiveEmpireBySector: {} };
+    }
+    const raw = localStorage.getItem(STORAGE_KEY_EMPIRES);
+    if (!raw) {
+      return { version: 1, sectors: {}, lastActiveEmpireBySector: {} };
+    }
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      return {
+        version: 1,
+        sectors: parsed.sectors || {},
+        lastActiveEmpireBySector: parsed.lastActiveEmpireBySector || {},
+      };
+    }
+  } catch (err) {
+    console.warn('Failed to load empire store from localStorage:', err);
+  }
+  return { version: 1, sectors: {}, lastActiveEmpireBySector: {} };
+}
+
+export function saveEmpireStore(store: SectorEmpireStore): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    localStorage.setItem(STORAGE_KEY_EMPIRES, JSON.stringify(store));
+  } catch (err) {
+    console.warn('Failed to save empire store to localStorage:', err);
+  }
+}
+
+export function loadEmpiresForSector(
+  seed: number,
+  columns?: number,
+  rows?: number
+): { empires: SectorEmpire[]; activeEmpireId: string | null } {
+  const store = loadEmpireStore();
+  const keySpecific = getSectorStorageKey(seed, columns, rows);
+  const keyGeneric = getSectorStorageKey(seed);
+
+  const empires = store.sectors[keySpecific] || store.sectors[keyGeneric] || [];
+  const activeEmpireId =
+    store.lastActiveEmpireBySector[keySpecific] ||
+    store.lastActiveEmpireBySector[keyGeneric] ||
+    (empires.length > 0 ? empires[0].id : null);
+
+  return { empires, activeEmpireId };
+}
+
+export function saveEmpiresForSector(
+  seed: number,
+  empires: SectorEmpire[],
+  activeEmpireId?: string | null,
+  columns?: number,
+  rows?: number
+): void {
+  const store = loadEmpireStore();
+  const keySpecific = getSectorStorageKey(seed, columns, rows);
+  const keyGeneric = getSectorStorageKey(seed);
+
+  store.sectors[keySpecific] = empires;
+  store.sectors[keyGeneric] = empires;
+
+  if (activeEmpireId) {
+    store.lastActiveEmpireBySector[keySpecific] = activeEmpireId;
+    store.lastActiveEmpireBySector[keyGeneric] = activeEmpireId;
+  } else if (empires.length > 0) {
+    store.lastActiveEmpireBySector[keySpecific] = empires[0].id;
+    store.lastActiveEmpireBySector[keyGeneric] = empires[0].id;
+  } else {
+    delete store.lastActiveEmpireBySector[keySpecific];
+    delete store.lastActiveEmpireBySector[keyGeneric];
+  }
+  saveEmpireStore(store);
+}
+
+export function loadLastSectorConfig(): any | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    const raw = localStorage.getItem(STORAGE_KEY_LAST_CONFIG);
+    if (raw) {
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    console.warn('Failed to load last sector config:', err);
+  }
+  return null;
+}
+
+export function saveLastSectorConfig(config: any): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    localStorage.setItem(STORAGE_KEY_LAST_CONFIG, JSON.stringify(config));
+  } catch (err) {
+    console.warn('Failed to save last sector config:', err);
+  }
+}
+
+export function exportEmpiresToJSON(): string {
+  const store = loadEmpireStore();
+  return JSON.stringify(store, null, 2);
+}
+
+export function importEmpiresFromJSON(jsonString: string): boolean {
+  try {
+    const parsed = JSON.parse(jsonString);
+    if (parsed && typeof parsed === 'object' && parsed.sectors) {
+      saveEmpireStore({
+        version: 1,
+        sectors: parsed.sectors,
+        lastActiveEmpireBySector: parsed.lastActiveEmpireBySector || {},
+      });
+      return true;
+    }
+  } catch (err) {
+    console.error('Failed to parse imported empires JSON:', err);
+  }
+  return false;
+}
+
+export function downloadEmpiresJSON(seed: number): void {
+  try {
+    const jsonStr = exportEmpiresToJSON();
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `zook_astro_empires_backup_seed_${seed}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error('Failed to download empires backup JSON:', err);
+  }
+}
+
+
+
