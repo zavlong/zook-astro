@@ -1,10 +1,14 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Crosshair,
   X,
   ChevronLeft,
   ChevronRight,
   Sparkles,
+  Crown,
+  Shield,
+  Flag,
+  Trash2,
 } from 'lucide-react';
 import {
   RealisticPlanetBody,
@@ -25,6 +29,19 @@ import {
   ProceduralPlanetPortrait,
   getProceduralPlanetIconDataUrl,
 } from '../ProceduralPlanetPortrait';
+import {
+  SectorEmpire,
+  ColonyDesignation,
+} from '../../../core/generation/empireGen';
+
+export const COLONY_DESIGNATIONS: { id: ColonyDesignation; label: string; icon: string; desc: string }[] = [
+  { id: 'Capital', label: 'Imperial Capital', icon: '👑', desc: 'Central administrative throne world of the empire' },
+  { id: 'Colony', label: 'Planetary Colony', icon: '🚀', desc: 'General civilian settlement and population center' },
+  { id: 'Mining Outpost', label: 'Mining Outpost', icon: '⛏️', desc: 'Resource extraction and deep crustal refineries' },
+  { id: 'Research Station', label: 'Research Station', icon: '🧪', desc: 'Planetary science labs, observatories, and xenology' },
+  { id: 'Industrial Hub', label: 'Industrial Hub', icon: '🏭', desc: 'Heavy manufacturing, orbital foundries, and shipyards' },
+  { id: 'Agri-World', label: 'Agri-World', icon: '🌾', desc: 'Hydroponics, vast planetary farms, and biosphere harvests' },
+];
 
 interface PlanetDossierModalProps {
   selectedEntity: Extract<SelectedMapEntity, { kind: 'planet' | 'moon' }>;
@@ -32,6 +49,14 @@ interface PlanetDossierModalProps {
   onSelectEntity: (entity: SelectedMapEntity) => void;
   onTrackInOrrery: (entity: SelectedMapEntity) => void;
   onClose: () => void;
+  currentEmpire?: SectorEmpire | null;
+  sectorEmpires?: SectorEmpire[];
+  planetClaimInfo?: {
+    empire: SectorEmpire;
+    key: string;
+    designation: ColonyDesignation;
+  } | null;
+  onToggleClaimPlanet?: (designation?: ColonyDesignation, empireId?: string) => void;
 }
 
 export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
@@ -40,7 +65,31 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
   onSelectEntity,
   onTrackInOrrery,
   onClose,
+  currentEmpire,
+  sectorEmpires = [],
+  planetClaimInfo,
+  onToggleClaimPlanet,
 }) => {
+  const [selectedDesignation, setSelectedDesignation] = useState<ColonyDesignation>(
+    planetClaimInfo?.designation || 'Colony'
+  );
+  const [targetEmpireId, setTargetEmpireId] = useState<string>(
+    planetClaimInfo?.empire?.id || currentEmpire?.id || (sectorEmpires[0]?.id ?? '')
+  );
+
+  useEffect(() => {
+    if (planetClaimInfo?.designation) {
+      setSelectedDesignation(planetClaimInfo.designation);
+    }
+    if (planetClaimInfo?.empire?.id) {
+      setTargetEmpireId(planetClaimInfo.empire.id);
+    } else if (currentEmpire?.id) {
+      setTargetEmpireId(currentEmpire.id);
+    } else if (sectorEmpires[0]?.id) {
+      setTargetEmpireId(sectorEmpires[0].id);
+    }
+  }, [planetClaimInfo, currentEmpire, sectorEmpires]);
+
   const zone = systemResult.zones[selectedEntity.zoneIdx];
   const hostPlanet = zone?.bodies[selectedEntity.bodyIdx] as RealisticPlanetBody | undefined;
   if (!zone || !hostPlanet || hostPlanet.kind !== 'planet') return null;
@@ -555,6 +604,193 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
               <span className="text-slate-400 block text-[10px] mb-0.5">ECOSYSTEM SUMMARY</span>
               <p className="text-emerald-200 text-xs leading-relaxed">{hydro.biosphere}</p>
             </div>
+          </div>
+        )}
+
+        {/* ============================================================================ */}
+        {/* IMPERIAL SOVEREIGNTY & COLONY ADMINISTRATION CARD                           */}
+        {/* ============================================================================ */}
+        {(!isMoon || planetClaimInfo) && (
+          <div
+            className="p-3.5 rounded-xl border font-mono text-xs flex flex-col gap-2.5 transition shadow-lg"
+            style={{
+              backgroundColor: planetClaimInfo ? `${planetClaimInfo.empire.color}15` : '#131a26',
+              borderColor: planetClaimInfo ? `${planetClaimInfo.empire.color}60` : '#1e293b',
+            }}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+              <span
+                className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5"
+                style={{ color: planetClaimInfo ? planetClaimInfo.empire.color : '#94a3b8' }}
+              >
+                {planetClaimInfo ? (
+                  <Crown className="w-4 h-4" />
+                ) : (
+                  <Shield className="w-4 h-4 text-slate-400" />
+                )}
+                Imperial Sovereignty &amp; Colony Administration
+              </span>
+
+              {planetClaimInfo ? (
+                <span
+                  className="px-2 py-0.5 rounded text-[10px] font-bold border"
+                  style={{
+                    color: planetClaimInfo.empire.color,
+                    borderColor: `${planetClaimInfo.empire.color}60`,
+                    backgroundColor: `${planetClaimInfo.empire.color}25`,
+                  }}
+                >
+                  {planetClaimInfo.designation === 'Capital' ? '👑 Capital World' : `🚩 ${planetClaimInfo.designation}`}
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded text-[10px] text-slate-400 bg-slate-900 border border-slate-800">
+                  Unclaimed Celestial Body
+                </span>
+              )}
+            </div>
+
+            {planetClaimInfo ? (
+              <div className="space-y-3">
+                {/* Ruling Empire Info */}
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">{planetClaimInfo.empire.phenotype.icon}</span>
+                    <div>
+                      <div className="font-bold text-white text-xs flex items-center gap-1.5">
+                        <span>{planetClaimInfo.empire.name}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {planetClaimInfo.empire.government?.icon} {planetClaimInfo.empire.government?.name || 'Empire'} · {planetClaimInfo.empire.phenotype.name}
+                      </div>
+                    </div>
+                  </div>
+
+                  {planetClaimInfo.empire.ethics && (
+                    <div className="flex flex-wrap gap-1">
+                      {planetClaimInfo.empire.ethics.map((eth) => (
+                        <span
+                          key={eth.id}
+                          className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-[10px] text-slate-300 flex items-center gap-1"
+                          title={eth.description}
+                        >
+                          <span>{eth.icon}</span>
+                          <span>{eth.name}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Change Colony Designation */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-slate-800/80 items-center">
+                  <div>
+                    <label className="text-slate-400 block text-[10px] uppercase font-semibold mb-1">
+                      Colony Classification &amp; Focus
+                    </label>
+                    <select
+                      value={selectedDesignation}
+                      onChange={(e) => {
+                        const newDes = e.target.value as ColonyDesignation;
+                        setSelectedDesignation(newDes);
+                        if (onToggleClaimPlanet) {
+                          onToggleClaimPlanet(newDes, planetClaimInfo.empire.id);
+                        }
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:border-sky-400"
+                    >
+                      {COLONY_DESIGNATIONS.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.icon} {d.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-end justify-end">
+                    {onToggleClaimPlanet && (
+                      <button
+                        type="button"
+                        onClick={() => onToggleClaimPlanet(undefined, planetClaimInfo.empire.id)}
+                        className="w-full sm:w-auto py-1.5 px-3 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 text-rose-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        title="Relinquish sovereignty over this world"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Relinquish Planet Claim</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Unclaimed UI */
+              <div className="space-y-3">
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  This world has no active colony charter. An established interstellar empire can claim this body and commission an orbital colony or planetary outpost.
+                </p>
+
+                {sectorEmpires.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-slate-800/80">
+                    {/* Empire selection if multiple */}
+                    <div>
+                      <label className="text-slate-400 block text-[10px] uppercase font-semibold mb-1">
+                        Sovereign Empire
+                      </label>
+                      <select
+                        value={targetEmpireId}
+                        onChange={(e) => setTargetEmpireId(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:border-sky-400"
+                      >
+                        {sectorEmpires.map((emp) => (
+                          <option key={emp.id} value={emp.id}>
+                            {emp.phenotype.icon} {emp.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Designation selection */}
+                    <div>
+                      <label className="text-slate-400 block text-[10px] uppercase font-semibold mb-1">
+                        Colony Charter
+                      </label>
+                      <select
+                        value={selectedDesignation}
+                        onChange={(e) => setSelectedDesignation(e.target.value as ColonyDesignation)}
+                        className="w-full bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:border-sky-400"
+                      >
+                        {COLONY_DESIGNATIONS.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.icon} {d.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Claim Button */}
+                    <div className="flex items-end">
+                      {onToggleClaimPlanet && (
+                        <button
+                          type="button"
+                          onClick={() => onToggleClaimPlanet(selectedDesignation, targetEmpireId)}
+                          className="w-full py-1.5 px-3 rounded-lg text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md transition cursor-pointer hover:brightness-110 active:scale-95"
+                          style={{
+                            backgroundColor:
+                              sectorEmpires.find((e) => e.id === targetEmpireId)?.color || '#10b981',
+                          }}
+                        >
+                          <Flag className="w-3.5 h-3.5" />
+                          <span>Establish Colony</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-[10.5px] text-slate-500 italic p-2 rounded bg-slate-900/60 border border-slate-800">
+                    No active empires detected in this sector. Spawn an empire on a habitable world in Sector Hex View to begin establishing planetary claims.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

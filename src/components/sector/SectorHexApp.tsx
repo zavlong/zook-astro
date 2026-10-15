@@ -38,6 +38,7 @@ import {
   saveLastSectorConfig,
   downloadEmpiresJSON,
   importEmpiresFromJSON,
+  parsePlanetKey,
 } from '../../core/generation/empireGen';
 import { SpawnEmpireModal } from './SpawnEmpireModal';
 import { StarGenParams } from '../../core/generation/realisticStarGen';
@@ -554,6 +555,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
 
   // Launch StarGen Lab
   const handleLaunchSystemGenerator = (system: SectorHexSystem) => {
+    const systemEmpire = empireMap.get(system.id);
     const params: StarGenParams = {
       sysMass: system.mass,
       age: system.age,
@@ -561,6 +563,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       id: system.id,
       name: system.name,
       forcedMult: 'auto',
+      sectorSeed: config.seed,
+      sectorColumns: config.columns,
+      sectorRows: config.rows,
+      empireId: systemEmpire?.id || activeEmpire?.id,
     };
     onLaunchStarGen(params);
   };
@@ -1959,6 +1965,70 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                           <span className="text-cyan-300 font-bold truncate block">{systemEmpire.homeworldName}</span>
                         </div>
                       </div>
+
+                      {/* Government & Ethics Badges */}
+                      {systemEmpire.government && (
+                        <div className="space-y-1.5 pt-0.5">
+                          <div className="flex items-center gap-1.5 text-[11px] text-slate-300">
+                            <span className="text-sm">{systemEmpire.government.icon}</span>
+                            <span className="font-semibold text-white">{systemEmpire.government.name}</span>
+                          </div>
+                          {systemEmpire.ethics && systemEmpire.ethics.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {systemEmpire.ethics.map((eth) => (
+                                <span
+                                  key={eth.id}
+                                  className="px-1.5 py-0.5 rounded bg-slate-900/90 border border-slate-700/80 text-[10px] text-slate-300 flex items-center gap-1"
+                                  title={eth.description}
+                                >
+                                  <span>{eth.icon}</span>
+                                  <span>{eth.name}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Claimed Planets in this Star System */}
+                      {(() => {
+                        const systemPlanetKeys = (systemEmpire.claimedPlanetKeys || []).filter((k) =>
+                          k.startsWith(`${selectedSystem.id}_`)
+                        );
+                        if (systemPlanetKeys.length === 0) return null;
+                        return (
+                          <div className="p-2 rounded bg-slate-950/70 border border-slate-800/80 space-y-1">
+                            <span className="text-slate-400 block text-[9.5px] uppercase font-bold tracking-wider">
+                              Imperial Colonies ({systemPlanetKeys.length})
+                            </span>
+                            <div className="space-y-1">
+                              {systemPlanetKeys.map((k) => {
+                                const parsed = parsePlanetKey(k);
+                                const des = systemEmpire.planetDesignations?.[k] || 'Colony';
+                                return (
+                                  <div
+                                    key={k}
+                                    className="flex items-center justify-between text-[10.5px] px-1.5 py-0.5 rounded bg-slate-900/60 border border-slate-800"
+                                  >
+                                    <span className="text-slate-200 font-mono">
+                                      🪐 {parsed.planetRole.toUpperCase()}
+                                    </span>
+                                    <span
+                                      className="px-1.5 py-0.2 rounded text-[9px] font-bold"
+                                      style={{
+                                        color: systemEmpire.color,
+                                        backgroundColor: `${systemEmpire.color}20`,
+                                      }}
+                                    >
+                                      {des}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Action buttons */}
                       <div className="pt-1 flex items-center gap-2">

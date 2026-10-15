@@ -40,6 +40,10 @@ export interface StarGenParams {
   seed?: number;
   id?: string;
   name?: string;
+  sectorSeed?: number;
+  sectorColumns?: number;
+  sectorRows?: number;
+  empireId?: string;
 }
 
 export interface RealisticZoneInput {

@@ -1,13 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Crown, X, Dices, Palette } from 'lucide-react';
+import { Crown, X, Dices, Palette, Shield, ScrollText } from 'lucide-react';
 import {
   SectorEmpire,
   AlienPhenotype,
   ALIEN_PHENOTYPES,
   PHENOTYPE_LIST,
   EMPIRE_COLOR_PALETTE,
+  EmpireEthic,
+  EmpireGovernmentType,
+  EMPIRE_ETHICS,
+  ETHICS_LIST,
+  EMPIRE_GOVERNMENTS,
+  GOVERNMENT_LIST,
   generateRandomEmpireName,
   generateRandomEmpire,
+  generateRandomEthicsAndGov,
+  makePlanetKey,
+  ColonyDesignation,
 } from '../../core/generation/empireGen';
 import { SectorHexSystem } from '../../core/generation/sectorHex';
 
@@ -29,6 +38,11 @@ export const SpawnEmpireModal: React.FC<SpawnEmpireModalProps> = ({
   const [empireName, setEmpireName] = useState<string>('');
   const [empireColor, setEmpireColor] = useState<string>('#10b981');
   const [phenotype, setPhenotype] = useState<AlienPhenotype>(ALIEN_PHENOTYPES.humanoid);
+  const [government, setGovernment] = useState<EmpireGovernmentType>(EMPIRE_GOVERNMENTS.democracy);
+  const [ethics, setEthics] = useState<EmpireEthic[]>([
+    EMPIRE_ETHICS.materialist,
+    EMPIRE_ETHICS.egalitarian,
+  ]);
 
   // Initialize randomized empire when opened or homeworld changes
   useEffect(() => {
@@ -38,6 +52,8 @@ export const SpawnEmpireModal: React.FC<SpawnEmpireModalProps> = ({
       setEmpireName(generated.name);
       setEmpireColor(generated.color);
       setPhenotype(generated.phenotype);
+      setGovernment(generated.government);
+      setEthics(generated.ethics);
     }
   }, [isOpen, homeworldSystem, existingEmpires]);
 
@@ -63,17 +79,78 @@ export const SpawnEmpireModal: React.FC<SpawnEmpireModalProps> = ({
     setPhenotype(randomP);
   };
 
+  const handleRerollGovAndEthics = () => {
+    const res = generateRandomEthicsAndGov(phenotype.id);
+    setGovernment(res.government);
+    setEthics(res.ethics);
+  };
+
+  const handleToggleEthic = (ethic: EmpireEthic) => {
+    if (ethic.id === 'gestalt') {
+      setEthics([EMPIRE_ETHICS.gestalt]);
+      setGovernment(EMPIRE_GOVERNMENTS.hivemind);
+      return;
+    }
+
+    // If currently gestalt, clear it
+    const nonGestalt = ethics.filter((e) => e.id !== 'gestalt');
+
+    // If already selected, deselect (unless it's the last one)
+    if (nonGestalt.some((e) => e.id === ethic.id)) {
+      if (nonGestalt.length > 1) {
+        setEthics(nonGestalt.filter((e) => e.id !== ethic.id));
+      }
+      return;
+    }
+
+    // Remove opposing ethic if present (e.g. militarist vs pacifist)
+    let filtered = nonGestalt.filter((e) => e.oppositeId !== ethic.id && ethic.oppositeId !== e.id);
+
+    // Limit to max 3 ethics
+    if (filtered.length >= 3) {
+      filtered = filtered.slice(1);
+    }
+
+    setEthics([...filtered, ethic]);
+  };
+
   const handleConfirm = () => {
     const id = `emp-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+
+    // Identify prime planet in homeworld system if available
+    let homeworldPlanetKey: string | undefined = undefined;
+    if (homeworldSystem.sysResult && homeworldSystem.sysResult.zones) {
+      for (const z of homeworldSystem.sysResult.zones) {
+        for (const b of z.bodies) {
+          if (b.kind === 'planet') {
+            if (!homeworldPlanetKey) {
+              homeworldPlanetKey = makePlanetKey(homeworldSystem.id, b.role || 'p1');
+            }
+          }
+        }
+      }
+    }
+
+    const claimedPlanetKeys = homeworldPlanetKey ? [homeworldPlanetKey] : [];
+    const planetDesignations: Record<string, ColonyDesignation> = {};
+    if (homeworldPlanetKey) {
+      planetDesignations[homeworldPlanetKey] = 'Capital';
+    }
+
     const newEmpire: SectorEmpire = {
       id,
       name: empireName.trim() || 'Alien Dominion',
       color: empireColor,
       phenotype,
+      government,
+      ethics,
       homeworldSystemId: homeworldSystem.id,
       homeworldName: homeworldSystem.name,
       homeworldCoord: homeworldSystem.coord,
+      homeworldPlanetKey,
       claimedSystemIds: [homeworldSystem.id],
+      claimedPlanetKeys,
+      planetDesignations,
       createdAt: Date.now(),
     };
     onFoundEmpire(newEmpire);
@@ -90,7 +167,7 @@ export const SpawnEmpireModal: React.FC<SpawnEmpireModalProps> = ({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-xl bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl p-6 flex flex-col gap-5 font-mono text-xs max-h-[92vh] overflow-y-auto relative">
+      <div className="w-full max-w-2xl bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl p-6 flex flex-col gap-5 font-mono text-xs max-h-[92vh] overflow-y-auto relative">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
           <div className="flex items-center gap-2.5">
@@ -108,7 +185,7 @@ export const SpawnEmpireModal: React.FC<SpawnEmpireModalProps> = ({
               <h2 id="spawn-empire-title" className="text-base font-bold text-white tracking-wide flex items-center gap-2">
                 <span>Spawn Alien Empire</span>
                 <span className="text-[10px] text-slate-400 font-normal">
-                  ({phenotype.icon} {phenotype.name})
+                  ({phenotype.icon} {phenotype.name} &bull; {government.icon} {government.name})
                 </span>
               </h2>
               <p className="text-[11px] text-slate-400">
@@ -214,7 +291,7 @@ export const SpawnEmpireModal: React.FC<SpawnEmpireModalProps> = ({
               <span>Random Phenotype</span>
             </button>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-40 overflow-y-auto pr-1">
             {PHENOTYPE_LIST.map((p) => {
               const isSelected = phenotype.id === p.id;
               return (
@@ -222,21 +299,92 @@ export const SpawnEmpireModal: React.FC<SpawnEmpireModalProps> = ({
                   key={p.id}
                   type="button"
                   onClick={() => setPhenotype(p)}
-                  className={`p-2.5 rounded-xl border text-left transition flex items-start gap-2.5 cursor-pointer ${
+                  className={`p-2 rounded-xl border text-left transition flex items-start gap-2 cursor-pointer ${
                     isSelected
                       ? 'bg-cyan-950/70 border-cyan-500 text-white shadow-lg shadow-cyan-950/50'
                       : 'bg-slate-900/60 border-slate-800/80 text-slate-300 hover:bg-slate-800/70 hover:border-slate-700'
                   }`}
                 >
-                  <span className="text-xl flex-shrink-0 leading-none pt-0.5">{p.icon}</span>
+                  <span className="text-lg flex-shrink-0 leading-none pt-0.5">{p.icon}</span>
                   <div className="min-w-0">
-                    <div className="font-bold text-[11px] truncate flex items-center gap-1">
-                      <span>{p.name}</span>
-                    </div>
-                    <div className="text-[9.5px] text-slate-400 line-clamp-2 leading-tight mt-0.5">
-                      {p.description}
-                    </div>
+                    <div className="font-bold text-[11px] truncate">{p.name}</div>
+                    <div className="text-[9px] text-slate-400 line-clamp-1 mt-0.5">{p.description}</div>
                   </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Government Type & Authority */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] text-slate-300 font-semibold uppercase tracking-wider flex items-center gap-1.5">
+              <Shield className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Government Type &amp; Authority</span>
+            </label>
+            <button
+              type="button"
+              onClick={handleRerollGovAndEthics}
+              className="text-[10.5px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer transition"
+            >
+              <Dices className="w-3.5 h-3.5" />
+              <span>Randomize Gov &amp; Ethics</span>
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-36 overflow-y-auto pr-1">
+            {GOVERNMENT_LIST.map((g) => {
+              const isSelected = government.id === g.id;
+              return (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => setGovernment(g)}
+                  className={`p-2 rounded-xl border text-left transition flex items-start gap-2 cursor-pointer ${
+                    isSelected
+                      ? 'bg-indigo-950/70 border-indigo-400 text-white shadow-md shadow-indigo-950/40 ring-1 ring-indigo-400'
+                      : 'bg-slate-900/60 border-slate-800/80 text-slate-300 hover:bg-slate-800/70 hover:border-slate-700'
+                  }`}
+                >
+                  <span className="text-lg leading-none pt-0.5">{g.icon}</span>
+                  <div className="min-w-0">
+                    <div className="font-bold text-[10.5px] truncate">{g.name}</div>
+                    <div className="text-[8.5px] text-slate-400 line-clamp-1 mt-0.5">{g.description}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Empire Ethics Selection */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] text-slate-300 font-semibold uppercase tracking-wider flex items-center gap-1.5">
+              <ScrollText className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Guiding Ethics (Pick up to 3)</span>
+            </label>
+            <span className="text-[10px] text-slate-400">
+              Selected: <strong className="text-white">{ethics.length}</strong> / 3
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-slate-900/60 border border-slate-800/80">
+            {ETHICS_LIST.map((ethic) => {
+              const isSelected = ethics.some((e) => e.id === ethic.id);
+              return (
+                <button
+                  key={ethic.id}
+                  type="button"
+                  onClick={() => handleToggleEthic(ethic)}
+                  className={`px-2.5 py-1.5 rounded-lg border text-xs font-mono transition flex items-center gap-1.5 cursor-pointer ${
+                    isSelected
+                      ? 'bg-cyan-950 border-cyan-400 text-cyan-200 font-bold shadow-md shadow-cyan-950/60'
+                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                  }`}
+                  title={ethic.description}
+                >
+                  <span>{ethic.icon}</span>
+                  <span>{ethic.name}</span>
                 </button>
               );
             })}
@@ -274,8 +422,19 @@ export const SpawnEmpireModal: React.FC<SpawnEmpireModalProps> = ({
                 Capital: {homeworldSystem.name}
               </span>
             </div>
-            <div className="text-[10.5px] text-slate-400 mt-0.5">
-              {phenotype.name} species inhabiting a habitable world in Sector {homeworldSystem.coord}.
+            <div className="text-[10px] text-slate-300 mt-1 flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-white flex items-center gap-1">
+                <span>{government.icon}</span>
+                <span>{government.name}</span>
+              </span>
+              <span className="text-slate-500">&bull;</span>
+              <span className="text-cyan-300 flex items-center gap-1">
+                {ethics.map((e) => (
+                  <span key={e.id} className="bg-slate-900/80 px-1 py-0.5 rounded border border-slate-700/60 text-[9.5px]">
+                    {e.icon} {e.name}
+                  </span>
+                ))}
+              </span>
             </div>
           </div>
         </div>
@@ -283,7 +442,7 @@ export const SpawnEmpireModal: React.FC<SpawnEmpireModalProps> = ({
         {/* Footer Actions */}
         <div className="flex items-center justify-between pt-3 border-t border-slate-800/80">
           <span className="text-[10px] text-slate-500">
-            Tip: Hold <kbd className="px-1 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[9px]">Shift</kbd> + click other stars to claim territory.
+            Tip: Hold <kbd className="px-1 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[9px]">Shift</kbd> + click stars in sector or claim worlds in StarGen.
           </span>
           <div className="flex items-center gap-2">
             <button

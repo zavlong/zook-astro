@@ -107,15 +107,193 @@ export const ALIEN_PHENOTYPES: Record<AlienPhenotypeId, AlienPhenotype> = {
 
 export const PHENOTYPE_LIST: AlienPhenotype[] = Object.values(ALIEN_PHENOTYPES);
 
+// ============================================================================
+// EMPIRE ETHICS & PHILOSOPHIES
+// ============================================================================
+
+export type EmpireEthicId =
+  | 'militarist'
+  | 'pacifist'
+  | 'authoritarian'
+  | 'egalitarian'
+  | 'materialist'
+  | 'spiritualist'
+  | 'xenophile'
+  | 'xenophobe'
+  | 'gestalt';
+
+export interface EmpireEthic {
+  id: EmpireEthicId;
+  name: string;
+  icon: string;
+  oppositeId?: EmpireEthicId;
+  description: string;
+}
+
+export const EMPIRE_ETHICS: Record<EmpireEthicId, EmpireEthic> = {
+  militarist: {
+    id: 'militarist',
+    name: 'Militarist',
+    icon: '⚔️',
+    oppositeId: 'pacifist',
+    description: 'Martial prowess, fleet supremacy, and conquest drive state policy.',
+  },
+  pacifist: {
+    id: 'pacifist',
+    name: 'Pacifist',
+    icon: '🕊️',
+    oppositeId: 'militarist',
+    description: 'Diplomatic consensus, non-violence, and internal prosperity are paramount.',
+  },
+  authoritarian: {
+    id: 'authoritarian',
+    name: 'Authoritarian',
+    icon: '👑',
+    oppositeId: 'egalitarian',
+    description: 'Hierarchical social order and supreme central command maintain order.',
+  },
+  egalitarian: {
+    id: 'egalitarian',
+    name: 'Egalitarian',
+    icon: '⚖️',
+    oppositeId: 'authoritarian',
+    description: 'Democratic liberties, individual merit, and equal representation for all.',
+  },
+  materialist: {
+    id: 'materialist',
+    name: 'Materialist',
+    icon: '🔬',
+    oppositeId: 'spiritualist',
+    description: 'Empirical rationalism, automation, and technological ascendancy.',
+  },
+  spiritualist: {
+    id: 'spiritualist',
+    name: 'Spiritualist',
+    icon: '✨',
+    oppositeId: 'materialist',
+    description: 'Cosmic consciousness, psionic mysteries, and sacred reverence.',
+  },
+  xenophile: {
+    id: 'xenophile',
+    name: 'Xenophile',
+    icon: '🤝',
+    oppositeId: 'xenophobe',
+    description: 'Active celebration of diverse species, cultural exchange, and migration.',
+  },
+  xenophobe: {
+    id: 'xenophobe',
+    name: 'Xenophobe',
+    icon: '🛡️',
+    oppositeId: 'xenophile',
+    description: 'Species preservation, planetary purity, and suspicion of outsiders.',
+  },
+  gestalt: {
+    id: 'gestalt',
+    name: 'Gestalt Consciousness',
+    icon: '🧠',
+    description: 'Billions of semi-autonomous bodies united under an indivisible hivemind.',
+  },
+};
+
+export const ETHICS_LIST: EmpireEthic[] = Object.values(EMPIRE_ETHICS);
+
+// ============================================================================
+// EMPIRE GOVERNMENT TYPES & AUTHORITIES
+// ============================================================================
+
+export type EmpireGovernmentTypeId =
+  | 'democracy'
+  | 'oligarchy'
+  | 'autocracy'
+  | 'technocracy'
+  | 'theocracy'
+  | 'hivemind'
+  | 'feudal';
+
+export interface EmpireGovernmentType {
+  id: EmpireGovernmentTypeId;
+  name: string;
+  icon: string;
+  description: string;
+  typicalCivics: string[];
+}
+
+export const EMPIRE_GOVERNMENTS: Record<EmpireGovernmentTypeId, EmpireGovernmentType> = {
+  democracy: {
+    id: 'democracy',
+    name: 'Representative Democracy',
+    icon: '🗳️',
+    description: 'Rulers are chosen via open interstellar elections and planetary assemblies.',
+    typicalCivics: ['Beacon of Liberty', 'Citizen Service', 'Idealistic Foundation'],
+  },
+  oligarchy: {
+    id: 'oligarchy',
+    name: 'Corporate Directorate',
+    icon: '💼',
+    description: 'Leadership is selected by influential merchant cartels and industrial boards.',
+    typicalCivics: ['Corporate Dominance', 'Ruthless Competition', 'Technological Concession'],
+  },
+  autocracy: {
+    id: 'autocracy',
+    name: 'Imperial Dynastic Realm',
+    icon: '👑',
+    description: 'Absolute dynastic sovereign with unquestioned rule across star systems.',
+    typicalCivics: ['Aristocratic Elite', 'Philosopher King', 'Imperial Cult'],
+  },
+  technocracy: {
+    id: 'technocracy',
+    name: 'Technocratic Directorate',
+    icon: '🧪',
+    description: 'Scientific and analytical ministers govern based on empirical optimization.',
+    typicalCivics: ['Scientific Ascendancy', 'Mechanized Logistics', 'Calculated Consensus'],
+  },
+  theocracy: {
+    id: 'theocracy',
+    name: 'Theocratic Synod',
+    icon: '⛪',
+    description: 'High hierophants and spiritual dogmas guide celestial legislation.',
+    typicalCivics: ['Exalted Priesthood', 'Sacred Asceticism', 'Divine Mandate'],
+  },
+  hivemind: {
+    id: 'hivemind',
+    name: 'Hive Mind / Collective',
+    icon: '🌐',
+    description: 'A single psionic or biological consciousness acting as an indivisible whole.',
+    typicalCivics: ['Subsumed Will', 'One Mind', 'Pooled Synapses'],
+  },
+  feudal: {
+    id: 'feudal',
+    name: 'Feudal Star League',
+    icon: '🛡️',
+    description: 'Sworn baronies, warrior clans, and planetary lords loyal to a high chancellor.',
+    typicalCivics: ['Feudal Realm', 'Warrior Culture', 'Martial Clans'],
+  },
+};
+
+export const GOVERNMENT_LIST: EmpireGovernmentType[] = Object.values(EMPIRE_GOVERNMENTS);
+
+export type ColonyDesignation =
+  | 'Capital'
+  | 'Colony'
+  | 'Mining Outpost'
+  | 'Research Station'
+  | 'Industrial Hub'
+  | 'Agri-World';
+
 export interface SectorEmpire {
   id: string;
   name: string;
   color: string;
   phenotype: AlienPhenotype;
+  government: EmpireGovernmentType;
+  ethics: EmpireEthic[];
   homeworldSystemId: string;
   homeworldName: string;
   homeworldCoord: string;
+  homeworldPlanetKey?: string; // e.g. "SYS-0408-A938_p3"
   claimedSystemIds: string[];
+  claimedPlanetKeys: string[]; // e.g. ["SYS-0408-A938_p1", "SYS-0408-A938_p3"]
+  planetDesignations?: Record<string, ColonyDesignation>;
   createdAt: number;
 }
 
@@ -173,6 +351,79 @@ export function generateRandomEmpireName(phenotypeId?: AlienPhenotypeId): string
   return formats[Math.floor(Math.random() * formats.length)];
 }
 
+export function generateRandomEthicsAndGov(phenotypeId: AlienPhenotypeId): {
+  ethics: EmpireEthic[];
+  government: EmpireGovernmentType;
+} {
+  if (phenotypeId === 'synthetic' && Math.random() < 0.5) {
+    return {
+      ethics: [EMPIRE_ETHICS.gestalt],
+      government: EMPIRE_GOVERNMENTS.hivemind,
+    };
+  }
+  if ((phenotypeId === 'arthropoid' || phenotypeId === 'fungoid') && Math.random() < 0.45) {
+    return {
+      ethics: [EMPIRE_ETHICS.gestalt],
+      government: EMPIRE_GOVERNMENTS.hivemind,
+    };
+  }
+
+  // Pick 2-3 compatible ethics from regular ethics
+  const nonGestalt = [
+    EMPIRE_ETHICS.militarist,
+    EMPIRE_ETHICS.pacifist,
+    EMPIRE_ETHICS.authoritarian,
+    EMPIRE_ETHICS.egalitarian,
+    EMPIRE_ETHICS.materialist,
+    EMPIRE_ETHICS.spiritualist,
+    EMPIRE_ETHICS.xenophile,
+    EMPIRE_ETHICS.xenophobe,
+  ];
+
+  const shuffled = [...nonGestalt].sort(() => Math.random() - 0.5);
+  const chosenEthics: EmpireEthic[] = [];
+
+  for (const ethic of shuffled) {
+    const hasOpposite = chosenEthics.some((e) => e.oppositeId === ethic.id || ethic.oppositeId === e.id);
+    if (!hasOpposite) {
+      chosenEthics.push(ethic);
+      if (chosenEthics.length >= 3) break;
+    }
+  }
+
+  // Select matching government based on ethics
+  let gov = EMPIRE_GOVERNMENTS.democracy;
+  if (chosenEthics.some((e) => e.id === 'materialist')) {
+    gov = Math.random() < 0.6 ? EMPIRE_GOVERNMENTS.technocracy : EMPIRE_GOVERNMENTS.oligarchy;
+  } else if (chosenEthics.some((e) => e.id === 'spiritualist')) {
+    gov = EMPIRE_GOVERNMENTS.theocracy;
+  } else if (chosenEthics.some((e) => e.id === 'authoritarian')) {
+    gov = Math.random() < 0.6 ? EMPIRE_GOVERNMENTS.autocracy : EMPIRE_GOVERNMENTS.feudal;
+  } else if (chosenEthics.some((e) => e.id === 'militarist')) {
+    gov = Math.random() < 0.5 ? EMPIRE_GOVERNMENTS.feudal : EMPIRE_GOVERNMENTS.autocracy;
+  } else if (chosenEthics.some((e) => e.id === 'egalitarian')) {
+    gov = EMPIRE_GOVERNMENTS.democracy;
+  } else {
+    const govs = [EMPIRE_GOVERNMENTS.democracy, EMPIRE_GOVERNMENTS.oligarchy, EMPIRE_GOVERNMENTS.autocracy];
+    gov = govs[Math.floor(Math.random() * govs.length)];
+  }
+
+  return { ethics: chosenEthics, government: gov };
+}
+
+export function makePlanetKey(systemId: string, planetRole: string): string {
+  return `${systemId}_${planetRole}`;
+}
+
+export function parsePlanetKey(planetKey: string): { systemId: string; planetRole: string } {
+  const lastUnderscore = planetKey.lastIndexOf('_');
+  if (lastUnderscore === -1) return { systemId: planetKey, planetRole: '' };
+  return {
+    systemId: planetKey.substring(0, lastUnderscore),
+    planetRole: planetKey.substring(lastUnderscore + 1),
+  };
+}
+
 export function generateRandomEmpire(
   homeworldSystem: SectorHexSystem,
   usedColors: string[] = []
@@ -188,16 +439,43 @@ export function generateRandomEmpire(
 
   const name = generateRandomEmpireName(phenotype.id);
   const id = `emp-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+  const { ethics, government } = generateRandomEthicsAndGov(phenotype.id);
+
+  // Automatically find prime planet in homeworld system if available
+  let homeworldPlanetKey: string | undefined = undefined;
+  if (homeworldSystem.sysResult && homeworldSystem.sysResult.zones) {
+    for (const z of homeworldSystem.sysResult.zones) {
+      for (const b of z.bodies) {
+        if (b.kind === 'planet') {
+          // If first planet or terrestrial candidate
+          if (!homeworldPlanetKey) {
+            homeworldPlanetKey = makePlanetKey(homeworldSystem.id, b.role || 'p1');
+          }
+        }
+      }
+    }
+  }
+
+  const claimedPlanetKeys = homeworldPlanetKey ? [homeworldPlanetKey] : [];
+  const planetDesignations: Record<string, ColonyDesignation> = {};
+  if (homeworldPlanetKey) {
+    planetDesignations[homeworldPlanetKey] = 'Capital';
+  }
 
   return {
     id,
     name,
     color: chosenColor,
     phenotype,
+    government,
+    ethics,
     homeworldSystemId: homeworldSystem.id,
     homeworldName: homeworldSystem.name,
     homeworldCoord: homeworldSystem.coord,
+    homeworldPlanetKey,
     claimedSystemIds: [homeworldSystem.id],
+    claimedPlanetKeys,
+    planetDesignations,
     createdAt: Date.now(),
   };
 }
@@ -343,6 +621,61 @@ export function importEmpiresFromJSON(jsonString: string): boolean {
   return false;
 }
 
+export function claimPlanetForEmpire(
+  seed: number,
+  empireId: string,
+  planetKey: string,
+  designation: ColonyDesignation = 'Colony',
+  columns?: number,
+  rows?: number
+): void {
+  const store = loadEmpireStore();
+  const keySpecific = getSectorStorageKey(seed, columns, rows);
+  const keyGeneric = getSectorStorageKey(seed);
+  const empires = store.sectors[keySpecific] || store.sectors[keyGeneric] || [];
+
+  const updated = empires.map((emp) => {
+    if (emp.id === empireId) {
+      const keys = Array.from(new Set([...(emp.claimedPlanetKeys || []), planetKey]));
+      const designations = { ...(emp.planetDesignations || {}), [planetKey]: designation };
+      return { ...emp, claimedPlanetKeys: keys, planetDesignations: designations };
+    } else {
+      // Remove from other empires if claimed
+      const keys = (emp.claimedPlanetKeys || []).filter((k) => k !== planetKey);
+      const designations = { ...(emp.planetDesignations || {}) };
+      delete designations[planetKey];
+      return { ...emp, claimedPlanetKeys: keys, planetDesignations: designations };
+    }
+  });
+
+  saveEmpiresForSector(seed, updated, empireId, columns, rows);
+}
+
+export function unclaimPlanetForEmpire(
+  seed: number,
+  empireId: string,
+  planetKey: string,
+  columns?: number,
+  rows?: number
+): void {
+  const store = loadEmpireStore();
+  const keySpecific = getSectorStorageKey(seed, columns, rows);
+  const keyGeneric = getSectorStorageKey(seed);
+  const empires = store.sectors[keySpecific] || store.sectors[keyGeneric] || [];
+
+  const updated = empires.map((emp) => {
+    if (emp.id === empireId) {
+      const keys = (emp.claimedPlanetKeys || []).filter((k) => k !== planetKey);
+      const designations = { ...(emp.planetDesignations || {}) };
+      delete designations[planetKey];
+      return { ...emp, claimedPlanetKeys: keys, planetDesignations: designations };
+    }
+    return emp;
+  });
+
+  saveEmpiresForSector(seed, updated, empireId, columns, rows);
+}
+
 export function downloadEmpiresJSON(seed: number): void {
   try {
     const jsonStr = exportEmpiresToJSON();
@@ -359,6 +692,8 @@ export function downloadEmpiresJSON(seed: number): void {
     console.error('Failed to download empires backup JSON:', err);
   }
 }
+
+
 
 
 

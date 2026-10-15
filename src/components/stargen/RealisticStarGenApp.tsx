@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Sparkles,
   RefreshCw,
@@ -56,6 +56,14 @@ import { StarDossierModal } from './modals/StarDossierModal';
 import { BinarySplitModal } from './modals/BinarySplitModal';
 import { BeltDossierModal } from './modals/BeltDossierModal';
 import { PlanetDossierModal } from './modals/PlanetDossierModal';
+import {
+  loadEmpiresForSector,
+  claimPlanetForEmpire,
+  unclaimPlanetForEmpire,
+  makePlanetKey,
+  SectorEmpire,
+  ColonyDesignation,
+} from '../../core/generation/empireGen';
 
 interface RealisticStarGenAppProps {
   onOpenInArchitect: (archSystem: ArchitectSystem) => void;
@@ -112,6 +120,99 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
   // Modals (JSON Import/Export)
   const [showJsonModal, setShowJsonModal] = useState<boolean>(false);
+
+  // Sector Empires & System Sovereignty State
+  const [sectorEmpires, setSectorEmpires] = useState<SectorEmpire[]>([]);
+
+  const sectorSeed = initialParams?.sectorSeed;
+  const sectorColumns = initialParams?.sectorColumns;
+  const sectorRows = initialParams?.sectorRows;
+
+  const reloadEmpires = useCallback(() => {
+    if (sectorSeed !== undefined) {
+      const loaded = loadEmpiresForSector(sectorSeed, sectorColumns, sectorRows);
+      setSectorEmpires(loaded.empires);
+    } else {
+      const loaded = loadEmpiresForSector(4289);
+      setSectorEmpires(loaded.empires);
+    }
+  }, [sectorSeed, sectorColumns, sectorRows]);
+
+  useEffect(() => {
+    reloadEmpires();
+  }, [reloadEmpires, systemResult]);
+
+  const currentSysId = systemResult?.step1?.id || initialParams?.id;
+
+  const currentEmpire = useMemo(() => {
+    if (!currentSysId) return null;
+    return (
+      sectorEmpires.find(
+        (e) =>
+          e.claimedSystemIds?.includes(currentSysId) ||
+          (initialParams?.empireId && e.id === initialParams.empireId)
+      ) || null
+    );
+  }, [sectorEmpires, currentSysId, initialParams?.empireId]);
+
+  const getPlanetClaimInfo = useCallback(
+    (b: RealisticPlanetBody, bIdx: number) => {
+      if (!currentSysId) return null;
+      const pKey1 = makePlanetKey(currentSysId, `p${bIdx + 1}`);
+      const pKey2 = b.role ? makePlanetKey(currentSysId, b.role) : '';
+
+      for (const emp of sectorEmpires) {
+        const keys = emp.claimedPlanetKeys || [];
+        if (keys.includes(pKey1)) {
+          return {
+            empire: emp,
+            key: pKey1,
+            designation: (emp.planetDesignations?.[pKey1] || 'Colony') as ColonyDesignation,
+          };
+        }
+        if (pKey2 && keys.includes(pKey2)) {
+          return {
+            empire: emp,
+            key: pKey2,
+            designation: (emp.planetDesignations?.[pKey2] || 'Colony') as ColonyDesignation,
+          };
+        }
+      }
+      return null;
+    },
+    [currentSysId, sectorEmpires]
+  );
+
+  const handleToggleClaimPlanet = useCallback(
+    (
+      b: RealisticPlanetBody,
+      bIdx: number,
+      designation?: ColonyDesignation,
+      targetEmpireId?: string
+    ) => {
+      if (!currentSysId) return;
+      const effSeed = sectorSeed ?? 4289;
+      const empireToUse =
+        sectorEmpires.find((e) => e.id === targetEmpireId) ||
+        currentEmpire ||
+        sectorEmpires[0];
+      if (!empireToUse) return;
+
+      const pKey = makePlanetKey(currentSysId, `p${bIdx + 1}`);
+      const existing = getPlanetClaimInfo(b, bIdx);
+
+      if (existing && !designation) {
+        // Relinquish
+        unclaimPlanetForEmpire(effSeed, existing.empire.id, existing.key, sectorColumns, sectorRows);
+      } else {
+        // Claim / Update designation
+        const des = designation || (existing?.designation ?? 'Colony');
+        claimPlanetForEmpire(effSeed, empireToUse.id, pKey, des, sectorColumns, sectorRows);
+      }
+      reloadEmpires();
+    },
+    [currentSysId, sectorSeed, sectorColumns, sectorRows, sectorEmpires, currentEmpire, getPlanetClaimInfo, reloadEmpires]
+  );
 
   const sysMass = +Math.pow(10, logMass).toFixed(3);
 
@@ -1134,71 +1235,89 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                       })}
 
                       {/* Clickable Planet Group */}
-                      <g
-                        className="cursor-pointer"
-                        onClick={(e) => {
-                          if (e.shiftKey) {
-                            setMapMode('orrery2d');
-                            handleTrackBody({
-                              kind: 'planet',
-                              zoneIdx: zIdx,
-                              bodyIdx: bIdx,
-                            });
-                          } else {
-                            setSelectedEntity({
-                              kind: 'planet',
-                              zoneIdx: zIdx,
-                              bodyIdx: bIdx,
-                            });
-                          }
-                        }}
-                      >
-                        <title>{`Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')} — Click for details · Shift+Click to track in Orrery`}</title>
-                        {/* Selection / Habitable Halo */}
-                        {(isPlanetSel || b.planetClass.includes('Habitable')) && (
-                          <circle
-                            cx={bx}
-                            cy={midY}
-                            r={rP + 4.5}
-                            fill="none"
-                            stroke={isPlanetSel ? '#38bdf8' : '#10b981'}
-                            strokeWidth={isPlanetSel ? 2.2 : 1.5}
-                            strokeDasharray={isPlanetSel ? undefined : '3,2'}
-                          />
-                        )}
+                      {(() => {
+                        const claimInfo = getPlanetClaimInfo(b, bIdx);
+                        return (
+                          <g
+                            className="cursor-pointer"
+                            onClick={(e) => {
+                              if (e.shiftKey) {
+                                setMapMode('orrery2d');
+                                handleTrackBody({
+                                  kind: 'planet',
+                                  zoneIdx: zIdx,
+                                  bodyIdx: bIdx,
+                                });
+                              } else {
+                                setSelectedEntity({
+                                  kind: 'planet',
+                                  zoneIdx: zIdx,
+                                  bodyIdx: bIdx,
+                                });
+                              }
+                            }}
+                          >
+                            <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')} — Click for details · Shift+Click to track in Orrery`}</title>
+                            {/* Selection / Habitable Halo */}
+                            {(isPlanetSel || b.planetClass.includes('Habitable')) && (
+                              <circle
+                                cx={bx}
+                                cy={midY}
+                                r={rP + 4.5}
+                                fill="none"
+                                stroke={isPlanetSel ? '#38bdf8' : '#10b981'}
+                                strokeWidth={isPlanetSel ? 2.2 : 1.5}
+                                strokeDasharray={isPlanetSel ? undefined : '3,2'}
+                              />
+                            )}
 
-                        {/* Low-Res Procedural Planet Portrait Icon (includes 3D rings, eyeball oceans, magma, bands) */}
-                        <image
-                          href={planetIconUrl}
-                          x={bx - planetImgSize / 2}
-                          y={midY - planetImgSize / 2}
-                          width={planetImgSize}
-                          height={planetImgSize}
-                        />
+                            {/* Imperial Sovereignty Halo */}
+                            {claimInfo && (
+                              <circle
+                                cx={bx}
+                                cy={midY}
+                                r={rP + (isPlanetSel ? 6.5 : 4.5)}
+                                fill="none"
+                                stroke={claimInfo.empire.color}
+                                strokeWidth={2.0}
+                                strokeDasharray={claimInfo.designation === 'Capital' ? undefined : '4,2'}
+                              />
+                            )}
 
-                        {/* Minimal Label: ONLY Planet Number & Semi-Major Axis to 2 Decimal Places */}
-                        <text
-                          x={bx}
-                          y={labelY1}
-                          fill="#f8fafc"
-                          fontSize={10}
-                          fontWeight="bold"
-                          fontFamily="monospace"
-                          textAnchor="middle"
-                        >
-                          #{num}
-                        </text>
-                        <text
-                          x={bx}
-                          y={labelY2}
-                          fill="#94a3b8"
-                          fontSize={9}
-                          fontFamily="monospace"
-                          textAnchor="middle"
-                        >
-                          {b.a.toFixed(2)} AU
-                        </text>
-                      </g>
+                            {/* Low-Res Procedural Planet Portrait Icon (includes 3D rings, eyeball oceans, magma, bands) */}
+                            <image
+                              href={planetIconUrl}
+                              x={bx - planetImgSize / 2}
+                              y={midY - planetImgSize / 2}
+                              width={planetImgSize}
+                              height={planetImgSize}
+                            />
+
+                            {/* Minimal Label: ONLY Planet Number & Semi-Major Axis to 2 Decimal Places */}
+                            <text
+                              x={bx}
+                              y={labelY1}
+                              fill={claimInfo ? claimInfo.empire.color : '#f8fafc'}
+                              fontSize={10}
+                              fontWeight="bold"
+                              fontFamily="monospace"
+                              textAnchor="middle"
+                            >
+                              {claimInfo ? (claimInfo.designation === 'Capital' ? '👑 ' : '🚩 ') : ''}#{num}
+                            </text>
+                            <text
+                              x={bx}
+                              y={labelY2}
+                              fill="#94a3b8"
+                              fontSize={9}
+                              fontFamily="monospace"
+                              textAnchor="middle"
+                            >
+                              {b.a.toFixed(2)} AU
+                            </text>
+                          </g>
+                        );
+                      })()}
                     </g>
                   );
                 })}
@@ -2138,6 +2257,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                         selectedEntity.zoneIdx === zIdx &&
                         selectedEntity.bodyIdx === bIdx;
                       const isPlanetSel = isPlanetTracked || isPlanetDossier;
+                      const claimInfo = getPlanetClaimInfo(b, bIdx);
 
                       // Actual Procedural Planet Texture from Planet Info View:
                       const planetIconUrl = getProceduralPlanetIconDataUrl(
@@ -2278,7 +2398,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                 );
                               }}
                             >
-                              <title>{`Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}\n• Click: View Planet Details\n• Shift+Click: Lock Camera & Track Orbit`}</title>
+                              <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}\n• Click: View Planet Details\n• Shift+Click: Lock Camera & Track Orbit`}</title>
                               {/* Invisible click target for easy selection */}
                               <circle
                                 cx={pProj.x}
@@ -2296,6 +2416,20 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                   fill="none"
                                   stroke="#38bdf8"
                                   strokeWidth={1.8}
+                                />
+                              )}
+
+                              {/* Imperial Sovereignty Halo */}
+                              {claimInfo && (
+                                <circle
+                                  cx={pProj.x}
+                                  cy={pProj.y}
+                                  r={pRad + 4.5}
+                                  fill="none"
+                                  stroke={claimInfo.empire.color}
+                                  strokeWidth={2.0}
+                                  strokeDasharray={claimInfo.designation === 'Capital' ? undefined : '3,2'}
+                                  opacity={0.9}
                                 />
                               )}
 
@@ -2318,13 +2452,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                 <text
                                   x={pProj.x}
                                   y={pProj.y - pRad - 4}
-                                  fill="#f8fafc"
+                                  fill={claimInfo ? claimInfo.empire.color : '#f8fafc'}
                                   fontSize={clamp(8 + pRad * 0.08, 8, 13)}
                                   fontWeight="bold"
                                   fontFamily="monospace"
                                   textAnchor="middle"
                                 >
-                                  #{bIdx + 1} ({b.a.toFixed(2)} AU)
+                                  {claimInfo ? (claimInfo.designation === 'Capital' ? '👑 ' : '🚩 ') : ''}#{bIdx + 1} ({b.a.toFixed(2)} AU)
                                 </text>
                               )}
                             </g>
@@ -2342,11 +2476,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             stroke={
                               isPlanetSel
                                 ? '#38bdf8'
+                                : claimInfo
+                                ? `${claimInfo.empire.color}90`
                                 : isCircumbinary
                                 ? 'rgba(251, 191, 36, 0.32)'
                                 : 'rgba(51, 65, 85, 0.88)'
                             }
-                            strokeWidth={isPlanetSel ? 1.8 : 1.15}
+                            strokeWidth={isPlanetSel ? 1.8 : claimInfo ? 1.4 : 1.15}
                           />
                         </g>
                       );
@@ -2572,6 +2708,9 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
     // 4. Planet & Moon Dossier Modal
     if (selectedEntity.kind === 'planet' || selectedEntity.kind === 'moon') {
+      const hostPlanet = systemResult.zones[selectedEntity.zoneIdx]?.bodies[selectedEntity.bodyIdx] as RealisticPlanetBody | undefined;
+      const claimInfo = hostPlanet ? getPlanetClaimInfo(hostPlanet, selectedEntity.bodyIdx) : null;
+
       return (
         <PlanetDossierModal
           selectedEntity={selectedEntity}
@@ -2582,6 +2721,14 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             setMapMode('orrery2d');
           }}
           onClose={() => setSelectedEntity(null)}
+          currentEmpire={currentEmpire}
+          sectorEmpires={sectorEmpires}
+          planetClaimInfo={claimInfo}
+          onToggleClaimPlanet={(des, empId) => {
+            if (hostPlanet) {
+              handleToggleClaimPlanet(hostPlanet, selectedEntity.bodyIdx, des, empId);
+            }
+          }}
         />
       );
     }
@@ -2591,6 +2738,83 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
   return (
     <div className="w-full h-full overflow-y-auto p-3 bg-[#060911] text-slate-100 custom-scrollbar flex flex-col gap-3">
+      {/* Imperial Sovereignty & Realm Banner */}
+      {currentEmpire && (
+        <div
+          className="rounded-xl p-3 border font-mono text-xs flex flex-wrap items-center justify-between gap-3 shadow-lg relative overflow-hidden"
+          style={{
+            backgroundColor: `${currentEmpire.color}15`,
+            borderColor: `${currentEmpire.color}60`,
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">{currentEmpire.phenotype.icon}</span>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-white text-sm tracking-wide">
+                  {currentEmpire.name}
+                </span>
+                <span
+                  className="px-2 py-0.5 rounded text-[10px] font-bold border"
+                  style={{
+                    color: currentEmpire.color,
+                    borderColor: `${currentEmpire.color}60`,
+                    backgroundColor: `${currentEmpire.color}25`,
+                  }}
+                >
+                  {currentEmpire.homeworldSystemId === currentSysId
+                    ? '👑 Imperial Capital System'
+                    : '🚩 Imperial Sovereign Territory'}
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-300 flex items-center gap-2 mt-0.5 flex-wrap">
+                <span>
+                  {currentEmpire.government?.icon} {currentEmpire.government?.name || 'Empire'}
+                </span>
+                <span className="text-slate-500">·</span>
+                <span className="text-slate-400">{currentEmpire.phenotype.name} Civilization</span>
+                <span className="text-slate-500">·</span>
+                <span className="text-slate-400">Homeworld: {currentEmpire.homeworldName}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {currentEmpire.ethics && (
+              <div className="flex flex-wrap gap-1">
+                {currentEmpire.ethics.map((eth) => (
+                  <span
+                    key={eth.id}
+                    className="px-2 py-0.5 rounded bg-slate-900/90 border border-slate-700/80 text-[10px] text-slate-300 flex items-center gap-1 shadow-sm"
+                    title={eth.description}
+                  >
+                    <span>{eth.icon}</span>
+                    <span>{eth.name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            {(() => {
+              const claimedPlanetsInSys = (currentEmpire.claimedPlanetKeys || []).filter((k) =>
+                currentSysId ? k.startsWith(`${currentSysId}_`) : false
+              ).length;
+              return (
+                <div
+                  className="px-2.5 py-1 rounded-lg border text-[11px] font-bold"
+                  style={{
+                    color: currentEmpire.color,
+                    borderColor: `${currentEmpire.color}50`,
+                    backgroundColor: `${currentEmpire.color}20`,
+                  }}
+                >
+                  🏛️ {claimedPlanetsInSys} Planetary Colonies
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* Compact Top Control & Slider Deck */}
       <div className="bg-[#0e131d] border border-[#2a3852] rounded-xl p-3.5 flex flex-col gap-3 shadow-lg">
         <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-800 pb-2.5">
