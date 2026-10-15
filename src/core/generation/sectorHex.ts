@@ -66,6 +66,20 @@ export interface SectorHexConfig {
   metallicitySigma: number;
 }
 
+export interface SectorHyperlane {
+  id: string; // "HL-SYS1__SYS2"
+  sourceId: string;
+  targetId: string;
+  sourceCoord: string;
+  targetCoord: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  lengthPx: number;
+  lengthLy: number;
+}
+
 export interface SectorHexGridData {
   config: SectorHexConfig;
   sectorWidth: number;
@@ -74,12 +88,14 @@ export interface SectorHexGridData {
   parsecHeight: number;
   cells: SectorHexCell[];
   systems: SectorHexSystem[];
+  hyperlanes: SectorHyperlane[]; // Procedural hyperlanes connecting neighboring stars
   integratedColorHex: string; // Luminosity-weighted average color of all constituent stars in sector
   stats: {
     totalHexes: number;
     occupiedHexes: number;
     occupancyPct: number;
     totalStars: number;
+    hyperlaneCount: number;
     obCount: number;
     afCount: number;
     gCount: number;
@@ -478,6 +494,9 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
     }
   }
 
+  // Generate procedural hyperlanes connecting each star to its 6 closest systems and deleting overlapping lanes
+  const hyperlanes = generateProceduralHyperlanes(systems);
+
   const totalHexes = config.columns * config.rows;
   const occupiedHexes = systems.length;
   const occupancyPct = totalHexes > 0 ? +((occupiedHexes / totalHexes) * 100).toFixed(1) : 0;
@@ -490,12 +509,14 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
     parsecHeight,
     cells,
     systems,
+    hyperlanes,
     integratedColorHex,
     stats: {
       totalHexes,
       occupiedHexes,
       occupancyPct,
       totalStars: systems.length,
+      hyperlaneCount: hyperlanes.length,
       obCount,
       afCount,
       gCount,
@@ -506,4 +527,158 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       habitableCount,
     },
   };
+}
+
+/**
+ * Squared perpendicular distance from point (px, py) to line segment (x1, y1)-(x2, y2)
+ */
+function distToSegmentSq(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+  const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+  if (l2 === 0) return (px - x1) * (px - x1) + (py - y1) * (py - y1);
+  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  const projX = x1 + t * (x2 - x1);
+  const projY = y1 + t * (y2 - y1);
+  return (px - projX) * (px - projX) + (py - projY) * (py - projY);
+}
+
+/**
+ * 2D counter-clockwise orientation test
+ */
+function ccw(x1: number, y1: number, x2: number, y2: number, x3: number, y3: number): number {
+  return (y3 - y1) * (x2 - x1) - (y2 - y1) * (x3 - x1);
+}
+
+/**
+ * Returns true if segment (x1, y1)-(x2, y2) strictly intersects (crosses) segment (x3, y3)-(x4, y4)
+ */
+function doSegmentsCross(
+  x1: number, y1: number, x2: number, y2: number,
+  x3: number, y3: number, x4: number, y4: number
+): boolean {
+  const d1 = ccw(x1, y1, x2, y2, x3, y3);
+  const d2 = ccw(x1, y1, x2, y2, x4, y4);
+  const d3 = ccw(x3, y3, x4, y4, x1, y1);
+  const d4 = ccw(x3, y3, x4, y4, x2, y2);
+
+  if (((d1 > 1e-4 && d2 < -1e-4) || (d1 < -1e-4 && d2 > 1e-4)) &&
+      ((d3 > 1e-4 && d4 < -1e-4) || (d3 < -1e-4 && d4 > 1e-4))) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Procedural Hyperlanes Generator:
+ * Connects each star to its 6 closest systems, then deletes any lanes that overlap (cross)
+ * each other or pass directly through intermediate stars, creating a clean, planar interstellar network.
+ */
+export function generateProceduralHyperlanes(systems: SectorHexSystem[]): SectorHyperlane[] {
+  if (systems.length < 2) return [];
+
+  interface CandidateEdge {
+    source: SectorHexSystem;
+    target: SectorHexSystem;
+    distSq: number;
+    dist: number;
+  }
+
+  const candidateEdgesMap = new Map<string, CandidateEdge>();
+
+  // 1. Connect each star to its 6 closest systems
+  for (let i = 0; i < systems.length; i++) {
+    const starA = systems[i];
+    const neighbors: { star: SectorHexSystem; distSq: number }[] = [];
+    for (let j = 0; j < systems.length; j++) {
+      if (i === j) continue;
+      const starB = systems[j];
+      const dx = starA.x - starB.x;
+      const dy = starA.y - starB.y;
+      neighbors.push({ star: starB, distSq: dx * dx + dy * dy });
+    }
+
+    // Sort by distance ascending and pick 6 closest
+    neighbors.sort((a, b) => a.distSq - b.distSq);
+    const closest6 = neighbors.slice(0, 6);
+
+    for (const nb of closest6) {
+      const idKey = starA.id < nb.star.id ? `${starA.id}__${nb.star.id}` : `${nb.star.id}__${starA.id}`;
+      if (!candidateEdgesMap.has(idKey)) {
+        const dist = Math.sqrt(nb.distSq);
+        candidateEdgesMap.set(idKey, {
+          source: starA,
+          target: nb.star,
+          distSq: nb.distSq,
+          dist,
+        });
+      }
+    }
+  }
+
+  // 2. Sort candidate edges by length ascending (shortest lanes first)
+  const candidateEdges = Array.from(candidateEdgesMap.values());
+  candidateEdges.sort((a, b) => a.dist - b.dist);
+
+  // 3. Delete lanes that overlap each other or pass through intermediate stars
+  const acceptedEdges: CandidateEdge[] = [];
+
+  for (const candidate of candidateEdges) {
+    const a = candidate.source;
+    const b = candidate.target;
+
+    // Check if candidate passes directly through another star C
+    let passesThroughStar = false;
+    for (let s = 0; s < systems.length; s++) {
+      const c = systems[s];
+      if (c.id === a.id || c.id === b.id) continue;
+      const dSq = distToSegmentSq(c.x, c.y, a.x, a.y, b.x, b.y);
+      if (dSq < 14 * 14) {
+        passesThroughStar = true;
+        break;
+      }
+    }
+    if (passesThroughStar) continue;
+
+    // Check if candidate overlaps/crosses any already accepted edge
+    let crossesOtherLane = false;
+    for (const existing of acceptedEdges) {
+      if (
+        existing.source.id === a.id ||
+        existing.source.id === b.id ||
+        existing.target.id === a.id ||
+        existing.target.id === b.id
+      ) {
+        continue;
+      }
+
+      if (doSegmentsCross(a.x, a.y, b.x, b.y, existing.source.x, existing.source.y, existing.target.x, existing.target.y)) {
+        crossesOtherLane = true;
+        break;
+      }
+    }
+
+    if (!crossesOtherLane) {
+      acceptedEdges.push(candidate);
+    }
+  }
+
+  // 4. Map to SectorHyperlane objects
+  return acceptedEdges.map((e) => {
+    const key = `${e.source.id}__${e.target.id}`;
+    // 54px ~ 2.5 pc -> ~0.15 ly/px
+    const lengthLy = +(e.dist * 0.15).toFixed(1);
+    return {
+      id: `HL-${key}`,
+      sourceId: e.source.id,
+      targetId: e.target.id,
+      sourceCoord: e.source.coord,
+      targetCoord: e.target.coord,
+      x1: e.source.x,
+      y1: e.source.y,
+      x2: e.target.x,
+      y2: e.target.y,
+      lengthPx: Math.round(e.dist),
+      lengthLy,
+    };
+  });
 }

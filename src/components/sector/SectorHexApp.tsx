@@ -15,10 +15,12 @@ import {
   Sliders,
   X,
   Grid,
+  Route,
 } from 'lucide-react';
 import {
   SectorHexConfig,
   SectorHexSystem,
+  type SectorHyperlane,
   DEFAULT_SECTOR_CONFIG,
   generateSectorHexGrid,
 } from '../../core/generation/sectorHex';
@@ -172,6 +174,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   // Copied state
   const [copiedId, setCopiedId] = useState<boolean>(false);
 
+  // Hyperlanes visibility toggle
+  const [showHyperlanes, setShowHyperlanes] = useState<boolean>(true);
+
   // Total bounds of the sector space
   const gridBoundingSize = useMemo(() => {
     return {
@@ -179,6 +184,14 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       height: gridData.sectorHeight,
     };
   }, [gridData.sectorWidth, gridData.sectorHeight]);
+
+  // Connected hyperlanes for currently selected system
+  const connectedLanes: SectorHyperlane[] = useMemo(() => {
+    if (!selectedSystem || !gridData.hyperlanes) return [];
+    return gridData.hyperlanes.filter(
+      (l) => l.sourceId === selectedSystem.id || l.targetId === selectedSystem.id
+    );
+  }, [selectedSystem, gridData.hyperlanes]);
 
   // Track container viewport dimensions for smooth frustum/viewport culling
   const containerRef = useRef<HTMLDivElement>(null);
@@ -982,6 +995,57 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 SECTOR FIELD: {gridData.parsecWidth}&times;{gridData.parsecHeight} pc &bull; {gridData.systems.length} STELLAR SYSTEMS
               </text>
 
+              {/* Procedural Hyperlane Network Layer */}
+              {showHyperlanes && gridData.hyperlanes && gridData.hyperlanes.length > 0 && (
+                <g className="hyperlanes-layer pointer-events-none">
+                  {gridData.hyperlanes.map((lane) => {
+                    const isConnectedToSelected =
+                      selectedSystem != null &&
+                      (lane.sourceId === selectedSystem.id || lane.targetId === selectedSystem.id);
+                    const isConnectedToHovered =
+                      hoveredSystem != null &&
+                      (lane.sourceId === hoveredSystem.id || lane.targetId === hoveredSystem.id);
+                    const isHighlighted = isConnectedToSelected || isConnectedToHovered;
+
+                    return (
+                      <g key={lane.id}>
+                        {/* Glow halo underlay when selected or hovered */}
+                        {isHighlighted && (
+                          <line
+                            x1={lane.x1}
+                            y1={lane.y1}
+                            x2={lane.x2}
+                            y2={lane.y2}
+                            stroke={isConnectedToSelected ? '#38bdf8' : '#818cf8'}
+                            strokeWidth={3.5}
+                            opacity={0.55}
+                            strokeLinecap="round"
+                          />
+                        )}
+                        {/* Core hyperlane route */}
+                        <line
+                          x1={lane.x1}
+                          y1={lane.y1}
+                          x2={lane.x2}
+                          y2={lane.y2}
+                          stroke={
+                            isConnectedToSelected
+                              ? '#38bdf8'
+                              : isConnectedToHovered
+                              ? '#a5b4fc'
+                              : 'rgba(56, 189, 248, 0.32)'
+                          }
+                          strokeWidth={isHighlighted ? 1.8 : 1.0}
+                          strokeDasharray={isHighlighted ? undefined : '3,4'}
+                          opacity={isHighlighted ? 1.0 : 0.65}
+                          strokeLinecap="round"
+                        />
+                      </g>
+                    );
+                  })}
+                </g>
+              )}
+
               {/* Stars in Random Positions with Circular Zones of Influence */}
               {visibleSystems.map((system) => {
                 const isSelected = selectedSystem?.id === system.id || selectedCoord === system.coord;
@@ -1182,6 +1246,19 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               >
                 <Maximize2 className="w-3.5 h-3.5" />
                 <span>Fit Sector</span>
+              </button>
+              <div className="w-[1px] h-3.5 bg-slate-800 mx-0.5" />
+              <button
+                onClick={() => setShowHyperlanes((v) => !v)}
+                className={`px-2 py-1 hover:bg-slate-800 rounded text-[10.5px] transition flex items-center gap-1 ${
+                  showHyperlanes
+                    ? 'text-cyan-400 bg-cyan-950/40 border border-cyan-800/60'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+                title="Toggle Procedural Hyperlanes"
+              >
+                <Route className="w-3.5 h-3.5" />
+                <span>Lanes {showHyperlanes ? 'ON' : 'OFF'}</span>
               </button>
               <span className="text-[10px] text-slate-500 pl-1">
                 {Math.round(zoom * 100)}%
@@ -1423,6 +1500,60 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 </div>
               </div>
 
+              {/* Hyperlane Connectivity Routes */}
+              <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-800/60 text-xs font-mono space-y-2">
+                <div className="flex items-center justify-between text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">
+                  <span className="flex items-center gap-1.5 text-cyan-400">
+                    <Route className="w-3.5 h-3.5" />
+                    Hyperlanes ({connectedLanes.length})
+                  </span>
+                  <span className="text-[10px] text-slate-500 lowercase font-normal">
+                    6 closest planar
+                  </span>
+                </div>
+                {connectedLanes.length === 0 ? (
+                  <div className="text-[11px] text-slate-500 italic py-0.5">
+                    No planar hyperlanes connected to this system.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                    {connectedLanes.map((lane) => {
+                      const targetId = lane.sourceId === selectedSystem.id ? lane.targetId : lane.sourceId;
+                      const neighbor = gridData.systems.find((s) => s.id === targetId);
+                      if (!neighbor) return null;
+
+                      return (
+                        <div
+                          key={lane.id}
+                          onClick={() => {
+                            setSelectedSystem(neighbor);
+                            setSelectedCoord(neighbor.coord);
+                          }}
+                          className="flex items-center justify-between p-1.5 rounded-lg bg-slate-950/70 hover:bg-cyan-950/40 border border-slate-800/70 hover:border-cyan-700/60 transition cursor-pointer group text-[11px]"
+                          title={`Jump to ${neighbor.name}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="w-2.5 h-2.5 rounded-full border border-white/50 group-hover:scale-110 transition-transform flex-shrink-0"
+                              style={{ backgroundColor: neighbor.colorHex }}
+                            />
+                            <span className="text-slate-200 group-hover:text-cyan-300 font-semibold transition truncate max-w-[130px]">
+                              {neighbor.name}
+                            </span>
+                            <span className="text-[9.5px] text-slate-500 font-mono">
+                              ({neighbor.coord})
+                            </span>
+                          </div>
+                          <span className="text-[10.5px] text-cyan-400/90 font-mono flex-shrink-0">
+                            {lane.lengthLy} ly
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               {/* Sector Context & Grid Stats */}
               <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-800/60 text-xs font-mono space-y-2">
                 <div className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">
@@ -1456,6 +1587,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
                     <span className="text-slate-500">Heavy Stars (&ge;3 M☉):</span>{' '}
                     <span className="text-amber-300 font-bold">{gridData.stats.heavyMassCount}</span>
+                  </div>
+                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
+                    <span className="text-slate-500">Hyperlanes:</span>{' '}
+                    <span className="text-cyan-400 font-bold">{gridData.stats.hyperlaneCount}</span>
                   </div>
                   <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50 col-span-2 flex items-center justify-between">
                     <span className="text-slate-400">Integrated Light (Constituent Stars):</span>
