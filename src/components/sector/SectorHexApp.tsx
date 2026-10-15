@@ -1529,7 +1529,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   { id: 'g', label: 'G (Sol)', color: 'text-amber-300' },
                   { id: 'km', label: 'K/M', color: 'text-red-400' },
                   { id: 'remnant', label: 'Remnants', color: 'text-purple-400' },
-                  { id: 'habitable', label: 'Candidate HZ', color: 'text-emerald-400' },
+                  { id: 'habitable', label: 'Habitable Worlds', color: 'text-emerald-400' },
                 ] as const
               ).map((f) => (
                 <button
@@ -1804,7 +1804,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     {selectedSystem.candidateHabitable && (
                       <div
                         className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-500 border border-slate-950 flex items-center justify-center text-[9px] text-white font-bold"
-                        title="Candidate Habitable System"
+                        title={
+                          selectedSystem.habitableTypes && selectedSystem.habitableTypes.length > 0
+                            ? `Candidate Habitable World / Biosphere (${selectedSystem.habitableTypes.join(', ')})`
+                            : 'Candidate Habitable World / Biosphere'
+                        }
                       >
                         ✓
                       </div>
@@ -2069,7 +2073,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     {selectedSystem.candidateHabitable ? (
                       <div className="space-y-2">
                         <p className="text-[10.5px] text-emerald-300/90 leading-relaxed">
-                          🌱 This system possesses a candidate habitable biosphere capable of giving rise to an alien civilization.
+                          🌱 This system possesses a candidate habitable world or active biosphere{' '}
+                          {selectedSystem.habitableTypes && selectedSystem.habitableTypes.length > 0
+                            ? `(${selectedSystem.habitableTypes.join(', ')}) `
+                            : ''}
+                          capable of giving rise to an interstellar civilization.
                         </p>
                         <button
                           onClick={() => {
@@ -2153,9 +2161,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between py-1">
-                  <span className="text-slate-400">Habitable Zone Candidate</span>
+                  <span className="text-slate-400">Habitable / Biosphere Worlds</span>
                   <span className={selectedSystem.candidateHabitable ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                    {selectedSystem.candidateHabitable ? 'Yes (Candidate Planet Present)' : 'None'}
+                    {selectedSystem.candidateHabitable
+                      ? `Yes (${selectedSystem.habitableTypes && selectedSystem.habitableTypes.length > 0 ? selectedSystem.habitableTypes.join(', ') : 'Candidate Present'})`
+                      : 'None'}
                   </span>
                 </div>
               </div>

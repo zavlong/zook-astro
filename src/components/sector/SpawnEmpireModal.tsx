@@ -120,18 +120,42 @@ export const SpawnEmpireModal: React.FC<SpawnEmpireModalProps> = ({
     // Identify prime planet in homeworld system if available
     let homeworldPlanetKey: string | undefined = undefined;
     if (homeworldSystem.sysResult && homeworldSystem.sysResult.zones) {
+      // 1. Prioritize candidate habitable / ammonia / active biosphere world
       for (let zIdx = 0; zIdx < homeworldSystem.sysResult.zones.length; zIdx++) {
         const z = homeworldSystem.sysResult.zones[zIdx];
         for (let bIdx = 0; bIdx < z.bodies.length; bIdx++) {
           const b = z.bodies[bIdx];
           if (b.kind === 'planet') {
-            if (!homeworldPlanetKey) {
+            const isPrime =
+              b.planetClass.includes('Habitable') ||
+              b.planetClass.includes('Ammonia') ||
+              b.planetClass.includes('Cryo-Ammonia') ||
+              b.hydrosphere?.solvent === 'NH3-H2O' ||
+              Boolean(b.hydrosphere?.biosphere) ||
+              (b.surfaceTempK >= 255 && b.surfaceTempK <= 335 && b.hydrosphere && (b.hydrosphere.coveragePct || 0) > 5);
+
+            if (isPrime) {
               homeworldPlanetKey = makePlanetKey(homeworldSystem.id, `z${zIdx}_p${bIdx + 1}`);
               break;
             }
           }
         }
         if (homeworldPlanetKey) break;
+      }
+
+      // 2. Fallback to first planet if no candidate matched
+      if (!homeworldPlanetKey) {
+        for (let zIdx = 0; zIdx < homeworldSystem.sysResult.zones.length; zIdx++) {
+          const z = homeworldSystem.sysResult.zones[zIdx];
+          for (let bIdx = 0; bIdx < z.bodies.length; bIdx++) {
+            const b = z.bodies[bIdx];
+            if (b.kind === 'planet') {
+              homeworldPlanetKey = makePlanetKey(homeworldSystem.id, `z${zIdx}_p${bIdx + 1}`);
+              break;
+            }
+          }
+          if (homeworldPlanetKey) break;
+        }
       }
     }
 

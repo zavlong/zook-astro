@@ -44,6 +44,8 @@ export interface SectorHexSystem {
   planetCount: number;
   beltCount: number;
   candidateHabitable: boolean;
+  habitableWorldCount?: number;
+  habitableTypes?: string[];
   sysResult: RealisticStarSystemResult; // The full system generation result
 }
 
@@ -395,23 +397,62 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       }
     }
 
-    // Check planets and habitable candidate worlds
+    // Check planets and habitable candidate worlds (Water Habitable Zone or Cryo-Ammonia Life)
     let planetCount = 0;
     let beltCount = 0;
     let candidateHabitable = false;
+    let habitableWorldCount = 0;
+    const habitableTypesSet = new Set<string>();
 
     for (const zone of sysResult.zones) {
       for (const body of zone.bodies) {
         if (body.kind === 'planet') {
           planetCount++;
-          if (
+
+          const isWaterHZ =
             body.planetClass.includes('Habitable') ||
-            (body.surfaceTempK >= 260 &&
-              body.surfaceTempK <= 325 &&
+            (body.surfaceTempK >= 255 &&
+              body.surfaceTempK <= 335 &&
               body.hydrosphere &&
-              (body.hydrosphere.coveragePct || 0) > 5)
-          ) {
+              (body.hydrosphere.coveragePct || 0) > 5);
+
+          const isAmmoniaWorld =
+            body.planetClass.includes('Ammonia') ||
+            body.planetClass.includes('Cryo-Ammonia') ||
+            body.hydrosphere?.solvent === 'NH3-H2O' ||
+            (body.surfaceTempK >= 120 &&
+              body.surfaceTempK <= 245 &&
+              body.hydrosphere &&
+              (body.hydrosphere.coveragePct || 0) > 0);
+
+          const hasBiosphere = Boolean(body.hydrosphere?.biosphere);
+
+          if (isWaterHZ || isAmmoniaWorld || hasBiosphere) {
             candidateHabitable = true;
+            habitableWorldCount++;
+            if (isAmmoniaWorld) {
+              habitableTypesSet.add('Ammonia World');
+            } else {
+              habitableTypesSet.add('Water HZ');
+            }
+          }
+
+          // Also inspect moons for habitable / cryo-ammonia worlds
+          if (body.moons && body.moons.length > 0) {
+            for (const moon of body.moons) {
+              const isMoonWaterHZ = moon.moonClass.includes('Habitable');
+              const isMoonAmmonia =
+                moon.moonClass.includes('Ammonia') ||
+                moon.moonClass.includes('Cryo-Ammonia') ||
+                moon.hydrosphere?.solvent === 'NH3-H2O';
+              const moonHasBio = Boolean(moon.hydrosphere?.biosphere);
+
+              if (isMoonWaterHZ || isMoonAmmonia || moonHasBio) {
+                candidateHabitable = true;
+                habitableWorldCount++;
+                habitableTypesSet.add(isMoonAmmonia ? 'Ammonia Moon' : 'Habitable Moon');
+              }
+            }
           }
         } else if (body.kind === 'belt') {
           beltCount++;
@@ -419,6 +460,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       }
     }
     if (candidateHabitable) habitableCount++;
+    const habitableTypes = Array.from(habitableTypesSet);
 
     const lumNum = typeof primaryStar.lumNum === 'number' ? primaryStar.lumNum : 1;
 
@@ -464,6 +506,8 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       planetCount,
       beltCount,
       candidateHabitable,
+      habitableWorldCount,
+      habitableTypes,
       sysResult,
     };
 
