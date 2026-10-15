@@ -14,11 +14,13 @@ export interface GalaxyConfig {
   morphology: GalaxyMorphology;
   columns: number; // 50
   rows: number; // 50
-  radiusKpc: number; // 15 to 35 kpc
+  radiusKpc: number; // 10 to 50 kpc (50 kpc fills entire grid, 25 kpc extends halfway out)
   coreRadiusFraction: number; // 0.10 to 0.30
   armCount: number; // 2, 3, 4, or 6
-  armWinding: number; // Spiral pitch / tightness (0.6 to 2.5)
-  overallDensityScale: number; // 0.5 to 1.5
+  armWinding: number; // Spiral pitch / tightness (0.5 to 5.0)
+  armWidth: number; // Width of spiral arms (0.3 to 2.5, default 1.0)
+  armStrength: number; // Density multiplier for spiral arms (0.2 to 3.0, default 1.0)
+  overallDensityScale: number; // 0.5 to 3.0
 }
 
 export interface GalaxySectorHex {
@@ -28,11 +30,15 @@ export interface GalaxySectorHex {
   name: string;
   seed: number; // Seed passed to SectorHex
   seedString: string; // e.g. "GAL-4289-SEC-2525"
-  rNorm: number; // Normalized radial distance (0 = core, 1.0 = edge)
+  rNorm: number; // Normalized radial distance (0 = core, 1.0 = edge of galaxy disk)
   rKpc: number; // Distance from core in kiloparsecs
   thetaRad: number; // Polar angle in radians
-  density: number; // 0.0 to 0.85
-  meanAge: number; // 0.3 to 12.5 Gyr
+  density: number; // 0.0 to 3.5 (supports >100% overdensities)
+  meanAge: number; // Mean stellar age in Gyr
+  ageRange: number; // Total age spread in Gyr (narrow in halo, wide uniform in bulge)
+  ageDistribution: 'normal' | 'uniform'; // Galactic bulge has uniform distribution
+  ageMin: number;
+  ageMax: number;
   metallicityMean: number; // -1.6 to +0.45 dex
   colorHex: string; // Bluer for young, redder for old
   opacity: number; // More opaque for dense, transparent for sparse
@@ -59,10 +65,12 @@ export const DEFAULT_GALAXY_CONFIG: GalaxyConfig = {
   morphology: 'spiral',
   columns: 50,
   rows: 50,
-  radiusKpc: 25,
+  radiusKpc: 35,
   coreRadiusFraction: 0.16,
   armCount: 4,
-  armWinding: 1.35,
+  armWinding: 1.5,
+  armWidth: 1.0,
+  armStrength: 1.0,
   overallDensityScale: 1.0,
 };
 
@@ -115,15 +123,15 @@ export function rgbToHex(r: number, g: number, b: number): string {
 
 /**
  * Computes the sector's integrated color as a luminosity-weighted average of its constituent stars.
- * Young sectors containing hot O/B stars emit predominantly luminous blue light.
- * Older sectors where massive stars have died are dominated by red giants and solar turnoffs (warm gold/red).
- * When density exceeds 100%, mass overflow spawns massive stars and desaturates towards white.
+ * Reflects both mean age and age distribution (uniform in bulge, narrow in halo/arms).
  */
 export function computeSectorConstituentColor(
   secSeed: number,
   meanAge: number,
-  metallicityMean: number,
-  density: number
+  ageRange: number = 2.0,
+  ageDistribution: 'normal' | 'uniform' = 'normal',
+  metallicityMean: number = 0.0,
+  density: number = 0.5
 ): string {
   const secRng = new PRNG(secSeed);
   const nSamples = 32;
@@ -152,8 +160,15 @@ export function computeSectorConstituentColor(
       if (overflow > 0) mass *= 1.0 + overflow * 1.45;
     }
 
-    // 2. Star Age & Metallicity
-    const starAge = Math.max(0.05, Math.min(12.8, meanAge + secRng.nextGaussian(0, 0.6)));
+    // 2. Star Age based on sector age distribution
+    let starAge: number;
+    if (ageDistribution === 'uniform') {
+      starAge = Math.max(0.08, Math.min(12.8, meanAge + (secRng.next() - 0.5) * ageRange));
+    } else {
+      const sigma = Math.max(0.2, ageRange / 3.2);
+      starAge = Math.max(0.08, Math.min(12.8, meanAge + secRng.nextGaussian(0, sigma)));
+    }
+
     const feh = Math.max(-1.8, Math.min(0.5, metallicityMean + secRng.nextGaussian(0, 0.12)));
 
     // 3. Stellar Evolution: Optical Luminosity and Teff
@@ -233,9 +248,6 @@ export function computeSectorConstituentColor(
 
 /**
  * Maps sector mean age and density to color (simple lookup fallback):
- * - Younger sectors are bluer, older sectors are redder.
- * - When density exceeds 100% (>1.0), saturation decreases towards white!
- *   At 200% or 300% density, sectors become dazzling white-hot luminous cores.
  */
 export function getSectorColorByAge(ageGyr: number, density: number = 0.5): string {
   let baseColor: string;
@@ -247,9 +259,8 @@ export function getSectorColorByAge(ageGyr: number, density: number = 0.5): stri
   else if (ageGyr < 8.8) baseColor = '#ef4444'; // Older population rich red
   else baseColor = '#dc2626'; // Ancient halo / core deep crimson
 
-  // Fun Rule: Densities exceeding 100% (1.0) desaturate towards white
+  // Densities exceeding 100% (1.0) desaturate towards white
   if (density > 1.0) {
-    // factor: 1.0 -> 0.0, 2.0 -> 0.55, 3.0+ -> 0.95+
     const desatFactor = Math.min(0.96, Math.pow((density - 1.0) / 2.0, 0.85) * 0.95);
     return desaturateToWhite(baseColor, desatFactor);
   }
@@ -258,15 +269,13 @@ export function getSectorColorByAge(ageGyr: number, density: number = 0.5): stri
 }
 
 /**
- * Maps sector stellar density to opacity:
- * "denser sectors are more opaque and less dense sectors are more transparent"
+ * Maps sector stellar density to opacity with a smooth gradual fade towards outer edges:
  */
 export function getSectorOpacityByDensity(density: number): number {
-  if (density < 0.03) return 0.03; // Nearly transparent void
-  if (density >= 1.0) return 0.98; // Completely opaque for overdensities
-  const scaled = Math.min(1.0, density / 0.82);
-  const opacity = 0.08 + 0.88 * Math.pow(scaled, 1.15);
-  return +Math.min(0.96, Math.max(0.04, opacity)).toFixed(3);
+  if (density <= 0.015) return 0.02; // Very faint whisper in outer void
+  const scaled = Math.min(1.0, density / 0.85);
+  const opacity = 0.03 + 0.93 * Math.pow(scaled, 1.25);
+  return +Math.min(0.98, Math.max(0.02, opacity)).toFixed(3);
 }
 
 /**
@@ -280,9 +289,9 @@ function getRegionName(
 ): string {
   if (density >= 2.0) return 'Hyper-Dense Stellar Nexus';
   if (density >= 1.15) return 'Massive Starburst Overdensity';
-  if (rNorm > 1.05 && density < 0.04) return 'Intergalactic Void';
+  if (rNorm > 1.25 && density < 0.04) return 'Intergalactic Void';
   if (rNorm > 0.92) return 'Galactic Halo Fringe';
-  if (rNorm < 0.14) return 'Galactic Core Bulge';
+  if (rNorm < 0.16) return 'Galactic Core Bulge';
 
   if (morphology === 'spiral' || morphology === 'barred-spiral') {
     if (isArm && density > 0.40) return 'Spiral Arm Starburst';
@@ -293,7 +302,7 @@ function getRegionName(
 
   if (morphology === 'ring') {
     if (Math.abs(rNorm - 0.72) < 0.15) return 'Collisional Starburst Ring';
-    if (rNorm < 0.40) return 'Nuclear Core';
+    if (rNorm < 0.35) return 'Nuclear Core';
     return 'Outer Ring Void';
   }
 
@@ -312,7 +321,8 @@ function getRegionName(
 }
 
 /**
- * Generates the full 50x50 Galaxy Grid with position-dependent density, age, and metallicity
+ * Generates the full 50x50 Galaxy Grid with physical radius scaling, gradual edge fading,
+ * spiral arm width/strength parameters, and dual mean-age + age-range astrophysics.
  */
 export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG): GalaxyGridData {
   const galaxySeedInt = seedFromId(config.seed);
@@ -321,7 +331,12 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
   const sectors: GalaxySectorHex[] = [];
   const centerX = (config.columns + 1) / 2; // 25.5 for 50
   const centerY = (config.rows + 1) / 2; // 25.5 for 50
-  const maxRadiusCells = Math.min(centerX - 1, centerY - 1) * 0.96; // ~23.5 cells
+  const maxRadiusCells = Math.min(centerX - 1, centerY - 1); // 24.5 cells from center to border
+
+  // Physical radius calibration: 50 kpc fills up the entire grid (radius ~24.5 cells),
+  // 25 kpc extends halfway out (radius ~12.25 cells), etc.
+  const GRID_KPC_MAX = 50;
+  const diskRadiusCells = (Math.max(5, config.radiusKpc) / GRID_KPC_MAX) * maxRadiusCells;
 
   let totalDensity = 0;
   let totalAge = 0;
@@ -329,15 +344,21 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
   let activeCount = 0;
   let totalEstimatedStars = 0;
 
+  const armWidthMultiplier = config.armWidth ?? 1.0;
+  const armStrengthMultiplier = config.armStrength ?? 1.0;
+  const armWinding = Math.max(0.5, Math.min(5.0, config.armWinding));
+
   for (let c = 1; c <= config.columns; c++) {
     for (let r = 1; r <= config.rows; r++) {
       const coord = `${c.toString().padStart(2, '0')}${r.toString().padStart(2, '0')}`;
 
-      // Normalized coordinates from center
+      // Coordinates relative to galactic center
       const dx = c - centerX;
       const dy = r - centerY;
       const distCells = Math.sqrt(dx * dx + dy * dy);
-      const rNorm = distCells / maxRadiusCells; // 0 at core, 1.0 at galaxy disk rim
+
+      // Normalized radius: rNorm = 1.0 at physical galaxy disk rim!
+      const rNorm = distCells / Math.max(1, diskRadiusCells);
       const rKpc = +(rNorm * config.radiusKpc).toFixed(1);
       const theta = Math.atan2(dy, dx); // [-PI, PI]
 
@@ -346,16 +367,18 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
       const seedString = `GAL-${config.seed}-SEC-${coord}`;
       const secRng = new PRNG(seedFromId(seedString));
 
-      // Calculate base density, age, and metallicity based on morphology and galactic position
+      // Calculate base density, age, age range, and metallicity
       let baseDensity = 0;
       let baseAge = 5.0;
+      let ageRange = 3.5;
+      let ageDistribution: 'normal' | 'uniform' = 'normal';
       let baseFeh = 0.0;
       let isArmSector = false;
 
-      const noise = secRng.nextGaussian(0, 0.04);
+      const noise = secRng.nextGaussian(0, 0.035);
 
       if (config.morphology === 'spiral' || config.morphology === 'barred-spiral') {
-        // 1. Central Bulge (high density, old stars, metal-rich)
+        // 1. Central Bulge (high density, wide uniform age range)
         const bulgeR = config.coreRadiusFraction;
         const bulgeWeight = Math.exp(-(rNorm * rNorm) / (2 * bulgeR * bulgeR));
 
@@ -365,23 +388,22 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
           const barAngle = Math.PI / 4;
           const rotatedX = dx * Math.cos(barAngle) + dy * Math.sin(barAngle);
           const rotatedY = -dx * Math.sin(barAngle) + dy * Math.cos(barAngle);
-          const barLength = maxRadiusCells * 0.38;
-          const barWidth = maxRadiusCells * 0.12;
+          const barLength = diskRadiusCells * 0.40;
+          const barWidth = diskRadiusCells * 0.14;
           barWeight =
-            Math.exp(-Math.pow(rotatedX / barLength, 4)) *
-            Math.exp(-Math.pow(rotatedY / barWidth, 2));
+            Math.exp(-Math.pow(rotatedX / Math.max(1, barLength), 4)) *
+            Math.exp(-Math.pow(rotatedY / Math.max(1, barWidth), 2));
         }
 
-        // 3. Logarithmic Spiral Arms
+        // 3. Logarithmic Spiral Arms with customizable Arm Width & Arm Strength
         const N = config.armCount;
-        const b = config.armWinding;
+        const b = armWinding;
         let minArmDist = 999;
 
         for (let k = 0; k < N; k++) {
           const armAngleOffset = (2 * Math.PI * k) / N;
           // Log spiral theta(r) = b * ln(r / r0) + offset
-          const expectedTheta = b * Math.log(Math.max(0.06, rNorm) / 0.14) + armAngleOffset;
-          // Angular distance wrapped to [-PI, PI]
+          const expectedTheta = b * Math.log(Math.max(0.04, rNorm) / 0.14) + armAngleOffset;
           let dTheta = (theta - expectedTheta) % (2 * Math.PI);
           if (dTheta > Math.PI) dTheta -= 2 * Math.PI;
           if (dTheta < -Math.PI) dTheta += 2 * Math.PI;
@@ -390,110 +412,164 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
           if (armDist < minArmDist) minArmDist = armDist;
         }
 
-        const armWidth = 0.42 / Math.sqrt(Math.max(0.1, rNorm));
-        const armWeight =
-          Math.exp(-(minArmDist * minArmDist) / (2 * armWidth * armWidth)) *
-          (rNorm >= 0.12 && rNorm <= 1.05 ? 1 : 0);
+        // Arm Width function: controlled by armWidthMultiplier
+        const effectiveArmWidth = (0.36 * armWidthMultiplier) / Math.sqrt(Math.max(0.12, rNorm));
+        const armAngularFalloff = Math.exp(-(minArmDist * minArmDist) / (2 * effectiveArmWidth * effectiveArmWidth));
 
-        if (armWeight > 0.45 && rNorm >= 0.14 && rNorm <= 1.0) {
+        // Smooth radial envelope for arms (no hard cutoffs!)
+        const armRadialEnvelope =
+          (1 - Math.exp(-rNorm / 0.14)) *
+          Math.exp(-Math.pow(Math.max(0, rNorm - 0.70) / 0.44, 2));
+
+        const armWeight = armAngularFalloff * armRadialEnvelope;
+
+        if (armWeight > 0.32 && rNorm >= 0.12) {
           isArmSector = true;
         }
 
         // Disk exponential radial decay
-        const diskDecay = Math.exp(-rNorm / 0.36);
+        const diskDecay = Math.exp(-rNorm / 0.40);
 
-        // Combined Density
+        // Arm density contribution scaled by armStrength
+        const armDensityContribution = 0.38 * armStrengthMultiplier * armWeight;
+
+        // Combined raw density
         const rawDensity =
-          0.78 * bulgeWeight +
-          0.45 * barWeight +
-          0.38 * diskDecay +
-          0.35 * armWeight +
+          0.82 * bulgeWeight +
+          0.48 * barWeight +
+          0.36 * diskDecay +
+          armDensityContribution +
           noise;
 
-        baseDensity = Math.max(0, Math.min(3.5, rawDensity * config.overallDensityScale));
-        if (rNorm > 1.15) baseDensity *= Math.max(0, 1 - (rNorm - 1.15) * 4);
+        // Gradual disk fade (soft exponential outer decay rather than abrupt step cutoff)
+        const edgeTaper = rNorm <= 0.85 ? 1.0 : Math.exp(-Math.pow((rNorm - 0.85) / 0.38, 1.8));
+        baseDensity = Math.max(0.01, Math.min(3.5, rawDensity * edgeTaper * config.overallDensityScale));
 
-        // Stellar Age (younger in arms, old in bulge/halo)
-        if (bulgeWeight > 0.45) {
-          baseAge = 9.5 + secRng.nextGaussian(0, 1.2);
+        // Stellar Age & Age Range Astrophysics:
+        // - Bulge: wide age range (effectively a uniform distribution spanning all epochs)
+        // - Arms: young mean age and narrow range (active starburst)
+        // - Halo: high mean age and narrow range (all stars are ancient)
+        // - Disk: intermediate solar age
+        if (bulgeWeight > 0.35 || rNorm < 0.16) {
+          baseAge = 6.8 + secRng.nextGaussian(0, 0.35);
+          ageRange = 11.2; // Uniform distribution across 11.2 Gyr span (~1.2 to 12.4 Gyr)
+          ageDistribution = 'uniform';
         } else if (isArmSector) {
-          baseAge = 0.8 + 1.6 * (rNorm / 1.0) + secRng.nextGaussian(0, 0.4);
+          baseAge = 0.8 + 1.4 * Math.min(1.2, rNorm) + secRng.nextGaussian(0, 0.25);
+          ageRange = 1.6 + 1.2 * Math.min(1.2, rNorm); // Narrow age range (recent star formation)
+          ageDistribution = 'normal';
+        } else if (rNorm > 0.92) {
+          baseAge = 11.4 + secRng.nextGaussian(0, 0.25);
+          ageRange = 1.5; // Narrow age range (all stars are old Population II)
+          ageDistribution = 'normal';
         } else {
-          baseAge = 4.2 + 4.5 * rNorm + secRng.nextGaussian(0, 0.8);
+          baseAge = 4.2 + 3.8 * rNorm + secRng.nextGaussian(0, 0.4);
+          ageRange = 3.6 + 2.4 * rNorm;
+          ageDistribution = 'normal';
         }
 
-        // Metallicity Gradient (metal-rich center, metal-poor outer disk)
+        // Metallicity Gradient
         baseFeh = 0.32 - 0.95 * rNorm + (isArmSector ? 0.12 : 0) + secRng.nextGaussian(0, 0.08);
 
       } else if (config.morphology === 'elliptical') {
         // de Vaucouleurs profile R^(1/4)
         const sersic = Math.exp(-3.2 * (Math.pow(Math.max(0.02, rNorm), 0.25) - 1));
-        baseDensity = Math.max(0, Math.min(3.5, (0.75 * sersic + noise) * config.overallDensityScale));
-        if (rNorm > 1.2) baseDensity *= Math.max(0, 1 - (rNorm - 1.2) * 3);
+        const edgeTaper = rNorm <= 0.85 ? 1.0 : Math.exp(-Math.pow((rNorm - 0.85) / 0.42, 1.6));
+        baseDensity = Math.max(0.01, Math.min(3.5, (0.75 * sersic + noise) * edgeTaper * config.overallDensityScale));
 
-        // Ellipticals are old Population II stars throughout
-        baseAge = 9.8 + secRng.nextGaussian(0, 1.2);
+        // Ellipticals are old Population II throughout with narrow age range
+        baseAge = 10.8 + secRng.nextGaussian(0, 0.4);
+        ageRange = 2.0;
+        ageDistribution = 'normal';
         baseFeh = 0.25 - 0.70 * rNorm + secRng.nextGaussian(0, 0.1);
 
       } else if (config.morphology === 'lenticular') {
         // Bulge + Smooth flat disk without arms
-        const bulge = Math.exp(-(rNorm * rNorm) / 0.03);
-        const disk = Math.exp(-rNorm / 0.32);
-        baseDensity = Math.max(0, Math.min(3.5, (0.75 * bulge + 0.35 * disk + noise) * config.overallDensityScale));
-        if (rNorm > 1.1) baseDensity *= Math.max(0, 1 - (rNorm - 1.1) * 4);
+        const bulge = Math.exp(-(rNorm * rNorm) / 0.035);
+        const disk = Math.exp(-rNorm / 0.36);
+        const edgeTaper = rNorm <= 0.85 ? 1.0 : Math.exp(-Math.pow((rNorm - 0.85) / 0.38, 1.8));
+        baseDensity = Math.max(0.01, Math.min(3.5, (0.75 * bulge + 0.35 * disk + noise) * edgeTaper * config.overallDensityScale));
 
-        baseAge = 7.5 + 2.5 * rNorm + secRng.nextGaussian(0, 0.8);
+        if (rNorm < 0.20) {
+          baseAge = 7.0 + secRng.nextGaussian(0, 0.4);
+          ageRange = 10.5;
+          ageDistribution = 'uniform';
+        } else {
+          baseAge = 8.5 + 2.0 * rNorm + secRng.nextGaussian(0, 0.4);
+          ageRange = 2.5;
+          ageDistribution = 'normal';
+        }
         baseFeh = 0.20 - 0.75 * rNorm + secRng.nextGaussian(0, 0.1);
 
       } else if (config.morphology === 'ring') {
-        // Nucleus + Ring structure
-        const nucleus = Math.exp(-(rNorm * rNorm) / 0.025);
+        // Nucleus + Collisional Ring
+        const nucleus = Math.exp(-(rNorm * rNorm) / 0.028);
         const ringDist = Math.abs(rNorm - 0.72);
-        const ringWeight = Math.exp(-(ringDist * ringDist) / (2 * 0.08 * 0.08));
+        const ringWeight = Math.exp(-(ringDist * ringDist) / (2 * 0.09 * 0.09));
         const interGap = Math.exp(-rNorm / 0.5) * 0.12;
+        const edgeTaper = rNorm <= 0.88 ? 1.0 : Math.exp(-Math.pow((rNorm - 0.88) / 0.36, 1.8));
 
-        baseDensity = Math.max(0, Math.min(3.5, (0.70 * nucleus + 0.65 * ringWeight + interGap + noise) * config.overallDensityScale));
-        if (rNorm > 1.1) baseDensity *= Math.max(0, 1 - (rNorm - 1.1) * 3);
+        baseDensity = Math.max(0.01, Math.min(3.5, (0.70 * nucleus + 0.65 * ringWeight + interGap + noise) * edgeTaper * config.overallDensityScale));
 
-        if (ringWeight > 0.40) {
+        if (ringWeight > 0.35) {
           isArmSector = true;
-          baseAge = 0.6 + secRng.nextGaussian(0, 0.3); // Fresh collision starburst!
+          baseAge = 0.6 + secRng.nextGaussian(0, 0.2); // Fresh collisional starburst
+          ageRange = 1.2;
+          ageDistribution = 'normal';
           baseFeh = 0.18 + secRng.nextGaussian(0, 0.06);
-        } else if (nucleus > 0.40) {
-          baseAge = 10.5 + secRng.nextGaussian(0, 1.0);
+        } else if (rNorm < 0.20) {
+          baseAge = 6.8 + secRng.nextGaussian(0, 0.35);
+          ageRange = 11.0;
+          ageDistribution = 'uniform';
           baseFeh = 0.30 + secRng.nextGaussian(0, 0.08);
         } else {
-          baseAge = 6.0 + secRng.nextGaussian(0, 0.8);
+          baseAge = 11.2 + secRng.nextGaussian(0, 0.3);
+          ageRange = 1.6;
+          ageDistribution = 'normal';
           baseFeh = -0.10 - 0.5 * rNorm;
         }
 
       } else {
-        // Irregular galaxy with chaotic star-forming knots
-        const clump1 = Math.exp(-(Math.pow(dx - 6, 2) + Math.pow(dy - 4, 2)) / 35);
-        const clump2 = Math.exp(-(Math.pow(dx + 5, 2) + Math.pow(dy - 7, 2)) / 45);
-        const clump3 = Math.exp(-(Math.pow(dx + 2, 2) + Math.pow(dy + 6, 2)) / 50);
-        const diffuse = Math.exp(-rNorm / 0.45);
+        // Irregular galaxy with chaotic starburst knots
+        const clump1 = Math.exp(-(Math.pow(dx - diskRadiusCells * 0.25, 2) + Math.pow(dy - diskRadiusCells * 0.15, 2)) / (diskRadiusCells * 1.5));
+        const clump2 = Math.exp(-(Math.pow(dx + diskRadiusCells * 0.22, 2) + Math.pow(dy - diskRadiusCells * 0.30, 2)) / (diskRadiusCells * 2.0));
+        const clump3 = Math.exp(-(Math.pow(dx + diskRadiusCells * 0.10, 2) + Math.pow(dy + diskRadiusCells * 0.28, 2)) / (diskRadiusCells * 2.2));
+        const diffuse = Math.exp(-rNorm / 0.48);
+        const edgeTaper = rNorm <= 0.85 ? 1.0 : Math.exp(-Math.pow((rNorm - 0.85) / 0.42, 1.6));
 
-        baseDensity = Math.max(0, Math.min(3.5, (0.50 * (clump1 + clump2 + clump3) + 0.25 * diffuse + noise) * config.overallDensityScale));
-        if (rNorm > 1.1) baseDensity *= Math.max(0, 1 - (rNorm - 1.1) * 3);
+        baseDensity = Math.max(0.01, Math.min(3.5, (0.50 * (clump1 + clump2 + clump3) + 0.25 * diffuse + noise) * edgeTaper * config.overallDensityScale));
 
-        if (clump1 > 0.4 || clump2 > 0.4 || clump3 > 0.4) {
+        if (clump1 > 0.35 || clump2 > 0.35 || clump3 > 0.35) {
           isArmSector = true;
-          baseAge = 0.5 + secRng.nextGaussian(0, 0.3);
+          baseAge = 0.5 + secRng.nextGaussian(0, 0.2);
+          ageRange = 1.0;
+          ageDistribution = 'normal';
           baseFeh = -0.15 + secRng.nextGaussian(0, 0.1);
         } else {
-          baseAge = 3.5 + 3.0 * rNorm + secRng.nextGaussian(0, 1.0);
+          baseAge = 4.2 + 3.0 * rNorm + secRng.nextGaussian(0, 0.5);
+          ageRange = 5.0;
+          ageDistribution = 'uniform';
           baseFeh = -0.45 - 0.5 * rNorm;
         }
       }
 
-      // Final clamping: density can now exceed 100% (up to 3.5 = 350%)!
+      // Final numerical bounds
       const density = +Math.max(0.01, Math.min(3.5, baseDensity)).toFixed(2);
       const meanAge = +Math.max(0.2, Math.min(12.8, baseAge)).toFixed(2);
       const metallicityMean = +Math.max(-1.7, Math.min(0.52, baseFeh)).toFixed(2);
+      const ageRangeClamped = +Math.max(0.5, Math.min(12.5, ageRange)).toFixed(2);
+      const ageMin = +Math.max(0.1, meanAge - ageRangeClamped / 2).toFixed(1);
+      const ageMax = +Math.min(13.5, meanAge + ageRangeClamped / 2).toFixed(1);
 
       // Color based on luminosity-weighted average of constituent stars:
-      const colorHex = computeSectorConstituentColor(sectorSeedNum, meanAge, metallicityMean, density);
+      const colorHex = computeSectorConstituentColor(
+        sectorSeedNum,
+        meanAge,
+        ageRangeClamped,
+        ageDistribution,
+        metallicityMean,
+        density
+      );
 
       // Opacity based on density: denser = more opaque, sparser = more transparent
       const opacity = getSectorOpacityByDensity(density);
@@ -502,7 +578,6 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
       const region = getRegionName(config.morphology, rNorm, density, isArmSector);
 
       // Estimated star systems inside a 50x50 sector (50x50 = 2,500 hexes)
-      // When density > 1.0, 100% of hexes are filled, plus multiplicity and mass overflow boost total star bodies!
       const estimatedStars50x50 = density <= 1.0
         ? Math.round(2500 * density)
         : Math.round(2500 * (1.0 + (density - 1.0) * 1.4));
@@ -529,6 +604,10 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
         thetaRad: +theta.toFixed(3),
         density,
         meanAge,
+        ageRange: ageRangeClamped,
+        ageDistribution,
+        ageMin,
+        ageMax,
         metallicityMean,
         colorHex,
         opacity,

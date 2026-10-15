@@ -154,6 +154,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   const [draftRows, setDraftRows] = useState<number>(config.rows);
   const [draftDensity, setDraftDensity] = useState<number>(config.density);
   const [draftAge, setDraftAge] = useState<number>(config.meanAge);
+  const [draftAgeRange, setDraftAgeRange] = useState<number>(config.ageRange ?? 3.5);
+  const [draftAgeDistribution, setDraftAgeDistribution] = useState<'normal' | 'uniform'>(
+    config.ageDistribution ?? 'normal'
+  );
   const [draftFeh, setDraftFeh] = useState<number>(config.metallicityMean);
   const [draftSeed, setDraftSeed] = useState<number>(config.seed);
 
@@ -163,9 +167,20 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     setDraftRows(config.rows);
     setDraftDensity(config.density);
     setDraftAge(config.meanAge);
+    setDraftAgeRange(config.ageRange ?? 3.5);
+    setDraftAgeDistribution(config.ageDistribution ?? 'normal');
     setDraftFeh(config.metallicityMean);
     setDraftSeed(config.seed);
-  }, [config.columns, config.rows, config.density, config.meanAge, config.metallicityMean, config.seed]);
+  }, [
+    config.columns,
+    config.rows,
+    config.density,
+    config.meanAge,
+    config.ageRange,
+    config.ageDistribution,
+    config.metallicityMean,
+    config.seed,
+  ]);
 
   // Generated Grid Data
   const gridData = useMemo(() => generateSectorHexGrid(config), [config]);
@@ -534,12 +549,14 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     setConfig((prev) => ({ ...prev, seed: newSeed }));
   };
 
-  // Apply Custom Grid Size and Density
+  // Apply Custom Grid Size, Density, Age & Age Range
   const handleApplyCustomGrid = (
     newCols: number,
     newRows: number,
     newDensity: number,
     newAge: number,
+    newAgeRange: number,
+    newAgeDistribution: 'normal' | 'uniform',
     newFeh: number,
     newSeed: number
   ) => {
@@ -547,13 +564,22 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     const clampedRows = Math.max(4, Math.min(100, Math.round(newRows)));
     const clampedDensity = Math.max(0.05, Math.min(3.5, +newDensity.toFixed(2)));
     const clampedAge = Math.max(0.2, Math.min(12.8, +newAge.toFixed(2)));
+    const clampedAgeRange = Math.max(0.5, Math.min(12.5, +newAgeRange.toFixed(2)));
     const clampedFeh = Math.max(-1.7, Math.min(0.5, +newFeh.toFixed(2)));
+    const derivedSigma =
+      newAgeDistribution === 'uniform'
+        ? +(clampedAgeRange / Math.sqrt(12)).toFixed(2)
+        : +(clampedAgeRange / 3.2).toFixed(2);
+
     setConfig((prev) => ({
       ...prev,
       columns: clampedCols,
       rows: clampedRows,
       density: clampedDensity,
       meanAge: clampedAge,
+      ageRange: clampedAgeRange,
+      ageDistribution: newAgeDistribution,
+      ageSigma: derivedSigma,
       metallicityMean: clampedFeh,
       seed: newSeed,
     }));
@@ -922,7 +948,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           <span className="text-slate-500">&bull;</span>
           <span>Stars: <strong className="text-cyan-300">{gridData.systems.length}</strong></span>
           <span className="text-slate-500">&bull;</span>
-          <span className="hidden md:inline">Age: <strong className="text-cyan-300">{config.meanAge.toFixed(1)} Gyr</strong></span>
+          <span className="hidden md:inline">Age: <strong className="text-cyan-300">{config.meanAge.toFixed(1)} Gyr{config.ageRange ? ` (±${(config.ageRange / 2).toFixed(1)} Gyr${config.ageDistribution === 'uniform' ? ', Uniform' : ''})` : ''}</strong></span>
         </button>
 
         {/* Search Star or Coordinate */}
@@ -1098,25 +1124,75 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               )}
             </div>
 
-            {/* Average Stellar Age Slider */}
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-slate-400">Average Stellar Age:</span>
-                <span className="text-cyan-300 font-bold">{draftAge.toFixed(1)} Gyr</span>
+            {/* Average Stellar Age & Age Range */}
+            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2.5">
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-slate-400">Average Stellar Age:</span>
+                  <span className="text-cyan-300 font-bold">{draftAge.toFixed(1)} Gyr</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.2}
+                  max={12.5}
+                  step={0.1}
+                  value={draftAge}
+                  onChange={(e) => setDraftAge(parseFloat(e.target.value))}
+                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                />
+                <div className="text-[9.5px] text-slate-500 mt-1 flex justify-between">
+                  <span>Young Starburst (0.2 Gyr)</span>
+                  <span>Solar (4.8 Gyr)</span>
+                  <span>Ancient Halo (12.0 Gyr)</span>
+                </div>
               </div>
-              <input
-                type="range"
-                min={0.2}
-                max={12.5}
-                step={0.1}
-                value={draftAge}
-                onChange={(e) => setDraftAge(parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-              />
-              <div className="text-[9.5px] text-slate-500 mt-1 flex justify-between">
-                <span>Young Starburst (0.2 Gyr)</span>
-                <span>Solar (4.8 Gyr)</span>
-                <span>Ancient Halo (12.0 Gyr)</span>
+
+              <div className="border-t border-slate-800/80 pt-2">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-slate-400">Stellar Age Range (Spread):</span>
+                  <span className="text-cyan-300 font-bold">&plusmn;{(draftAgeRange / 2).toFixed(1)} Gyr ({draftAgeRange.toFixed(1)} Gyr span)</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={12.0}
+                  step={0.1}
+                  value={draftAgeRange}
+                  onChange={(e) => setDraftAgeRange(parseFloat(e.target.value))}
+                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                />
+                <div className="flex items-center justify-between text-[9.5px] text-slate-500 mt-1">
+                  <span>Narrow (Halo / Arms &plusmn;0.6 Gyr)</span>
+                  <span>Wide (Bulge &plusmn;5.6 Gyr)</span>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-800/80 pt-2 flex items-center justify-between">
+                <span className="text-slate-400 text-xs">Age Distribution:</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setDraftAgeDistribution('normal')}
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono cursor-pointer transition ${
+                      draftAgeDistribution === 'normal'
+                        ? 'bg-blue-600 text-white font-bold'
+                        : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Normal (Gaussian)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDraftAgeDistribution('uniform')}
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono cursor-pointer transition ${
+                      draftAgeDistribution === 'uniform'
+                        ? 'bg-amber-600 text-white font-bold'
+                        : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Uniform (Bulge)
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1173,7 +1249,18 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 Cancel
               </button>
               <button
-                onClick={() => handleApplyCustomGrid(draftCols, draftRows, draftDensity, draftAge, draftFeh, draftSeed)}
+                onClick={() =>
+                  handleApplyCustomGrid(
+                    draftCols,
+                    draftRows,
+                    draftDensity,
+                    draftAge,
+                    draftAgeRange,
+                    draftAgeDistribution,
+                    draftFeh,
+                    draftSeed
+                  )
+                }
                 className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold transition shadow-lg shadow-cyan-500/20 cursor-pointer"
               >
                 Apply &amp; Regenerate

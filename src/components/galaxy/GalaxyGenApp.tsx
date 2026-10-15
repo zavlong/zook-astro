@@ -665,7 +665,9 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                           ? 'rgba(255, 255, 255, 0.35)'
                           : sector.density > 0.35
                           ? 'rgba(255, 255, 255, 0.18)'
-                          : 'rgba(148, 163, 184, 0.08)'
+                          : sector.density > 0.04
+                          ? 'rgba(148, 163, 184, 0.07)'
+                          : 'transparent'
                       }
                       strokeWidth={isSelected ? 2.8 : isCore ? 1.8 : sector.density > 1.5 ? 1.4 : 0.8}
                       className="transition-colors duration-150"
@@ -966,7 +968,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                   )}
                 </div>
 
-                {/* Mean Stellar Age */}
+                {/* Mean Stellar Age & Range */}
                 <div className="border-t border-slate-800/80 pt-2.5">
                   <div className="flex justify-between text-[11px] mb-1">
                     <span className="text-slate-400">Mean Stellar Age</span>
@@ -975,12 +977,24 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                       {selectedSector.meanAge} Gyr
                     </span>
                   </div>
+                  <div className="flex justify-between text-[10px] text-slate-300 font-mono mb-1 bg-slate-950/50 p-1.5 rounded-lg border border-slate-800/70">
+                    <span className="text-slate-400">Age Range:</span>
+                    <span className="text-cyan-300 font-bold">&plusmn;{(selectedSector.ageRange / 2).toFixed(1)} Gyr ({selectedSector.ageMin} &ndash; {selectedSector.ageMax} Gyr)</span>
+                  </div>
+                  <div className="text-[9.5px] text-slate-400 font-mono mb-1.5 flex items-center gap-1.5">
+                    <span className="text-slate-500">Distribution:</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${selectedSector.ageDistribution === 'uniform' ? 'bg-amber-950/80 text-amber-300 border border-amber-800' : 'bg-blue-950/80 text-blue-300 border border-blue-800'}`}>
+                      {selectedSector.ageDistribution === 'uniform' ? 'Uniform Distribution' : 'Normal Distribution'}
+                    </span>
+                  </div>
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    {selectedSector.meanAge < 2.0
-                      ? 'Young Population I starburst with massive O/B/A giants and bright blue spiral arms.'
-                      : selectedSector.meanAge < 6.0
-                      ? 'Intermediate Solar-age thin disk population with abundant G/K stars.'
-                      : 'Ancient Population II stars dominated by red dwarfs and cool white dwarf remnants.'}
+                    {selectedSector.ageDistribution === 'uniform'
+                      ? '🌌 Galactic Bulge: Wide uniform age distribution spanning from primordial remnants to ongoing stellar accretion.'
+                      : selectedSector.rNorm > 0.90
+                      ? '⚪ Galactic Halo: Ancient Population II stars with narrow age range (all stars are uniformly old).'
+                      : selectedSector.meanAge < 2.0
+                      ? '🌀 Spiral Arm Ridge: Active Population I starburst with hot young O/B/A stars.'
+                      : 'Intermediate Solar-age thin disk population with balanced stellar generations.'}
                   </p>
                 </div>
 
@@ -1024,6 +1038,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                   <div>&bull; Grid Dimensions: <code className="text-blue-300">50 &times; 50</code> (2,500 hexes)</div>
                   <div>&bull; Density: <code className="text-blue-300">{selectedSector.density}</code></div>
                   <div>&bull; Mean Age: <code className="text-blue-300">{selectedSector.meanAge} Gyr</code></div>
+                  <div>&bull; Age Range: <code className="text-blue-300">{selectedSector.ageRange} Gyr ({selectedSector.ageDistribution})</code></div>
                   <div>&bull; Metallicity: <code className="text-blue-300">{selectedSector.metallicityMean} dex</code></div>
                 </div>
               </div>
@@ -1114,40 +1129,83 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                 </div>
               </div>
 
-              {/* Arm Count & Arm Winding (for spirals) */}
+              {/* Arm Parameters (Count, Winding, Width, Strength for spirals) */}
               {(draftConfig.morphology === 'spiral' || draftConfig.morphology === 'barred-spiral') && (
-                <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800">
-                  <div>
-                    <label className="text-slate-300 block mb-1">
-                      Arm Count: <strong className="text-blue-400">{draftConfig.armCount}</strong>
-                    </label>
-                    <input
-                      type="range"
-                      min={2}
-                      max={6}
-                      step={1}
-                      value={draftConfig.armCount}
-                      onChange={(e) =>
-                        setDraftConfig((d) => ({ ...d, armCount: parseInt(e.target.value) }))
-                      }
-                      className="w-full accent-blue-500 cursor-pointer"
-                    />
+                <div className="space-y-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+                  <div className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">
+                    Spiral Arm Mechanics
                   </div>
-                  <div>
-                    <label className="text-slate-300 block mb-1">
-                      Arm Winding: <strong className="text-blue-400">{draftConfig.armWinding.toFixed(2)}</strong>
-                    </label>
-                    <input
-                      type="range"
-                      min={0.6}
-                      max={2.4}
-                      step={0.05}
-                      value={draftConfig.armWinding}
-                      onChange={(e) =>
-                        setDraftConfig((d) => ({ ...d, armWinding: parseFloat(e.target.value) }))
-                      }
-                      className="w-full accent-blue-500 cursor-pointer"
-                    />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-slate-300 block mb-1">
+                        Arm Count: <strong className="text-blue-400">{draftConfig.armCount}</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min={2}
+                        max={6}
+                        step={1}
+                        value={draftConfig.armCount}
+                        onChange={(e) =>
+                          setDraftConfig((d) => ({ ...d, armCount: parseInt(e.target.value) }))
+                        }
+                        className="w-full accent-blue-500 cursor-pointer"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-300 block mb-1">
+                        Arm Winding: <strong className="text-blue-400">{draftConfig.armWinding.toFixed(2)}x</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min={0.5}
+                        max={5.0}
+                        step={0.05}
+                        value={draftConfig.armWinding}
+                        onChange={(e) =>
+                          setDraftConfig((d) => ({ ...d, armWinding: parseFloat(e.target.value) }))
+                        }
+                        className="w-full accent-blue-500 cursor-pointer"
+                      />
+                      <div className="text-[9px] text-slate-500 mt-0.5">Scale up to 5.0x tight winding</div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 border-t border-slate-800/60 pt-2.5">
+                    <div>
+                      <label className="text-slate-300 block mb-1">
+                        Arm Width: <strong className="text-cyan-400">{(draftConfig.armWidth ?? 1.0).toFixed(2)}x</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min={0.3}
+                        max={2.5}
+                        step={0.05}
+                        value={draftConfig.armWidth ?? 1.0}
+                        onChange={(e) =>
+                          setDraftConfig((d) => ({ ...d, armWidth: parseFloat(e.target.value) }))
+                        }
+                        className="w-full accent-cyan-500 cursor-pointer"
+                      />
+                      <div className="text-[9px] text-slate-500 mt-0.5">Filament thin to sweeping broad</div>
+                    </div>
+                    <div>
+                      <label className="text-slate-300 block mb-1">
+                        Arm Strength: <strong className="text-amber-400">{(draftConfig.armStrength ?? 1.0).toFixed(2)}x</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min={0.2}
+                        max={3.0}
+                        step={0.05}
+                        value={draftConfig.armStrength ?? 1.0}
+                        onChange={(e) =>
+                          setDraftConfig((d) => ({ ...d, armStrength: parseFloat(e.target.value) }))
+                        }
+                        className="w-full accent-amber-500 cursor-pointer"
+                      />
+                      <div className="text-[9px] text-slate-500 mt-0.5">Density multiplier for spiral arms</div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1155,13 +1213,16 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               {/* Galaxy Radius & Overall Density Scale */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-300 block mb-1">
-                    Radius: <strong className="text-emerald-400">{draftConfig.radiusKpc} kpc</strong>
-                  </label>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-slate-300 block font-bold">
+                      Physical Radius:
+                    </label>
+                    <strong className="text-emerald-400">{draftConfig.radiusKpc} kpc</strong>
+                  </div>
                   <input
                     type="range"
-                    min={15}
-                    max={45}
+                    min={10}
+                    max={50}
                     step={1}
                     value={draftConfig.radiusKpc}
                     onChange={(e) =>
@@ -1169,13 +1230,23 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                     }
                     className="w-full accent-emerald-500 cursor-pointer"
                   />
+                  <div className="text-[9.5px] text-slate-400 mt-1 font-mono">
+                    {draftConfig.radiusKpc === 50
+                      ? '🌌 50 kpc: Fills entire 50×50 grid'
+                      : draftConfig.radiusKpc === 25
+                      ? '🌌 25 kpc: Extends halfway out'
+                      : `Extends ${Math.round((draftConfig.radiusKpc / 50) * 100)}% of grid`}
+                  </div>
                 </div>
                 <div>
-                  <label className="text-slate-300 block mb-1">
-                    Density Scale: <strong className={draftConfig.overallDensityScale > 1.2 ? 'text-amber-300' : 'text-emerald-400'}>
-                      {draftConfig.overallDensityScale.toFixed(2)}x{draftConfig.overallDensityScale > 1.2 ? ' (Overdensities Active)' : ''}
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-slate-300 block font-bold">
+                      Density Scale:
+                    </label>
+                    <strong className={draftConfig.overallDensityScale > 1.2 ? 'text-amber-300' : 'text-emerald-400'}>
+                      {draftConfig.overallDensityScale.toFixed(2)}x
                     </strong>
-                  </label>
+                  </div>
                   <input
                     type="range"
                     min={0.5}
@@ -1190,6 +1261,9 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                     }
                     className="w-full accent-emerald-500 cursor-pointer"
                   />
+                  <div className="text-[9.5px] text-slate-400 mt-1 font-mono">
+                    {draftConfig.overallDensityScale > 1.2 ? '🔥 Overdensity overflow active' : 'Baseline stellar density'}
+                  </div>
                 </div>
               </div>
             </div>

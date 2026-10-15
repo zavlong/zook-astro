@@ -46,6 +46,12 @@ export const App: React.FC = () => {
       rows: 50,
       density: sector.density,
       meanAge: sector.meanAge,
+      ageRange: sector.ageRange,
+      ageDistribution: sector.ageDistribution,
+      ageSigma:
+        sector.ageDistribution === 'uniform'
+          ? +(sector.ageRange / Math.sqrt(12)).toFixed(2)
+          : +(sector.ageRange / 3.2).toFixed(2),
       metallicityMean: sector.metallicityMean,
     });
 

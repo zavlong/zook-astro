@@ -64,6 +64,8 @@ export interface SectorHexConfig {
   density: number; // 0.05 to 3.5 (supports >100% overdensities)
   meanAge: number; // 0.5 to 11 Gyr
   ageSigma: number;
+  ageRange?: number; // Total age spread in Gyr (e.g. 1.5 Gyr for halo, 11.2 Gyr for bulge)
+  ageDistribution?: 'normal' | 'uniform'; // Galactic bulge has uniform distribution
   metallicityMean: number; // -1.5 to +0.4 dex
   metallicitySigma: number;
 }
@@ -326,8 +328,14 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
     const mass = sampleSystemMass(sysRng, config.density);
     if (mass >= 3.0) heavyMassCount++;
 
-    // 2. Age sample (clamped between 0.1 and 12.8 Gyr)
-    const rawAge = config.meanAge + sysRng.nextGaussian(0, config.ageSigma);
+    // 2. Age sample (clamped between 0.1 and 12.8 Gyr, honoring uniform distribution for galactic bulge)
+    let rawAge: number;
+    if (config.ageDistribution === 'uniform' && config.ageRange) {
+      rawAge = config.meanAge + (sysRng.next() - 0.5) * config.ageRange;
+    } else {
+      const sigma = config.ageSigma || (config.ageRange ? config.ageRange / 3.2 : 1.0);
+      rawAge = config.meanAge + sysRng.nextGaussian(0, sigma);
+    }
     const age = +Math.max(0.1, Math.min(12.8, rawAge)).toFixed(2);
 
     // 3. Metallicity sample (with cosmic age anti-correlation)
