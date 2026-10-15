@@ -51,7 +51,7 @@ interface SectorHexAppProps {
   initialConfig?: Partial<SectorHexConfig> | null;
 }
 
-type SectorPresetKey = 'disk' | 'young-cluster' | 'old-halo' | 'dense-core';
+type SectorPresetKey = 'disk' | 'young-cluster' | 'old-halo' | 'dense-core' | 'galactic-nucleus';
 
 interface SectorPreset {
   id: SectorPresetKey;
@@ -62,6 +62,7 @@ interface SectorPreset {
   ageSigma: number;
   metallicityMean: number;
   metallicitySigma: number;
+  coord?: string;
 }
 
 const SECTOR_PRESETS: SectorPreset[] = [
@@ -104,6 +105,17 @@ const SECTOR_PRESETS: SectorPreset[] = [
     ageSigma: 2.0,
     metallicityMean: 0.18,
     metallicitySigma: 0.28,
+  },
+  {
+    id: 'galactic-nucleus',
+    label: 'Galactic Nucleus (2525)',
+    description: 'Center of galaxy (Sector 2525) with 1,000,000 M☉ Supermassive Black Hole (Sagittarius A*), S-stars, and relativistic debris.',
+    density: 1.25,
+    meanAge: 8.5,
+    ageSigma: 2.2,
+    metallicityMean: 0.25,
+    metallicitySigma: 0.18,
+    coord: '2525',
   },
 ];
 
@@ -543,6 +555,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       ageSigma: preset.ageSigma,
       metallicityMean: preset.metallicityMean,
       metallicitySigma: preset.metallicitySigma,
+      coord: preset.coord,
+      columns: preset.coord === '2525' ? Math.max(50, prev.columns) : prev.columns,
+      rows: preset.coord === '2525' ? Math.max(50, prev.rows) : prev.rows,
+      name: preset.coord === '2525' ? 'Sector 2525 (Galactic Nucleus)' : prev.name,
     }));
   };
 
@@ -811,11 +827,52 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       );
     }
 
-    // Quadruple System (4 Stars: Dual binary pairs AB and CD)
+    // Quadruple System (4 Stars: Dual binary pairs AB and CD, OR Supermassive Black Hole + 3 S-Stars)
     const starA = stars[0];
     const starB = stars[1];
     const starC = stars[2];
     const starD = stars[3];
+
+    // Special: Supermassive Black Hole + 3 S-Stars (Sagittarius A* Galactic Center S-Cluster)
+    if (system.mass > 999999 || starA.category?.includes('Supermassive') || starA.spectralType?.includes('SMBH')) {
+      const { r: rA } = getStarScaledRadius(starA, 1.45);
+      const { r: rB } = getStarScaledRadius(starB, 0.75);
+      const { r: rC } = getStarScaledRadius(starC, 0.65);
+      const { r: rD } = getStarScaledRadius(starD, 0.58);
+      const posB = { x: -14, y: -7 };
+      const posC = { x: +13, y: -9 };
+      const posD = { x: +16, y: +8 };
+
+      return (
+        <g>
+          {/* Relativistic Accretion Disc Atmospheric Glow */}
+          <circle r={rA * 3.8} fill="#a855f7" opacity={0.25} />
+          <circle r={rA * 2.5} fill="#c084fc" opacity={0.35} />
+
+          {/* Relativistic Accretion Ring / Photon Torus */}
+          <ellipse cx={0} cy={0} rx={rA * 2.1} ry={rA * 0.95} fill="none" stroke="#e9d5ff" strokeWidth={1.4} opacity={0.9} />
+          <ellipse cx={0} cy={0} rx={rA * 1.6} ry={rA * 0.72} fill="none" stroke="#a855f7" strokeWidth={1.8} opacity={0.7} />
+
+          {/* S-Star Relativistic Orbital Traces */}
+          <ellipse cx={0} cy={0} rx={16} ry={9} fill="none" stroke="rgba(192, 132, 252, 0.35)" strokeWidth={0.6} strokeDasharray="2,2" />
+          <ellipse cx={0} cy={0} rx={21} ry={13} fill="none" stroke="rgba(192, 132, 252, 0.30)" strokeWidth={0.6} strokeDasharray="2,2" />
+
+          {/* Event Horizon (Pure Black Singularity Void) */}
+          <circle r={rA} fill="#000000" stroke="#c084fc" strokeWidth={1.2} />
+
+          {/* Companion S-Stars (B, C, D) */}
+          <circle cx={posB.x} cy={posB.y} r={rB * 1.6} fill={starB.colorHex} opacity={0.35} />
+          <circle cx={posB.x} cy={posB.y} r={rB} fill={starB.colorHex} stroke="#ffffff" strokeWidth={0.5} />
+
+          <circle cx={posC.x} cy={posC.y} r={rC * 1.6} fill={starC.colorHex} opacity={0.35} />
+          <circle cx={posC.x} cy={posC.y} r={rC} fill={starC.colorHex} stroke="#ffffff" strokeWidth={0.5} />
+
+          <circle cx={posD.x} cy={posD.y} r={rD * 1.6} fill={starD.colorHex} opacity={0.35} />
+          <circle cx={posD.x} cy={posD.y} r={rD} fill={starD.colorHex} stroke="#ffffff" strokeWidth={0.5} />
+        </g>
+      );
+    }
+
     const { r: rA, isBlackHole: isBHA } = getStarScaledRadius(starA, 0.72);
     const { r: rB, isBlackHole: isBHB } = getStarScaledRadius(starB, 0.72);
     const { r: rC, isBlackHole: isBHC } = getStarScaledRadius(starC, 0.72);
@@ -1605,6 +1662,28 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       />
                     )}
 
+                    {/* Supermassive Black Hole Galactic Nucleus Badge (1,000,000 M☉) */}
+                    {system.mass > 999999 && (
+                      <g>
+                        <circle
+                          cx={0}
+                          cy={-system.influenceRadius - 10}
+                          r={7.5}
+                          fill="#4a044e"
+                          stroke="#c084fc"
+                          strokeWidth={1}
+                        />
+                        <text
+                          y={-system.influenceRadius - 6.5}
+                          textAnchor="middle"
+                          fontSize={9}
+                          style={{ pointerEvents: 'none' }}
+                        >
+                          🌀
+                        </text>
+                      </g>
+                    )}
+
                     {/* Coordinate / Catalog Label at top of zone - revealed only on mouse over or click/selection */}
                     {showLabels && (isSelected || isHovered) && zoom >= 0.26 && (
                       <text
@@ -2031,6 +2110,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                           <span>Giant System ({selectedSystem.mass.toFixed(1)} M☉)</span>
                         </span>
                       )}
+                      {selectedSystem.mass > 999999 && (
+                        <span className="text-[10px] text-purple-300 bg-purple-950/80 px-1.5 py-0.2 rounded border border-purple-800 font-bold flex items-center gap-1">
+                          <span>🌀</span>
+                          <span>Supermassive Black Hole ({selectedSystem.mass.toLocaleString()} M☉)</span>
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2056,10 +2141,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
                     <div className="text-[10px] text-slate-400 uppercase">Mass (sysMass)</div>
                     <div className="text-sm font-bold text-amber-300 mt-0.5">
-                      {selectedSystem.mass.toFixed(3)} <span className="text-xs text-slate-400">M☉</span>
+                      {selectedSystem.mass >= 100000 ? selectedSystem.mass.toLocaleString() : selectedSystem.mass.toFixed(3)} <span className="text-xs text-slate-400">M☉</span>
                     </div>
                     <div className="text-[9.5px] text-slate-400 mt-0.5">
-                      Star A: <span className="text-amber-200 font-semibold">{selectedSystem.primaryMass.toFixed(3)} M☉</span>
+                      Star A: <span className="text-amber-200 font-semibold">{selectedSystem.primaryMass >= 100000 ? selectedSystem.primaryMass.toLocaleString() : selectedSystem.primaryMass.toFixed(3)} M☉</span>
                     </div>
                   </div>
 

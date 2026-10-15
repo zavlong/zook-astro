@@ -42,6 +42,7 @@ export const App: React.FC = () => {
     setSectorInitialConfig({
       seed: sector.seed,
       name: sector.name,
+      coord: sector.coord,
       columns: 50,
       rows: 50,
       density: sector.density,

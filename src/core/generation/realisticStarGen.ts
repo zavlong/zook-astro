@@ -7,6 +7,7 @@ import {
   RealisticMoon,
   RealisticStarNode,
   StarSystem,
+  StellarEvolutionState,
 } from '../../types/astrophysics';
 import {
   ArchitectSystem,
@@ -182,6 +183,13 @@ export const STARGEN_BENCHMARK_PRESETS: Record<
     age: 11.8,
     feh: -1.6,
     forcedMult: '1',
+  },
+  smbh: {
+    label: 'Sagittarius A* SMBH (1,000,000 M☉, 8.0 Gyr, +0.25 dex)',
+    sysMass: 1000000,
+    age: 8.0,
+    feh: 0.25,
+    forcedMult: 'auto',
   },
 };
 
@@ -2699,6 +2707,145 @@ export function generateZoneSystem(
   };
 }
 
+/**
+ * Generates a special Supermassive Black Hole system (for sysMass > 999,999 M☉)
+ * Ignored regular algorithm: creates Supermassive Black Hole primary with three random
+ * companion stars (S-stars) and a whole bunch of asteroid belts and zero planets.
+ */
+function generateSupermassiveBlackHoleSystem(
+  params: StarGenParams,
+  rng?: PRNG,
+  seedUsed?: number
+): RealisticStarSystemResult {
+  if (!rng) {
+    const seed = seedFromId(params.id ?? params.seed ?? 2525);
+    rng = new PRNG(seed);
+    seedUsed = seed;
+  }
+
+  // 1. Primary: Supermassive Black Hole (SMBH)
+  const starA: RealisticStarNode = {
+    label: 'A',
+    category: 'Supermassive Black Hole',
+    mass: params.sysMass,
+    lum: '1.25e+06',
+    lumNum: 1250000,
+    radius: 4.244, // Schwarzschild radius in R_sun (2.95e6 km)
+    Teff: 85000, // Relativistic inner accretion disk temperature
+    logg: 9.80,
+    tau: 0.001,
+    spectralType: 'SMBH (Supermassive Black Hole)',
+    colorHex: '#c084fc',
+  };
+
+  // 2. Three random companion stars in wide orbits (Galactic Center S-Cluster)
+  const massB = +(10.0 + rng.next() * 25.0).toFixed(2);
+  const massC = +(3.5 + rng.next() * 12.0).toFixed(2);
+  const massD = +(1.2 + rng.next() * 6.0).toFixed(2);
+
+  const ageB = +(0.01 + rng.next() * 0.04).toFixed(3);
+  const ageC = +(0.03 + rng.next() * 0.12).toFixed(3);
+  const ageD = +(0.08 + rng.next() * 0.35).toFixed(3);
+
+  const starB = getStarStats(massB, ageB, params.feh, 'B');
+  const starC = getStarStats(massC, ageC, params.feh, 'C');
+  const starD = getStarStats(massD, ageD, params.feh, 'D');
+
+  const splits: RealisticBinarySplit[] = [
+    {
+      pair: 'A-B',
+      a_AU: 180.0,
+      e: 0.88,
+      regime: 'S-Type (Circum-SMBH Orbit)',
+      sMaxA: 120.0,
+      sMaxB: 18.0,
+      pMin: 420.0,
+    },
+    {
+      pair: '(AB)-C',
+      a_AU: 580.0,
+      e: 0.65,
+      regime: 'S-Type (Circum-SMBH Orbit)',
+      sMaxA: 310.0,
+      sMaxB: 25.0,
+      pMin: 1150.0,
+    },
+    {
+      pair: '(ABC)-D',
+      a_AU: 1450.0,
+      e: 0.42,
+      regime: 'S-Type (Circum-SMBH Orbit)',
+      sMaxA: 820.0,
+      sMaxB: 40.0,
+      pMin: 2800.0,
+    },
+  ];
+
+  // 3. A whole bunch of asteroid belts and NO planets
+  const beltDefs = [
+    { role: 'Relativistic Inner Accretion Debris Ring', a: 1.2, width: 0.6, mass: 65 },
+    { role: 'Innermost Silicate Dust & Planetesimal Belt', a: 3.6, width: 1.4, mass: 120 },
+    { role: 'Sublimation Transition Asteroid Belt', a: 7.8, width: 2.5, mass: 180 },
+    { role: 'Main Circumnuclear Asteroid Ring (CNR)', a: 16.5, width: 5.2, mass: 350 },
+    { role: 'Dense Frozen Asteroid & Comet Belt', a: 31.0, width: 9.0, mass: 240 },
+    { role: 'Perturbed Outer Planetesimal Field', a: 58.0, width: 16.0, mass: 190 },
+    { role: 'Kuiper-Scale Relic Debris Belt', a: 95.0, width: 24.0, mass: 140 },
+    { role: 'Circum-Cluster Tidal Debris Torus', a: 150.0, width: 38.0, mass: 95 },
+  ];
+
+  const beltBodies: RealisticBeltBody[] = beltDefs.map((def) => {
+    const inc = +(rng.next() * 12.0).toFixed(2);
+    const node = +(rng.next() * 360.0).toFixed(1);
+    return {
+      kind: 'belt',
+      role: def.role,
+      a: def.a,
+      a_birth: def.a,
+      beltWidth: def.width,
+      rawSlotMassEarth: def.mass * 1.5,
+      massEarth: def.mass,
+      incDeg: inc,
+      omegaNodeDeg: node,
+    };
+  });
+
+  const smbhZone: RealisticPlanetaryZone = {
+    title: 'Circumnuclear Debris Ring & Relativistic Torus (Star A)',
+    mass: params.sysMass,
+    lum: 1250000,
+    a_in: 0.8,
+    a_out: 180.0,
+    a_snow: 22.0,
+    archetype: 'D',
+    probs: { A: 0, B: 0, C: 0, D: 1 },
+    diskMassEarth: 1380.0,
+    bodies: beltBodies, // NO planets, only asteroid belts
+  };
+
+  return {
+    roll: globalRollCounter,
+    step1: params,
+    hierarchy: {
+      archName: 'Supermassive Black Hole System (Galactic Center S-Cluster)',
+      stars: [starA, starB, starC, starD],
+      splits,
+      zones: [
+        {
+          title: `Star A (${starA.spectralType})`,
+          mass: starA.mass,
+          lum: starA.lumNum,
+          age: params.age,
+          feh: params.feh,
+          a_in: 0.8,
+          a_out: 180.0,
+        },
+      ],
+    },
+    zones: [smbhZone],
+    seedUsed,
+  };
+}
+
 let globalRollCounter = 0;
 
 export function runRealisticGenerator(
@@ -2711,6 +2858,12 @@ export function runRealisticGenerator(
     rng = new PRNG(seedUsed);
   }
   globalRollCounter++;
+
+  // Special System: If solar masses > 999999, ignore regular algorithm and create SMBH system
+  if (params.sysMass > 999999) {
+    return generateSupermassiveBlackHoleSystem(params, rng, seedUsed);
+  }
+
   const nStars = rollStep2(params.sysMass, params.forcedMult, rng);
   const h = buildHierarchy(params.sysMass, params.age, params.feh, nStars, rng);
   const pZones: RealisticPlanetaryZone[] = [];
@@ -3028,6 +3181,60 @@ export function convertRealisticToSectorStarSystem(
   const primary = res.hierarchy.stars[0];
   const progenitorMass = Math.max(0.08, zone ? zone.mass : primary.mass);
   const starAgeGyr = res.step1.age;
+
+  if (res.step1.sysMass > 999999) {
+    const starState: StellarEvolutionState = {
+      phase: 'Supermassive Black Hole',
+      spectralMK: 'SMBH',
+      spectralDesc: 'Supermassive Black Hole (10^6 M☉ relativistic nucleus)',
+      ageGyr: res.step1.age,
+      ageText: `${res.step1.age.toFixed(1)} Gyr`,
+      L: 1250000,
+      Teff: 85000,
+      currentMass: res.step1.sysMass,
+      radiusRsun: 4.24,
+      radiusAU: +(4.24 * 0.00465).toFixed(5),
+      radiusKm: 2950000,
+      rInHZ: 1100,
+      rOutHZ: 2400,
+      snowLineAU: 2800,
+      isPulsating: false,
+      isSupernova: false,
+      isPlanetaryNebula: false,
+      nebulaRadiusAU: 0,
+      snShockRadiusAU: 0,
+      isRemnant: true,
+      remnantType: 'Black Hole',
+    };
+    const colorData = {
+      r: 192,
+      g: 132,
+      b: 252,
+      glow: 'rgba(192, 132, 252, 0.45)',
+      hex: '#c084fc',
+      cat: 'remnant' as const,
+    };
+    return {
+      id: 9000 + res.roll,
+      name: res.step1.name || `STARGEN-${String(res.roll).padStart(3, '0')}`,
+      x: 0,
+      y: 0,
+      z: 0,
+      progenitorMass: res.step1.sysMass,
+      starAgeGyr: res.step1.age,
+      progressPct: 100.0,
+      starState,
+      colorData,
+      planets: [],
+      hasHZPlanet: false,
+      metallicityDex: res.step1.feh,
+      systemArchName: res.hierarchy.archName,
+      zoneArchetype: 'D',
+      diskMassEarth: zone?.diskMassEarth || 1380,
+      companionStars: res.hierarchy.stars.slice(1),
+      binarySplits: res.hierarchy.splits,
+    };
+  }
 
   const tMS_Gyr = calculateMSLifetimeGyr(progenitorMass);
   const progressPct = Math.min(100.0, (starAgeGyr / tMS_Gyr) * 50.0);

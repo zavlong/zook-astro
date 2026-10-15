@@ -1119,6 +1119,13 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                     {copiedId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                   </button>
                 </div>
+
+                {selectedSector.coord === '2525' && (
+                  <div className="mt-2.5 px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-purple-950/90 to-indigo-950/90 border border-purple-500/70 text-purple-200 text-xs font-mono font-bold flex items-center gap-2 shadow-lg">
+                    <span className="text-sm">🌀</span>
+                    <span>Galactic Nucleus SMBH (Sagittarius A* &bull; 1,000,000 M☉)</span>
+                  </div>
+                )}
               </div>
 
               {/* PRIMARY ACTION BUTTON: ENTER 50x50 SECTOR MAP */}

@@ -2913,12 +2913,14 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
           <div className="flex flex-col gap-1">
             <div className="flex justify-between text-[11px] font-semibold text-slate-300 uppercase">
               <span>System Mass</span>
-              <span className="text-sky-400 font-mono">{sysMass} M☉</span>
+              <span className="text-sky-400 font-mono">
+                {sysMass >= 100000 ? `${sysMass.toLocaleString()} M☉` : `${sysMass} M☉`}
+              </span>
             </div>
             <input
               type="range"
               min={-1.05}
-              max={1.2}
+              max={Math.max(1.7, logMass)}
               step={0.01}
               value={logMass}
               onChange={(e) =>

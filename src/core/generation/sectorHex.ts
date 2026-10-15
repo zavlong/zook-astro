@@ -60,6 +60,7 @@ export interface SectorHexCell {
 export interface SectorHexConfig {
   seed: number;
   name: string;
+  coord?: string; // e.g. "2525" for central galactic sector
   columns: number;
   rows: number;
   density: number; // 0.05 to 3.5 (supports >100% overdensities)
@@ -568,6 +569,93 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
 
     systems.push(system);
     cells.push({ col: c, row: r, coord, system });
+  }
+
+  // Special System for Sector 2525 (Center of Galaxy Map):
+  // "if sector number = 2525, create system with 1000000 solar masses (no effect to the rest of the mass number)"
+  const isSector2525 = config.coord === '2525' || config.name?.includes('2525');
+  if (isSector2525) {
+    const smbhX = Math.round(sectorWidth / 2);
+    const smbhY = Math.round(sectorHeight / 2);
+
+    // Gently push any regular star that is too close away from the SMBH accretion boundary
+    for (const s of systems) {
+      const dx = s.x - smbhX;
+      const dy = s.y - smbhY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 46) {
+        const angle = dist > 0 ? Math.atan2(dy, dx) : 0;
+        s.x = Math.round(smbhX + Math.cos(angle) * 52);
+        s.y = Math.round(smbhY + Math.sin(angle) * 52);
+      }
+    }
+
+    const smbhCol = Math.min(config.columns, Math.max(1, Math.floor(((smbhX - padding) / usableW) * config.columns) + 1));
+    const smbhRow = Math.min(config.rows, Math.max(1, Math.floor(((smbhY - padding) / usableH) * config.rows) + 1));
+    const smbhCoord = formatHexCoord(smbhCol, smbhRow);
+    const smbhId = `SYS-2525-SMBH`;
+
+    const smbhParams: StarGenParams = {
+      sysMass: 1000000,
+      age: config.meanAge,
+      feh: Math.max(0.20, config.metallicityMean),
+      id: smbhId,
+      name: 'Sagittarius A* (Galactic SMBH)',
+      forcedMult: 'auto',
+    };
+    const smbhSysResult = runRealisticGenerator(smbhParams);
+    const primaryStar = smbhSysResult.hierarchy.stars[0];
+    const companionStars = smbhSysResult.hierarchy.stars.slice(1);
+    const nStars = smbhSysResult.hierarchy.stars.length;
+
+    let beltCount = 0;
+    for (const zone of smbhSysResult.zones) {
+      for (const body of zone.bodies) {
+        if (body.kind === 'belt') beltCount++;
+      }
+    }
+
+    const smbhSystem: SectorHexSystem = {
+      age: config.meanAge,
+      mass: 1000000,
+      metallicity: Math.max(0.20, config.metallicityMean),
+      id: smbhId,
+      x: smbhX,
+      y: smbhY,
+      influenceRadius: 54,
+      parsecX: 0,
+      parsecY: 0,
+      name: 'Sagittarius A* (Galactic SMBH)',
+      col: smbhCol,
+      row: smbhRow,
+      coord: smbhCoord,
+      primaryClass: primaryStar.spectralType,
+      primaryMass: 1000000,
+      spectralCat: 'remnant',
+      colorHex: primaryStar.colorHex,
+      glowColor: '#a855f7',
+      teff: primaryStar.Teff,
+      lumLsun: typeof primaryStar.lumNum === 'number' ? primaryStar.lumNum : 1250000,
+      isRemnant: true,
+      remnantType: 'Supermassive Black Hole',
+      nStars,
+      archName: smbhSysResult.hierarchy.archName,
+      companionStars,
+      planetCount: 0,
+      beltCount,
+      candidateHabitable: false,
+      habitableWorldCount: 0,
+      habitableTypes: [],
+      isGiantSystem: false,
+      sysResult: smbhSysResult,
+    };
+
+    // Prepend so Sagittarius A* is the primary system and default selection of sector 2525
+    systems.unshift(smbhSystem);
+    cells.unshift({ col: smbhCol, row: smbhRow, coord: smbhCoord, system: smbhSystem });
+    remnantCount++;
+    multipleSystemCount++;
+    heavyMassCount++;
   }
 
   // Compute the sector's integrated color as luminosity-weighted average of all constituent stars
