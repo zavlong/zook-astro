@@ -16,6 +16,10 @@ import {
   X,
   Grid,
   Route,
+  Crown,
+  Shield,
+  Flag,
+  Trash2,
 } from 'lucide-react';
 import {
   SectorHexConfig,
@@ -24,6 +28,8 @@ import {
   DEFAULT_SECTOR_CONFIG,
   generateSectorHexGrid,
 } from '../../core/generation/sectorHex';
+import { SectorEmpire } from '../../core/generation/empireGen';
+import { SpawnEmpireModal } from './SpawnEmpireModal';
 import { StarGenParams } from '../../core/generation/realisticStarGen';
 import { SpectralCategory } from '../../types/astrophysics';
 
@@ -192,6 +198,124 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       (l) => l.sourceId === selectedSystem.id || l.targetId === selectedSystem.id
     );
   }, [selectedSystem, gridData.hyperlanes]);
+
+  // ============================================================================
+  // ALIEN EMPIRE & TERRITORY MANAGEMENT STATE
+  // ============================================================================
+  const [empires, setEmpires] = useState<SectorEmpire[]>([]);
+  const [activeEmpireId, setActiveEmpireId] = useState<string | null>(null);
+  const [isSpawnEmpireMode, setIsSpawnEmpireMode] = useState<boolean>(false);
+  const [isEmpireModalOpen, setIsEmpireModalOpen] = useState<boolean>(false);
+  const [empireTargetSystem, setEmpireTargetSystem] = useState<SectorHexSystem | null>(null);
+  const [bannerNotice, setBannerNotice] = useState<string | null>(null);
+
+  // Active empire lookup
+  const activeEmpire = useMemo(() => {
+    if (empires.length === 0) return null;
+    return empires.find((e) => e.id === activeEmpireId) || empires[0];
+  }, [empires, activeEmpireId]);
+
+  // O(1) System ID -> Empire Lookup Map
+  const empireMap = useMemo(() => {
+    const map = new Map<string, SectorEmpire>();
+    for (const emp of empires) {
+      for (const sysId of emp.claimedSystemIds) {
+        map.set(sysId, emp);
+      }
+    }
+    return map;
+  }, [empires]);
+
+  // Auto-dismiss transient banner notices
+  useEffect(() => {
+    if (!bannerNotice || isSpawnEmpireMode) return;
+    const timer = setTimeout(() => {
+      setBannerNotice(null);
+    }, 4500);
+    return () => clearTimeout(timer);
+  }, [bannerNotice, isSpawnEmpireMode]);
+
+  // Launch spawn empire workflow
+  const handleStartSpawnEmpire = useCallback(() => {
+    if (selectedSystem && selectedSystem.candidateHabitable) {
+      setEmpireTargetSystem(selectedSystem);
+      setIsEmpireModalOpen(true);
+      setIsSpawnEmpireMode(false);
+      setBannerNotice(null);
+    } else {
+      setIsSpawnEmpireMode(true);
+      setBannerNotice('👑 Click any system with a habitable world (marked 🟢) to establish an alien empire.');
+    }
+  }, [selectedSystem]);
+
+  // Handle empire founded in modal
+  const handleFoundEmpire = useCallback((newEmpire: SectorEmpire) => {
+    setEmpires((prev) => {
+      // Free the new homeworld from any existing claims
+      const filtered = prev.map((emp) => ({
+        ...emp,
+        claimedSystemIds: emp.claimedSystemIds.filter((id) => id !== newEmpire.homeworldSystemId),
+      }));
+      return [...filtered, newEmpire];
+    });
+    setActiveEmpireId(newEmpire.id);
+    setIsSpawnEmpireMode(false);
+    setBannerNotice(`👑 Founded the ${newEmpire.name}! Hold Shift + Click other stars to expand territory.`);
+  }, []);
+
+  // Shift-click claim / unclaim toggle for a system
+  const handleClaimToggle = useCallback(
+    (system: SectorHexSystem) => {
+      if (!activeEmpire) {
+        setBannerNotice('⚠️ Spawn or select an active empire first to claim star systems.');
+        return;
+      }
+
+      const currentOwner = empireMap.get(system.id);
+      if (currentOwner && currentOwner.id === activeEmpire.id) {
+        // System is already claimed by the active empire
+        if (system.id === activeEmpire.homeworldSystemId) {
+          setBannerNotice(`👑 Cannot unclaim ${activeEmpire.name}'s capital homeworld!`);
+          return;
+        }
+        // Unclaim it
+        setEmpires((prev) =>
+          prev.map((emp) =>
+            emp.id === activeEmpire.id
+              ? { ...emp, claimedSystemIds: emp.claimedSystemIds.filter((id) => id !== system.id) }
+              : emp
+          )
+        );
+        setBannerNotice(`Unclaimed ${system.name} from ${activeEmpire.name}.`);
+      } else {
+        // Claim it for activeEmpire (removing from previous empire if claimed)
+        setEmpires((prev) =>
+          prev.map((emp) => {
+            if (emp.id === activeEmpire.id) {
+              return {
+                ...emp,
+                claimedSystemIds: Array.from(new Set([...emp.claimedSystemIds, system.id])),
+              };
+            } else {
+              return {
+                ...emp,
+                claimedSystemIds: emp.claimedSystemIds.filter((id) => id !== system.id),
+              };
+            }
+          })
+        );
+        setBannerNotice(`🪐 Claimed ${system.name} for ${activeEmpire.name}!`);
+      }
+    },
+    [activeEmpire, empireMap]
+  );
+
+  // Delete / disband an empire
+  const handleDeleteEmpire = useCallback((empId: string) => {
+    setEmpires((prev) => prev.filter((e) => e.id !== empId));
+    setActiveEmpireId((prev) => (prev === empId ? null : prev));
+    setBannerNotice('Empire disbanded.');
+  }, []);
 
   // Track container viewport dimensions for smooth frustum/viewport culling
   const containerRef = useRef<HTMLDivElement>(null);
@@ -683,6 +807,20 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
 
         {/* Global Action Buttons */}
         <div className="flex items-center gap-2">
+          {/* Spawn Empire Button */}
+          <button
+            onClick={handleStartSpawnEmpire}
+            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg transition cursor-pointer ${
+              isSpawnEmpireMode
+                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30 ring-2 ring-amber-300 animate-pulse'
+                : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white shadow-emerald-500/25'
+            }`}
+            title="Establish an alien empire on a system with a habitable world"
+          >
+            <Crown className="w-3.5 h-3.5" />
+            <span>{isSpawnEmpireMode ? 'Select Habitable Star...' : 'Spawn Empire'}</span>
+          </button>
+
           <button
             onClick={handleRollNewSector}
             className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg shadow-cyan-500/20 transition cursor-pointer"
@@ -1007,18 +1145,30 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       (lane.sourceId === hoveredSystem.id || lane.targetId === hoveredSystem.id);
                     const isHighlighted = isConnectedToSelected || isConnectedToHovered;
 
+                    // Check if both hyperlane endpoints are claimed by the same empire
+                    const srcEmpire = empireMap.get(lane.sourceId);
+                    const tgtEmpire = empireMap.get(lane.targetId);
+                    const isSameEmpire = srcEmpire != null && tgtEmpire != null && srcEmpire.id === tgtEmpire.id;
+                    const empireColor = isSameEmpire ? srcEmpire.color : null;
+
                     return (
                       <g key={lane.id}>
-                        {/* Glow halo underlay when selected or hovered */}
-                        {isHighlighted && (
+                        {/* Glow halo underlay when selected, hovered, or empire territory */}
+                        {(isHighlighted || isSameEmpire) && (
                           <line
                             x1={lane.x1}
                             y1={lane.y1}
                             x2={lane.x2}
                             y2={lane.y2}
-                            stroke={isConnectedToSelected ? '#38bdf8' : '#818cf8'}
-                            strokeWidth={3.5}
-                            opacity={0.55}
+                            stroke={
+                              isHighlighted
+                                ? isConnectedToSelected
+                                  ? '#38bdf8'
+                                  : '#818cf8'
+                                : empireColor!
+                            }
+                            strokeWidth={isHighlighted ? 3.6 : 3.0}
+                            opacity={isHighlighted ? 0.65 : 0.50}
                             strokeLinecap="round"
                           />
                         )}
@@ -1029,15 +1179,17 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                           x2={lane.x2}
                           y2={lane.y2}
                           stroke={
-                            isConnectedToSelected
-                              ? '#38bdf8'
-                              : isConnectedToHovered
-                              ? '#a5b4fc'
+                            isHighlighted
+                              ? isConnectedToSelected
+                                ? '#38bdf8'
+                                : '#a5b4fc'
+                              : isSameEmpire
+                              ? empireColor!
                               : 'rgba(56, 189, 248, 0.32)'
                           }
-                          strokeWidth={isHighlighted ? 1.8 : 1.0}
-                          strokeDasharray={isHighlighted ? undefined : '3,4'}
-                          opacity={isHighlighted ? 1.0 : 0.65}
+                          strokeWidth={isHighlighted ? 1.8 : isSameEmpire ? 1.5 : 1.0}
+                          strokeDasharray={isHighlighted || isSameEmpire ? undefined : '3,4'}
+                          opacity={isHighlighted ? 1.0 : isSameEmpire ? 0.95 : 0.65}
                           strokeLinecap="round"
                         />
                       </g>
@@ -1050,6 +1202,8 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               {visibleSystems.map((system) => {
                 const isSelected = selectedSystem?.id === system.id || selectedCoord === system.coord;
                 const isHovered = hoveredSystem?.id === system.id;
+                const systemEmpire = empireMap.get(system.id);
+                const isCapital = systemEmpire != null && systemEmpire.homeworldSystemId === system.id;
 
                 // Filter check
                 let matchesFilter = true;
@@ -1069,6 +1223,29 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     transform={`translate(${system.x}, ${system.y})`}
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (isSpawnEmpireMode) {
+                        if (system.candidateHabitable) {
+                          setEmpireTargetSystem(system);
+                          setIsEmpireModalOpen(true);
+                          setIsSpawnEmpireMode(false);
+                          setBannerNotice(null);
+                        } else {
+                          setBannerNotice(
+                            '⚠️ Cannot spawn empire here: System has no habitable worlds. Please choose a star with a green dot 🟢.'
+                          );
+                        }
+                        setSelectedSystem(system);
+                        setSelectedCoord(system.coord);
+                        return;
+                      }
+
+                      if (e.shiftKey) {
+                        handleClaimToggle(system);
+                        setSelectedSystem(system);
+                        setSelectedCoord(system.coord);
+                        return;
+                      }
+
                       setSelectedSystem(system);
                       setSelectedCoord(system.coord);
                     }}
@@ -1085,36 +1262,88 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     <circle
                       r={system.influenceRadius + 4}
                       fill="none"
-                      stroke={isSelected ? '#38bdf8' : isHovered ? '#7dd3fc' : 'rgba(100, 116, 139, 0.22)'}
-                      strokeWidth={0.8}
+                      stroke={
+                        systemEmpire
+                          ? systemEmpire.color
+                          : isSelected
+                          ? '#38bdf8'
+                          : isHovered
+                          ? '#7dd3fc'
+                          : 'rgba(100, 116, 139, 0.22)'
+                      }
+                      strokeWidth={systemEmpire ? (isSelected || isHovered ? 1.5 : 1.0) : 0.8}
                       strokeDasharray="2,3"
-                      opacity={isSelected || isHovered ? 0.95 : 0.40}
+                      opacity={systemEmpire ? 0.75 : isSelected || isHovered ? 0.95 : 0.40}
                     />
+
+                    {/* Capital Insignia Outer Dashed Halo */}
+                    {isCapital && (
+                      <circle
+                        r={system.influenceRadius + 8}
+                        fill="none"
+                        stroke={systemEmpire.color}
+                        strokeWidth={1.5}
+                        strokeDasharray="3,3"
+                        opacity={0.85}
+                      />
+                    )}
 
                     {/* Circular Zone of Influence (Primary Hit Area & Click/Hover Target) */}
                     <circle
                       r={system.influenceRadius}
                       fill={
-                        isSelected
+                        systemEmpire
+                          ? isSelected
+                            ? `${systemEmpire.color}45`
+                            : isHovered
+                            ? `${systemEmpire.color}32`
+                            : `${systemEmpire.color}1c`
+                          : isSelected
                           ? 'rgba(14, 165, 233, 0.22)'
                           : isHovered
                           ? 'rgba(56, 189, 248, 0.12)'
                           : 'rgba(15, 23, 42, 0.50)'
                       }
                       stroke={
-                        isSelected
+                        systemEmpire
+                          ? systemEmpire.color
+                          : isSelected
                           ? '#38bdf8'
                           : isHovered
                           ? '#7dd3fc'
                           : 'rgba(148, 163, 184, 0.35)'
                       }
-                      strokeWidth={isSelected ? 2.5 : isHovered ? 1.8 : 1.2}
+                      strokeWidth={
+                        systemEmpire
+                          ? isSelected
+                            ? 3.0
+                            : isHovered
+                            ? 2.2
+                            : 1.6
+                          : isSelected
+                          ? 2.5
+                          : isHovered
+                          ? 1.8
+                          : 1.2
+                      }
                       strokeDasharray={isSelected ? '5,3' : 'none'}
                       className={isSelected ? 'animate-pulse' : ''}
                     />
 
                     {/* Render Multiple Stars (A, B, C, D) with their exact colors and sizes */}
                     {renderSystemStars(system)}
+
+                    {/* Capital Crown Badge Icon */}
+                    {isCapital && (
+                      <text
+                        y={-system.influenceRadius - 8}
+                        textAnchor="middle"
+                        fontSize={11}
+                        style={{ pointerEvents: 'none' }}
+                      >
+                        👑
+                      </text>
+                    )}
 
                     {/* Habitable World Green Badge Dot */}
                     {system.candidateHabitable && (
@@ -1266,6 +1495,103 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             </div>
           </div>
 
+          {/* Spawn Empire Mode Banner */}
+          {isSpawnEmpireMode && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-amber-950/95 backdrop-blur-md border border-amber-500/80 text-amber-200 px-4 py-2.5 rounded-2xl shadow-2xl z-30 font-mono text-xs flex items-center gap-3 animate-fade-in pointer-events-auto">
+              <Crown className="w-4 h-4 text-amber-400 animate-bounce flex-shrink-0" />
+              <div>
+                <strong className="text-white">Spawn Empire Mode Active:</strong> Click any system with a habitable world (<span className="text-emerald-400 font-bold">🟢</span>) to establish capital.
+              </div>
+              <button
+                onClick={() => {
+                  setIsSpawnEmpireMode(false);
+                  setBannerNotice(null);
+                }}
+                className="px-2.5 py-1 bg-amber-900/80 hover:bg-amber-800 text-white rounded-lg text-[10.5px] font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
+          {/* Transient Notification Banner */}
+          {!isSpawnEmpireMode && bannerNotice && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-slate-950/95 backdrop-blur-md border border-cyan-500/60 text-slate-200 px-4 py-2 rounded-2xl shadow-2xl z-30 font-mono text-xs flex items-center gap-2.5 animate-fade-in pointer-events-auto">
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />
+              <span>{bannerNotice}</span>
+              <button
+                onClick={() => setBannerNotice(null)}
+                className="text-slate-400 hover:text-white p-0.5 ml-1 transition cursor-pointer"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+
+          {/* Active Empire Floating Realm Bar */}
+          {empires.length > 0 && !isSpawnEmpireMode && (
+            <div className="absolute top-4 right-4 bg-slate-950/90 backdrop-blur-md border border-slate-800/90 px-3 py-2 rounded-2xl text-xs font-mono shadow-2xl z-20 flex items-center gap-3 pointer-events-auto">
+              {/* Empire Color & Icon */}
+              <div
+                className="w-7 h-7 rounded-xl flex items-center justify-center text-base border shadow"
+                style={{
+                  backgroundColor: `${activeEmpire?.color}25`,
+                  borderColor: activeEmpire?.color,
+                }}
+              >
+                {activeEmpire?.phenotype.icon}
+              </div>
+
+              {/* Empire Selector / Info */}
+              <div>
+                <div className="flex items-center gap-1.5">
+                  {empires.length > 1 ? (
+                    <select
+                      value={activeEmpire?.id}
+                      onChange={(e) => setActiveEmpireId(e.target.value)}
+                      className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
+                      style={{ color: activeEmpire?.color }}
+                    >
+                      {empires.map((emp) => (
+                        <option key={emp.id} value={emp.id} className="bg-slate-950 text-white">
+                          {emp.phenotype.icon} {emp.name} ({emp.claimedSystemIds.length}★)
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="font-bold text-white text-xs truncate max-w-[150px]" style={{ color: activeEmpire?.color }}>
+                      {activeEmpire?.name}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-slate-400">
+                    &bull; {activeEmpire?.claimedSystemIds.length} {activeEmpire?.claimedSystemIds.length === 1 ? 'system' : 'systems'}
+                  </span>
+                </div>
+                <div className="text-[9.5px] text-slate-400 flex items-center gap-1 mt-0.5">
+                  <span>Shift+Click star to claim</span>
+                  <span className="text-slate-600">&bull;</span>
+                  <button
+                    onClick={handleStartSpawnEmpire}
+                    className="text-cyan-400 hover:text-cyan-300 font-semibold cursor-pointer"
+                  >
+                    + Spawn Another
+                  </button>
+                </div>
+              </div>
+
+              {/* Disband Empire */}
+              {activeEmpire && (
+                <button
+                  onClick={() => handleDeleteEmpire(activeEmpire.id)}
+                  className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-900 rounded-lg transition cursor-pointer"
+                  title="Disband active empire"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Quick Hover Tooltip if hovering a star */}
           {hoveredSystem && (
             <div
@@ -1286,6 +1612,22 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       {hoveredSystem.nStars}★ Multiple
                     </span>
                   )}
+                  {(() => {
+                    const hEmpire = empireMap.get(hoveredSystem.id);
+                    if (!hEmpire) return null;
+                    return (
+                      <span
+                        className="text-[9.5px] px-1 py-0.2 rounded border font-semibold flex items-center gap-1"
+                        style={{
+                          color: hEmpire.color,
+                          borderColor: `${hEmpire.color}60`,
+                          backgroundColor: `${hEmpire.color}20`,
+                        }}
+                      >
+                        {hEmpire.phenotype.icon} {hEmpire.name}
+                      </span>
+                    );
+                  })()}
                 </div>
                 <div className="text-[10px] text-slate-400 flex items-center gap-2">
                   <span>{hoveredSystem.primaryClass}</span>
@@ -1440,6 +1782,128 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   <span>Launch StarGen Lab with this System &rarr;</span>
                 </button>
               </div>
+
+              {/* ============================================================================ */}
+              {/* ALIEN EMPIRE & SOVEREIGNTY TERRITORY CARD                                    */}
+              {/* ============================================================================ */}
+              {(() => {
+                const systemEmpire = empireMap.get(selectedSystem.id);
+                const isCapital = systemEmpire != null && systemEmpire.homeworldSystemId === selectedSystem.id;
+
+                if (systemEmpire) {
+                  return (
+                    <div
+                      className="p-3.5 rounded-xl border font-mono text-xs space-y-2.5 transition shadow-lg relative overflow-hidden"
+                      style={{
+                        backgroundColor: `${systemEmpire.color}18`,
+                        borderColor: `${systemEmpire.color}60`,
+                      }}
+                    >
+                      <div className="flex items-center justify-between pb-2 border-b" style={{ borderColor: `${systemEmpire.color}35` }}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl leading-none">{systemEmpire.phenotype.icon}</span>
+                          <div>
+                            <div className="font-bold text-white tracking-wide flex items-center gap-1.5">
+                              <span>{systemEmpire.name}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400">
+                              {systemEmpire.phenotype.name} Civilization
+                            </div>
+                          </div>
+                        </div>
+                        <div
+                          className="px-2 py-0.5 rounded text-[10px] font-bold border"
+                          style={{
+                            color: systemEmpire.color,
+                            borderColor: `${systemEmpire.color}60`,
+                            backgroundColor: `${systemEmpire.color}25`,
+                          }}
+                        >
+                          {isCapital ? '👑 Capital' : 'Outpost'}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        <div className="p-2 rounded bg-slate-950/60 border border-slate-800/80">
+                          <span className="text-slate-400 block text-[9.5px] uppercase">Empire Realm</span>
+                          <span className="text-white font-bold">{systemEmpire.claimedSystemIds.length} Stars</span>
+                        </div>
+                        <div className="p-2 rounded bg-slate-950/60 border border-slate-800/80">
+                          <span className="text-slate-400 block text-[9.5px] uppercase">Homeworld</span>
+                          <span className="text-cyan-300 font-bold truncate block">{systemEmpire.homeworldName}</span>
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="pt-1 flex items-center gap-2">
+                        {activeEmpire && activeEmpire.id !== systemEmpire.id && (
+                          <button
+                            onClick={() => handleClaimToggle(selectedSystem)}
+                            className="flex-1 py-1.5 px-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <Flag className="w-3.5 h-3.5" style={{ color: activeEmpire.color }} />
+                            <span>Claim for {activeEmpire.name}</span>
+                          </button>
+                        )}
+                        {activeEmpire && activeEmpire.id === systemEmpire.id && !isCapital && (
+                          <button
+                            onClick={() => handleClaimToggle(selectedSystem)}
+                            className="flex-1 py-1.5 px-2 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 text-rose-300 text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Relinquish Claim</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // If unclaimed:
+                return (
+                  <div className="p-3 rounded-xl bg-slate-900/50 border border-slate-800/80 font-mono text-xs space-y-2">
+                    <div className="flex items-center justify-between text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">
+                      <span className="flex items-center gap-1.5 text-slate-300">
+                        <Shield className="w-3.5 h-3.5 text-slate-500" />
+                        Imperial Sovereignty
+                      </span>
+                      <span className="text-slate-500 font-normal">Unclaimed</span>
+                    </div>
+
+                    {selectedSystem.candidateHabitable ? (
+                      <div className="space-y-2">
+                        <p className="text-[10.5px] text-emerald-300/90 leading-relaxed">
+                          🌱 This system possesses a candidate habitable biosphere capable of giving rise to an alien civilization.
+                        </p>
+                        <button
+                          onClick={() => {
+                            setEmpireTargetSystem(selectedSystem);
+                            setIsEmpireModalOpen(true);
+                          }}
+                          className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 transition cursor-pointer"
+                        >
+                          <Crown className="w-3.5 h-3.5" />
+                          <span>Spawn Empire Capital on this World</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-[10.5px] text-slate-500 leading-relaxed">
+                        Uninhabited deep space. Can be claimed as an outpost by an established empire via <kbd className="px-1 py-0.5 rounded bg-slate-800 text-slate-300 text-[9.5px]">Shift+Click</kbd>.
+                      </p>
+                    )}
+
+                    {activeEmpire && (
+                      <button
+                        onClick={() => handleClaimToggle(selectedSystem)}
+                        className="w-full mt-1 py-1.5 px-2.5 rounded-lg bg-slate-950/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Flag className="w-3 h-3" style={{ color: activeEmpire.color }} />
+                        <span>Claim for {activeEmpire.name} (Shift+Click)</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Astrophysical Telemetry Summary */}
               <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs font-mono space-y-2">
@@ -1620,6 +2084,18 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           )}
         </div>
       </div>
+
+      {/* Spawn Alien Empire Dialog Modal */}
+      <SpawnEmpireModal
+        isOpen={isEmpireModalOpen}
+        onClose={() => {
+          setIsEmpireModalOpen(false);
+          setEmpireTargetSystem(null);
+        }}
+        homeworldSystem={empireTargetSystem}
+        existingEmpires={empires}
+        onFoundEmpire={handleFoundEmpire}
+      />
     </div>
   );
 };
