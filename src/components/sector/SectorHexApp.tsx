@@ -324,10 +324,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   // Copied state
   const [copiedId, setCopiedId] = useState<boolean>(false);
 
-  // Hyperlanes & visibility toggles
-  const [showHyperlanes, setShowHyperlanes] = useState<boolean>(true);
-  const [showHexBoundaries, setShowHexBoundaries] = useState<boolean>(true);
-  const [showLabels, setShowLabels] = useState<boolean>(true);
+  // Hyperlanes & visibility toggles (default false for maximum performance)
+  const [showHyperlanes, setShowHyperlanes] = useState<boolean>(false);
+  const [showHexBoundaries, setShowHexBoundaries] = useState<boolean>(false);
+  const [showLabels, setShowLabels] = useState<boolean>(false);
   const [showNebulae, setShowNebulae] = useState<boolean>(true);
 
   // Total bounds of the sector space
@@ -948,24 +948,44 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   };
 
   // ============================================================================
-  // HIGH-PERFORMANCE VIEWPORT CULLING FOR VISIBLE STARS
+  // HIGH-PERFORMANCE VIEWPORT CULLING FOR VISIBLE STARS & HYPERLANES
   // ============================================================================
   const visibleSystems = useMemo(() => {
-    const margin = 120; // Pixel padding around screen
-    const viewMinX = -pan.x / zoom - margin;
-    const viewMaxX = (containerSize.width - pan.x) / zoom + margin;
-    const viewMinY = -pan.y / zoom - margin;
-    const viewMaxY = (containerSize.height - pan.y) / zoom + margin;
+    const marginPx = 80; // Pixel padding around screen to prevent popping
+    const viewMinX = (-pan.x - marginPx) / zoom;
+    const viewMaxX = (containerSize.width - pan.x + marginPx) / zoom;
+    const viewMinY = (-pan.y - marginPx) / zoom;
+    const viewMaxY = (containerSize.height - pan.y + marginPx) / zoom;
 
     return gridData.systems.filter((sys) => {
+      const r = sys.influenceRadius || 40;
       return (
-        sys.x >= viewMinX &&
-        sys.x <= viewMaxX &&
-        sys.y >= viewMinY &&
-        sys.y <= viewMaxY
+        sys.x + r >= viewMinX &&
+        sys.x - r <= viewMaxX &&
+        sys.y + r >= viewMinY &&
+        sys.y - r <= viewMaxY
       );
     });
   }, [gridData.systems, pan.x, pan.y, zoom, containerSize]);
+
+  // Viewport culling for hyperlanes (0 DOM nodes when showHyperlanes is false)
+  const visibleHyperlanes = useMemo(() => {
+    if (!showHyperlanes || !gridData.hyperlanes || gridData.hyperlanes.length === 0) return [];
+    const marginPx = 80;
+    const viewMinX = (-pan.x - marginPx) / zoom;
+    const viewMaxX = (containerSize.width - pan.x + marginPx) / zoom;
+    const viewMinY = (-pan.y - marginPx) / zoom;
+    const viewMaxY = (containerSize.height - pan.y + marginPx) / zoom;
+
+    return gridData.hyperlanes.filter((lane) => {
+      const minX = Math.min(lane.x1, lane.x2);
+      const maxX = Math.max(lane.x1, lane.x2);
+      const minY = Math.min(lane.y1, lane.y2);
+      const maxY = Math.max(lane.y1, lane.y2);
+
+      return !(maxX < viewMinX || minX > viewMaxX || maxY < viewMinY || minY > viewMaxY);
+    });
+  }, [showHyperlanes, gridData.hyperlanes, pan.x, pan.y, zoom, containerSize]);
 
   return (
     <div
@@ -1507,111 +1527,139 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   <stop offset="100%" stopColor="#080314" stopOpacity="0" />
                 </radialGradient>
               ))}
+
+              {/* Hexagonal Sector Boundary Clip Path */}
+              <clipPath id="sector-hex-clip">
+                <polygon points={gridData.hexPoints} />
+              </clipPath>
             </defs>
 
             <g
               transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}
               style={{ transformOrigin: '0 0' }}
             >
-              {/* Sector Boundary Box */}
-              <rect
-                x={0}
-                y={0}
-                width={gridData.sectorWidth}
-                height={gridData.sectorHeight}
-                rx={16}
-                fill={gridData.hasNebula ? "rgba(6, 11, 24, 0.45)" : "#000000"}
-                stroke="rgba(56, 189, 248, 0.30)"
-                strokeWidth={1.5}
+              {/* Sector Hexagon Border & Fill */}
+              <polygon
+                points={gridData.hexPoints}
+                fill={gridData.hasNebula ? "rgba(6, 11, 24, 0.50)" : "#000000"}
+                stroke="#38bdf8"
+                strokeWidth={2.4}
+                strokeOpacity={0.75}
+              />
+
+              {/* Inner Dashed Hexagon Guideline */}
+              <polygon
+                points={gridData.hexInnerPoints}
+                fill="none"
+                stroke="rgba(56, 189, 248, 0.25)"
+                strokeWidth={1.2}
                 strokeDasharray="6,4"
               />
 
-              {/* Procedural H-II Purple-Red Cloud Nebula & Fractal Noise Clouds */}
-              {gridData.hasNebula && showNebulae && (
-                <g className="sector-nebula-layer pointer-events-none">
-                  {/* Fractal Noise Clouds Atmosphere */}
-                  <rect
-                    x={0}
-                    y={0}
-                    width={gridData.sectorWidth}
-                    height={gridData.sectorHeight}
-                    rx={16}
-                    filter="url(#sector-noise-clouds)"
-                    opacity={0.65}
-                    style={{ mixBlendMode: 'screen' }}
-                  />
-                  {gridData.nebula && (
-                    <g style={{ mixBlendMode: 'screen' }}>
-                      {gridData.nebula.blobs.map((blob, idx) => (
-                        <ellipse
-                          key={`nebula-blob-${idx}`}
-                          cx={blob.cx}
-                          cy={blob.cy}
-                          rx={blob.rx}
-                          ry={blob.ry}
-                          transform={`rotate(${blob.rotation}, ${blob.cx}, ${blob.cy})`}
-                          fill={`url(#nebula-blob-grad-${idx})`}
-                          filter="url(#nebula-soft-blur)"
-                        />
-                      ))}
-                      {/* Subtle dark interstellar dust absorption filaments */}
-                      {gridData.nebula.dustLanes.map((dust, idx) => (
-                        <line
-                          key={`nebula-dust-${idx}`}
-                          x1={dust.x1}
-                          y1={dust.y1}
-                          x2={dust.x2}
-                          y2={dust.y2}
-                          stroke="#05030a"
-                          strokeWidth={dust.strokeWidth}
-                          opacity={dust.opacity}
-                          strokeLinecap="round"
-                          filter="url(#nebula-dust-blur)"
-                        />
-                      ))}
-                    </g>
-                  )}
-                </g>
-              )}
-
-              {/* Subtle Astronomical Parsec Coordinate Grid Lines */}
-              {Array.from({ length: 9 }).map((_, idx) => {
-                const frac = (idx + 1) / 10;
-                const gx = gridData.sectorWidth * frac;
-                const gy = gridData.sectorHeight * frac;
-                return (
-                  <g key={`grid-line-${idx}`} opacity={0.10} stroke="#38bdf8" strokeWidth={0.8} strokeDasharray="3,4">
-                    <line x1={gx} y1={0} x2={gx} y2={gridData.sectorHeight} />
-                    <line x1={0} y1={gy} x2={gridData.sectorWidth} y2={gy} />
+              {/* Clipped Environment: Nebula Noise Clouds & Parsec Coordinates */}
+              <g clipPath="url(#sector-hex-clip)">
+                {/* Procedural H-II Purple-Red Cloud Nebula & Fractal Noise Clouds */}
+                {gridData.hasNebula && showNebulae && (
+                  <g className="sector-nebula-layer pointer-events-none">
+                    {/* Fractal Noise Clouds Atmosphere */}
+                    <rect
+                      x={0}
+                      y={0}
+                      width={gridData.sectorWidth}
+                      height={gridData.sectorHeight}
+                      filter="url(#sector-noise-clouds)"
+                      opacity={0.65}
+                      style={{ mixBlendMode: 'screen' }}
+                    />
+                    {gridData.nebula && (
+                      <g style={{ mixBlendMode: 'screen' }}>
+                        {gridData.nebula.blobs.map((blob, idx) => (
+                          <ellipse
+                            key={`nebula-blob-${idx}`}
+                            cx={blob.cx}
+                            cy={blob.cy}
+                            rx={blob.rx}
+                            ry={blob.ry}
+                            transform={`rotate(${blob.rotation}, ${blob.cx}, ${blob.cy})`}
+                            fill={`url(#nebula-blob-grad-${idx})`}
+                            filter="url(#nebula-soft-blur)"
+                          />
+                        ))}
+                        {/* Subtle dark interstellar dust absorption filaments */}
+                        {gridData.nebula.dustLanes.map((dust, idx) => (
+                          <line
+                            key={`nebula-dust-${idx}`}
+                            x1={dust.x1}
+                            y1={dust.y1}
+                            x2={dust.x2}
+                            y2={dust.y2}
+                            stroke="#05030a"
+                            strokeWidth={dust.strokeWidth}
+                            opacity={dust.opacity}
+                            strokeLinecap="round"
+                            filter="url(#nebula-dust-blur)"
+                          />
+                        ))}
+                      </g>
+                    )}
                   </g>
+                )}
+
+                {/* Subtle Astronomical Parsec Coordinate Grid Lines */}
+                {Array.from({ length: 9 }).map((_, idx) => {
+                  const frac = (idx + 1) / 10;
+                  const gx = gridData.sectorWidth * frac;
+                  const gy = gridData.sectorHeight * frac;
+                  return (
+                    <g key={`grid-line-${idx}`} opacity={0.10} stroke="#38bdf8" strokeWidth={0.8} strokeDasharray="3,4">
+                      <line x1={gx} y1={0} x2={gx} y2={gridData.sectorHeight} />
+                      <line x1={0} y1={gy} x2={gridData.sectorWidth} y2={gy} />
+                    </g>
+                  );
+                })}
+              </g>
+
+              {/* Hexagon Vertex Sci-Fi Tech Brackets (6 Corners) */}
+              {gridData.hexVertices?.map((v, idx) => {
+                const angleToCenter = Math.atan2(gridData.hexCenterY - v.y, gridData.hexCenterX - v.x);
+                const arm1Angle = angleToCenter + Math.PI / 3;
+                const arm2Angle = angleToCenter - Math.PI / 3;
+                const armLen = 24;
+                const p1x = v.x + Math.cos(arm1Angle) * armLen;
+                const p1y = v.y + Math.sin(arm1Angle) * armLen;
+                const p2x = v.x + Math.cos(arm2Angle) * armLen;
+                const p2y = v.y + Math.sin(arm2Angle) * armLen;
+                return (
+                  <path
+                    key={`hex-corner-${idx}`}
+                    d={`M ${p1x} ${p1y} L ${v.x} ${v.y} L ${p2x} ${p2y}`}
+                    fill="none"
+                    stroke="#38bdf8"
+                    strokeWidth={2.4}
+                    opacity={0.85}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
                 );
               })}
 
-              {/* Sector Corner Sci-Fi Tech Brackets */}
-              <path
-                d={`M 25 10 L 10 10 L 10 25 M ${gridData.sectorWidth - 25} 10 L ${gridData.sectorWidth - 10} 10 L ${gridData.sectorWidth - 10} 25 M 10 ${gridData.sectorHeight - 25} L 10 ${gridData.sectorHeight - 10} L 25 ${gridData.sectorHeight - 10} M ${gridData.sectorWidth - 25} ${gridData.sectorHeight - 10} L ${gridData.sectorWidth - 10} ${gridData.sectorHeight - 10} L ${gridData.sectorWidth - 10} ${gridData.sectorHeight - 25}`}
-                fill="none"
-                stroke="#38bdf8"
-                strokeWidth={2}
-                opacity={0.60}
-              />
-
-              {/* Sector Parsec Scale Marker in Bottom Corner */}
+              {/* Sector Parsec Scale Marker at Bottom of Hexagon */}
               <text
-                x={16}
-                y={gridData.sectorHeight - 14}
-                fill="rgba(148, 163, 184, 0.6)"
-                fontSize={9}
+                x={gridData.hexCenterX}
+                y={gridData.hexCenterY + gridData.hexRadius - 16}
+                textAnchor="middle"
+                fill="rgba(148, 163, 184, 0.7)"
+                fontSize={9.5}
                 fontFamily="monospace"
-                letterSpacing="0.05em"
+                letterSpacing="0.06em"
               >
-                SECTOR FIELD: {gridData.parsecWidth}&times;{gridData.parsecHeight} pc &bull; {gridData.systems.length} STELLAR SYSTEMS
+                HEXAGONAL SECTOR FIELD: {gridData.parsecWidth}&times;{gridData.parsecHeight} pc &bull; {gridData.systems.length} STELLAR SYSTEMS
               </text>
 
-              {/* Procedural Hyperlane Network Layer */}
-              {showHyperlanes && gridData.hyperlanes && gridData.hyperlanes.length > 0 && (
+              {/* Procedural Hyperlane Network Layer (Viewport Culled) */}
+              {showHyperlanes && visibleHyperlanes.length > 0 && (
                 <g className="hyperlanes-layer pointer-events-none">
-                  {gridData.hyperlanes.map((lane) => {
+                  {visibleHyperlanes.map((lane) => {
                     const isConnectedToSelected =
                       selectedSystem != null &&
                       (lane.sourceId === selectedSystem.id || lane.targetId === selectedSystem.id);

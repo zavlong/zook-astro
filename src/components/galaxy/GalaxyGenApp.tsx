@@ -93,9 +93,9 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   const [searchCoord, setSearchCoord] = useState<string>('');
   const [copiedId, setCopiedId] = useState<boolean>(false);
 
-  // Viewport visibility toggles
-  const [showHexBoundaries, setShowHexBoundaries] = useState<boolean>(true);
-  const [showLabels, setShowLabels] = useState<boolean>(true);
+  // Viewport visibility toggles (default false for maximum performance)
+  const [showHexBoundaries, setShowHexBoundaries] = useState<boolean>(false);
+  const [showLabels, setShowLabels] = useState<boolean>(false);
 
   // Sync draft and persist active galaxy config when config changes
   useEffect(() => {

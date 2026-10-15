@@ -129,6 +129,12 @@ export interface SectorHexGridData {
   integratedColorHex: string; // Luminosity-weighted average color of all constituent stars in sector
   hasNebula: boolean; // Flag: whether sector map background should be noise clouds (true) or plain black (false)
   nebula: SectorNebula | null; // Procedural purple-red cloud nebula (only present in young sectors < 1.0 Gyr)
+  hexRadius: number; // Pointy-topped regular hexagon radius of sector boundary
+  hexCenterX: number;
+  hexCenterY: number;
+  hexPoints: string; // SVG polygon points string for sector hexagon border
+  hexInnerPoints: string; // SVG polygon points string for inner dashed boundary
+  hexVertices: { x: number; y: number }[]; // 6 vertex coordinates
   stats: {
     totalHexes: number;
     occupiedHexes: number;
@@ -299,23 +305,64 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
   const usableW = sectorWidth - padding * 2;
   const usableH = sectorHeight - padding * 2;
 
-  // Compute organic spacing to prevent direct overlap while keeping natural Poisson distribution
-  const avgArea = (usableW * usableH) / targetStarCount;
+  // Sector hexagon boundary geometry (matching galaxy map pointy-topped orientation)
+  const hexCenterX = Math.round(sectorWidth / 2);
+  const hexCenterY = Math.round(sectorHeight / 2);
+  const hexRadius = Math.round(Math.min((sectorWidth - 80) / Math.sqrt(3), (sectorHeight - 80) / 2));
+  const innerRadius = Math.round(hexRadius * 0.985);
+
+  const hexVertices: { x: number; y: number }[] = [];
+  const hexPointsArr: string[] = [];
+  const hexInnerArr: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI / 180) * (60 * i - 30);
+    const vx = Math.round(hexCenterX + hexRadius * Math.cos(angle));
+    const vy = Math.round(hexCenterY + hexRadius * Math.sin(angle));
+    hexVertices.push({ x: vx, y: vy });
+    hexPointsArr.push(`${vx},${vy}`);
+
+    const ivx = Math.round(hexCenterX + innerRadius * Math.cos(angle));
+    const ivy = Math.round(hexCenterY + innerRadius * Math.sin(angle));
+    hexInnerArr.push(`${ivx},${ivy}`);
+  }
+  const hexPoints = hexPointsArr.join(' ');
+  const hexInnerPoints = hexInnerArr.join(' ');
+
+  // Helper: check if a coordinate lies inside the sector hexagon (pointy-topped)
+  const isInsideSectorHex = (x: number, y: number, margin = 48): boolean => {
+    const dx = Math.abs(x - hexCenterX);
+    const dy = Math.abs(y - hexCenterY);
+    const effR = hexRadius - margin;
+    const wR = effR * (Math.sqrt(3) / 2);
+    if (dx > wR || dy > effR) return false;
+    return (dx / Math.sqrt(3) + dy) <= effR;
+  };
+
+  // Compute organic spacing within the hexagon interior
+  const hexArea = ((3 * Math.sqrt(3)) / 2) * Math.pow(Math.max(100, hexRadius - 48), 2);
+  const avgArea = hexArea / targetStarCount;
   const idealDist = Math.sqrt(avgArea);
   const minSpacing = Math.max(26, Math.min(65, idealDist * 0.70));
   const minDistSq = minSpacing * minSpacing;
 
   const placedCoords: { x: number; y: number }[] = [];
 
+  const hexHalfW = (hexRadius - 48) * (Math.sqrt(3) / 2);
+  const hexHalfH = hexRadius - 48;
+
   for (let i = 0; i < targetStarCount; i++) {
-    let bestX = padding + rng.next() * usableW;
-    let bestY = padding + rng.next() * usableH;
+    let bestX = hexCenterX;
+    let bestY = hexCenterY;
     let bestMinDistSq = -1;
 
-    // Fast candidate sampling using squared Euclidean distance without expensive square roots
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const candX = padding + rng.next() * usableW;
-      const candY = padding + rng.next() * usableH;
+    // Fast candidate sampling inside the hexagon boundary
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const candX = hexCenterX + (rng.next() * 2 - 1) * hexHalfW;
+      const candY = hexCenterY + (rng.next() * 2 - 1) * hexHalfH;
+
+      if (!isInsideSectorHex(candX, candY, 48)) {
+        continue;
+      }
 
       let nearestSq = Infinity;
       for (let p = 0; p < placedCoords.length; p++) {
@@ -742,6 +789,12 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
     integratedColorHex,
     hasNebula,
     nebula,
+    hexRadius,
+    hexCenterX,
+    hexCenterY,
+    hexPoints,
+    hexInnerPoints,
+    hexVertices,
     stats: {
       totalHexes,
       occupiedHexes,
