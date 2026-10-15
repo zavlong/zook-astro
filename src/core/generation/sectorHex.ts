@@ -406,10 +406,12 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
 
     const lumNum = typeof primaryStar.lumNum === 'number' ? primaryStar.lumNum : 1;
 
-    // Radius of circular zone of influence (in px) scaled naturally with stellar mass and multiplicity
-    const rBase = 26 + 3.8 * Math.log10(Math.max(0.1, primaryStar.mass));
+    // Physical radius scaling: scale with square root of radius, clamping white dwarfs, neutron stars, and black holes to smallest brown dwarf (0.08 R_sun)
+    const MIN_BD_R = 0.08;
+    const rSolar = isRemnant ? MIN_BD_R : Math.max(MIN_BD_R, primaryStar.radius || 1.0);
+    const rBase = 24 + 4.5 * Math.sqrt(rSolar);
     const rMulti = nStars > 1 ? (nStars === 2 ? 4 : 7) : 0;
-    const influenceRadius = Math.round(Math.min(42, Math.max(22, rBase + rMulti)));
+    const influenceRadius = Math.round(Math.min(46, Math.max(24, rBase + rMulti)));
 
     // Relative parsec coordinates
     const parsecX = +(((x - padding) / usableW) * parsecWidth - parsecWidth / 2).toFixed(1);

@@ -340,6 +340,45 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   };
 
   // ============================================================================
+  // SCALE STAR RADIUS BY SQUARE ROOT OF PHYSICAL RADIUS (R_sun)
+  // Clamps white dwarfs, neutron stars, and black holes to the smallest brown dwarf
+  // ============================================================================
+  const getStarScaledRadius = (
+    star: { radius?: number; mass?: number; spectralType?: string; category?: string },
+    scaleMult: number = 1.0
+  ): { r: number; glowR: number; isBlackHole: boolean } => {
+    const MIN_BROWN_DWARF_RADIUS = 0.08; // Physical radius of smallest sub-stellar brown dwarf (~0.8 R_jup)
+
+    // Check if star is a white dwarf, neutron star, or black hole
+    const typeLower = (star.spectralType || '').toLowerCase();
+    const catLower = (star.category || '').toLowerCase();
+    const isBlackHole = typeLower.includes('black hole');
+    const isCompactRemnant =
+      catLower.includes('remnant') ||
+      typeLower.includes('white dwarf') ||
+      typeLower.includes('dwarf (d') ||
+      typeLower.includes('neutron') ||
+      isBlackHole;
+
+    let rSolar = typeof star.radius === 'number' && star.radius > 0
+      ? star.radius
+      : (star.mass ? Math.pow(star.mass, 0.8) : 1.0);
+
+    // Clamp white dwarfs, neutron stars, and black holes to the exact same size as smallest brown dwarfs
+    if (isCompactRemnant || rSolar < MIN_BROWN_DWARF_RADIUS) {
+      rSolar = MIN_BROWN_DWARF_RADIUS;
+    }
+
+    // Scale directly by square root of radius: r ∝ sqrt(R)
+    const sqrtR = Math.sqrt(rSolar);
+    const baseR = 2.0 + 2.85 * sqrtR;
+    const r = Math.min(16.0 * scaleMult, Math.max(2.3 * scaleMult, baseR * scaleMult));
+    const glowR = Math.min(26.0 * scaleMult, Math.max(5.8 * scaleMult, r * 1.85 + 2.0));
+
+    return { r: +r.toFixed(2), glowR: +glowR.toFixed(2), isBlackHole };
+  };
+
+  // ============================================================================
   // MULTIPLE STAR RENDERING HELPER (DEPICTS MULTIPLE STARS IN SECTORHEX GRAPHIC)
   // ============================================================================
   const renderSystemStars = (system: SectorHexSystem) => {
@@ -348,15 +387,19 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
 
     // Single Star
     if (n <= 1 || !stars || stars.length === 0) {
-      const star = stars[0] || { mass: system.primaryMass, colorHex: system.colorHex };
-      const r = Math.min(9.5, Math.max(3.5, 4.2 * Math.pow(star.mass, 0.28)));
-      const glowR = Math.min(18, Math.max(7, 6.5 * Math.pow(star.mass, 0.35)));
+      const star = stars[0] || { mass: system.primaryMass, colorHex: system.colorHex, radius: system.primaryMass };
+      const { r, glowR, isBlackHole } = getStarScaledRadius(star, 1.0);
       return (
         <g>
           {/* High-Performance Lightweight Vector Glow */}
-          <circle r={glowR} fill={star.colorHex} opacity={0.20} />
-          <circle r={glowR * 0.65} fill={star.colorHex} opacity={0.35} />
-          <circle r={r} fill={star.colorHex} stroke="#ffffff" strokeWidth={0.7} />
+          <circle r={glowR} fill={star.colorHex} opacity={isBlackHole ? 0.35 : 0.20} />
+          <circle r={glowR * 0.65} fill={star.colorHex} opacity={isBlackHole ? 0.45 : 0.35} />
+          <circle
+            r={r}
+            fill={isBlackHole ? '#000000' : star.colorHex}
+            stroke={isBlackHole ? '#38bdf8' : '#ffffff'}
+            strokeWidth={0.7}
+          />
         </g>
       );
     }
@@ -365,17 +408,18 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     if (n === 2) {
       const starA = stars[0];
       const starB = stars[1];
-      const rA = Math.min(7.5, Math.max(3.0, 3.8 * Math.pow(starA.mass, 0.28)));
-      const rB = Math.min(6.5, Math.max(2.4, 3.4 * Math.pow(starB.mass, 0.28)));
-      const posA = { x: -6.5, y: -2 };
-      const posB = { x: +6.5, y: -2 };
+      const { r: rA, isBlackHole: isBHA } = getStarScaledRadius(starA, 0.88);
+      const { r: rB, isBlackHole: isBHB } = getStarScaledRadius(starB, 0.88);
+      const posA = { x: -Math.max(6.5, rA * 0.9), y: -2 };
+      const posB = { x: +Math.max(6.5, rB * 0.9), y: -2 };
+      const bridgeRx = Math.max(10.5, (posB.x - posA.x) * 0.85);
       return (
         <g>
           {/* Subtle orbital bridge */}
           <ellipse
             cx={0}
             cy={-2}
-            rx={10.5}
+            rx={bridgeRx}
             ry={4.5}
             fill="none"
             stroke="rgba(148, 163, 184, 0.25)"
@@ -383,12 +427,26 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             strokeDasharray="2,2"
           />
           {/* Star A */}
-          <circle cx={posA.x} cy={posA.y} r={rA * 1.8} fill={starA.colorHex} opacity={0.22} />
-          <circle cx={posA.x} cy={posA.y} r={rA} fill={starA.colorHex} stroke="#ffffff" strokeWidth={0.6} />
+          <circle cx={posA.x} cy={posA.y} r={rA * 1.8} fill={starA.colorHex} opacity={isBHA ? 0.35 : 0.22} />
+          <circle
+            cx={posA.x}
+            cy={posA.y}
+            r={rA}
+            fill={isBHA ? '#000000' : starA.colorHex}
+            stroke={isBHA ? '#38bdf8' : '#ffffff'}
+            strokeWidth={0.6}
+          />
 
           {/* Star B */}
-          <circle cx={posB.x} cy={posB.y} r={rB * 1.8} fill={starB.colorHex} opacity={0.22} />
-          <circle cx={posB.x} cy={posB.y} r={rB} fill={starB.colorHex} stroke="#ffffff" strokeWidth={0.6} />
+          <circle cx={posB.x} cy={posB.y} r={rB * 1.8} fill={starB.colorHex} opacity={isBHB ? 0.35 : 0.22} />
+          <circle
+            cx={posB.x}
+            cy={posB.y}
+            r={rB}
+            fill={isBHB ? '#000000' : starB.colorHex}
+            stroke={isBHB ? '#38bdf8' : '#ffffff'}
+            strokeWidth={0.6}
+          />
         </g>
       );
     }
@@ -398,18 +456,18 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       const starA = stars[0];
       const starB = stars[1];
       const starC = stars[2];
-      const rA = Math.min(7.0, Math.max(2.8, 3.5 * Math.pow(starA.mass, 0.28)));
-      const rB = Math.min(5.5, Math.max(2.2, 3.0 * Math.pow(starB.mass, 0.28)));
-      const rC = Math.min(5.5, Math.max(2.0, 3.0 * Math.pow(starC.mass, 0.28)));
-      const posA = { x: -7.5, y: -2 };
-      const posB = { x: +6.0, y: -6.5 };
-      const posC = { x: +6.0, y: +2.5 };
+      const { r: rA, isBlackHole: isBHA } = getStarScaledRadius(starA, 0.80);
+      const { r: rB, isBlackHole: isBHB } = getStarScaledRadius(starB, 0.80);
+      const { r: rC, isBlackHole: isBHC } = getStarScaledRadius(starC, 0.80);
+      const posA = { x: -Math.max(7.5, rA * 0.95), y: -2 };
+      const posB = { x: +Math.max(6.0, rB * 0.9), y: -6.5 };
+      const posC = { x: +Math.max(6.0, rC * 0.9), y: +2.5 };
       return (
         <g>
           <ellipse
             cx={0}
             cy={-2}
-            rx={12}
+            rx={12.5}
             ry={6.5}
             fill="none"
             stroke="rgba(148, 163, 184, 0.20)"
@@ -417,16 +475,37 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             strokeDasharray="2,2"
           />
           {/* Star A */}
-          <circle cx={posA.x} cy={posA.y} r={rA * 1.7} fill={starA.colorHex} opacity={0.22} />
-          <circle cx={posA.x} cy={posA.y} r={rA} fill={starA.colorHex} stroke="#ffffff" strokeWidth={0.6} />
+          <circle cx={posA.x} cy={posA.y} r={rA * 1.7} fill={starA.colorHex} opacity={isBHA ? 0.35 : 0.22} />
+          <circle
+            cx={posA.x}
+            cy={posA.y}
+            r={rA}
+            fill={isBHA ? '#000000' : starA.colorHex}
+            stroke={isBHA ? '#38bdf8' : '#ffffff'}
+            strokeWidth={0.6}
+          />
 
           {/* Star B */}
-          <circle cx={posB.x} cy={posB.y} r={rB * 1.7} fill={starB.colorHex} opacity={0.22} />
-          <circle cx={posB.x} cy={posB.y} r={rB} fill={starB.colorHex} stroke="#ffffff" strokeWidth={0.6} />
+          <circle cx={posB.x} cy={posB.y} r={rB * 1.7} fill={starB.colorHex} opacity={isBHB ? 0.35 : 0.22} />
+          <circle
+            cx={posB.x}
+            cy={posB.y}
+            r={rB}
+            fill={isBHB ? '#000000' : starB.colorHex}
+            stroke={isBHB ? '#38bdf8' : '#ffffff'}
+            strokeWidth={0.6}
+          />
 
           {/* Star C */}
-          <circle cx={posC.x} cy={posC.y} r={rC * 1.7} fill={starC.colorHex} opacity={0.22} />
-          <circle cx={posC.x} cy={posC.y} r={rC} fill={starC.colorHex} stroke="#ffffff" strokeWidth={0.6} />
+          <circle cx={posC.x} cy={posC.y} r={rC * 1.7} fill={starC.colorHex} opacity={isBHC ? 0.35 : 0.22} />
+          <circle
+            cx={posC.x}
+            cy={posC.y}
+            r={rC}
+            fill={isBHC ? '#000000' : starC.colorHex}
+            stroke={isBHC ? '#38bdf8' : '#ffffff'}
+            strokeWidth={0.6}
+          />
         </g>
       );
     }
@@ -436,10 +515,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     const starB = stars[1];
     const starC = stars[2];
     const starD = stars[3];
-    const rA = Math.min(6.0, Math.max(2.5, 3.0 * Math.pow(starA.mass, 0.28)));
-    const rB = Math.min(5.0, Math.max(2.0, 2.6 * Math.pow(starB.mass, 0.28)));
-    const rC = Math.min(5.0, Math.max(2.0, 2.6 * Math.pow(starC.mass, 0.28)));
-    const rD = Math.min(4.5, Math.max(1.8, 2.4 * Math.pow(starD.mass, 0.28)));
+    const { r: rA, isBlackHole: isBHA } = getStarScaledRadius(starA, 0.72);
+    const { r: rB, isBlackHole: isBHB } = getStarScaledRadius(starB, 0.72);
+    const { r: rC, isBlackHole: isBHC } = getStarScaledRadius(starC, 0.72);
+    const { r: rD, isBlackHole: isBHD } = getStarScaledRadius(starD, 0.72);
     const posA = { x: -8, y: -5 };
     const posB = { x: -6, y: +2 };
     const posC = { x: +6, y: -5 };
@@ -456,17 +535,17 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           strokeWidth={0.7}
           strokeDasharray="2,2"
         />
-        <circle cx={posA.x} cy={posA.y} r={rA * 1.5} fill={starA.colorHex} opacity={0.22} />
-        <circle cx={posA.x} cy={posA.y} r={rA} fill={starA.colorHex} stroke="#ffffff" strokeWidth={0.5} />
+        <circle cx={posA.x} cy={posA.y} r={rA * 1.5} fill={starA.colorHex} opacity={isBHA ? 0.35 : 0.22} />
+        <circle cx={posA.x} cy={posA.y} r={rA} fill={isBHA ? '#000000' : starA.colorHex} stroke={isBHA ? '#38bdf8' : '#ffffff'} strokeWidth={0.5} />
 
-        <circle cx={posB.x} cy={posB.y} r={rB * 1.5} fill={starB.colorHex} opacity={0.22} />
-        <circle cx={posB.x} cy={posB.y} r={rB} fill={starB.colorHex} stroke="#ffffff" strokeWidth={0.5} />
+        <circle cx={posB.x} cy={posB.y} r={rB * 1.5} fill={starB.colorHex} opacity={isBHB ? 0.35 : 0.22} />
+        <circle cx={posB.x} cy={posB.y} r={rB} fill={isBHB ? '#000000' : starB.colorHex} stroke={isBHB ? '#38bdf8' : '#ffffff'} strokeWidth={0.5} />
 
-        <circle cx={posC.x} cy={posC.y} r={rC * 1.5} fill={starC.colorHex} opacity={0.22} />
-        <circle cx={posC.x} cy={posC.y} r={rC} fill={starC.colorHex} stroke="#ffffff" strokeWidth={0.5} />
+        <circle cx={posC.x} cy={posC.y} r={rC * 1.5} fill={starC.colorHex} opacity={isBHC ? 0.35 : 0.22} />
+        <circle cx={posC.x} cy={posC.y} r={rC} fill={isBHC ? '#000000' : starC.colorHex} stroke={isBHC ? '#38bdf8' : '#ffffff'} strokeWidth={0.5} />
 
-        <circle cx={posD.x} cy={posD.y} r={rD * 1.5} fill={starD.colorHex} opacity={0.22} />
-        <circle cx={posD.x} cy={posD.y} r={rD} fill={starD.colorHex} stroke="#ffffff" strokeWidth={0.5} />
+        <circle cx={posD.x} cy={posD.y} r={rD * 1.5} fill={starD.colorHex} opacity={isBHD ? 0.35 : 0.22} />
+        <circle cx={posD.x} cy={posD.y} r={rD} fill={isBHD ? '#000000' : starD.colorHex} stroke={isBHD ? '#38bdf8' : '#ffffff'} strokeWidth={0.5} />
       </g>
     );
   };
