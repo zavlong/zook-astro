@@ -200,6 +200,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   );
   const [draftFeh, setDraftFeh] = useState<number>(config.metallicityMean);
   const [draftSeed, setDraftSeed] = useState<number>(config.seed);
+  const [draftHasNebula, setDraftHasNebula] = useState<boolean>(config.hasNebula ?? false);
 
   // Sync draft inputs when config changes
   useEffect(() => {
@@ -211,6 +212,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     setDraftAgeDistribution(config.ageDistribution ?? 'normal');
     setDraftFeh(config.metallicityMean);
     setDraftSeed(config.seed);
+    setDraftHasNebula(config.hasNebula ?? false);
   }, [
     config.columns,
     config.rows,
@@ -220,6 +222,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     config.ageDistribution,
     config.metallicityMean,
     config.seed,
+    config.hasNebula,
   ]);
 
   // Generated Grid Data
@@ -641,7 +644,8 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     newAgeRange: number,
     newAgeDistribution: 'normal' | 'uniform',
     newFeh: number,
-    newSeed: number
+    newSeed: number,
+    newHasNebula: boolean
   ) => {
     const clampedCols = Math.max(4, Math.min(100, Math.round(newCols)));
     const clampedRows = Math.max(4, Math.min(100, Math.round(newRows)));
@@ -665,6 +669,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       ageSigma: derivedSigma,
       metallicityMean: clampedFeh,
       seed: newSeed,
+      hasNebula: newHasNebula,
     }));
     setShowConfigModal(false);
   };
@@ -1023,12 +1028,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 <span className="w-2.5 h-2.5 rounded-full border border-white/40 shadow-sm" style={{ backgroundColor: gridData.integratedColorHex }} />
                 <span>Sector Integrated Light: <strong style={{ color: gridData.integratedColorHex }}>{gridData.integratedColorHex}</strong></span>
               </span>
-              {gridData.nebula && (
+              {gridData.hasNebula && (
                 <>
                   <span className="text-slate-600">&bull;</span>
                   <span className="text-fuchsia-300 font-semibold bg-fuchsia-950/70 border border-fuchsia-800/80 px-2 py-0.5 rounded-full text-[10.5px] flex items-center gap-1 shadow-sm">
                     <span>🌌</span>
-                    <span>{gridData.nebula.name}</span>
+                    <span>{gridData.nebula?.name || 'Nebula Noise Clouds'}</span>
                   </span>
                 </>
               )}
@@ -1365,6 +1370,45 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               </button>
             </div>
 
+            {/* Background Atmosphere: Plain Black vs Nebula Noise Clouds */}
+            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+              <div className="flex justify-between items-center mb-1.5">
+                <span className="text-slate-400">Background Atmosphere:</span>
+                <span className={`font-bold text-xs ${draftHasNebula ? 'text-fuchsia-300' : 'text-slate-300'}`}>
+                  {draftHasNebula ? 'Nebula Noise Clouds' : 'Plain Black Space'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDraftHasNebula(false)}
+                  className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer border ${
+                    !draftHasNebula
+                      ? 'bg-slate-800 text-white border-slate-600 shadow'
+                      : 'bg-slate-950/70 text-slate-400 border-slate-800 hover:text-slate-200'
+                  }`}
+                >
+                  Plain Black
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDraftHasNebula(true)}
+                  className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer border ${
+                    draftHasNebula
+                      ? 'bg-fuchsia-950/70 text-fuchsia-200 border-fuchsia-600 shadow'
+                      : 'bg-slate-950/70 text-slate-400 border-slate-800 hover:text-slate-200'
+                  }`}
+                >
+                  Noise Clouds
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1.5">
+                {draftHasNebula
+                  ? 'Active H-II ionization clouds and fractal dust fill the sector background.'
+                  : 'Deep space plain black background devoid of emission nebulae.'}
+              </p>
+            </div>
+
             {/* Action Buttons */}
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
               <button
@@ -1383,7 +1427,8 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     draftAgeRange,
                     draftAgeDistribution,
                     draftFeh,
-                    draftSeed
+                    draftSeed,
+                    draftHasNebula
                   )
                 }
                 className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold transition shadow-lg shadow-cyan-500/20 cursor-pointer"
@@ -1409,25 +1454,30 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
           onWheel={handleWheel}
-          className={`flex-1 h-full relative overflow-hidden bg-[#030611] select-none ${
+          className={`flex-1 h-full relative overflow-hidden select-none ${
             isDragging ? 'cursor-grabbing' : 'cursor-grab'
           }`}
           style={{
-            backgroundImage: `radial-gradient(circle at 50% 50%, #0a1128 0%, #030611 100%)`,
+            backgroundColor: gridData.hasNebula ? '#030611' : '#000000',
+            backgroundImage: gridData.hasNebula
+              ? `radial-gradient(circle at 50% 50%, #150928 0%, #080314 55%, #030611 100%)`
+              : 'none',
           }}
         >
-          {/* Subtle Deep Space Star Dust Background */}
-          <div
-            className="absolute inset-0 opacity-40 pointer-events-none"
-            style={{
-              backgroundImage: `radial-gradient(1px 1px at 20px 30px, #ffffff, rgba(0,0,0,0)),
-                                radial-gradient(1px 1px at 80px 140px, #67e8f9, rgba(0,0,0,0)),
-                                radial-gradient(1.5px 1.5px at 220px 70px, #fde047, rgba(0,0,0,0)),
-                                radial-gradient(1px 1px at 300px 220px, #f472b6, rgba(0,0,0,0)),
-                                radial-gradient(1.5px 1.5px at 450px 180px, #ffffff, rgba(0,0,0,0))`,
-              backgroundSize: '500px 500px',
-            }}
-          />
+          {/* Subtle Deep Space Star Dust Background (only when noise clouds / nebula enabled) */}
+          {gridData.hasNebula && (
+            <div
+              className="absolute inset-0 opacity-40 pointer-events-none"
+              style={{
+                backgroundImage: `radial-gradient(1px 1px at 20px 30px, #ffffff, rgba(0,0,0,0)),
+                                  radial-gradient(1px 1px at 80px 140px, #67e8f9, rgba(0,0,0,0)),
+                                  radial-gradient(1.5px 1.5px at 220px 70px, #fde047, rgba(0,0,0,0)),
+                                  radial-gradient(1px 1px at 300px 220px, #f472b6, rgba(0,0,0,0)),
+                                  radial-gradient(1.5px 1.5px at 450px 180px, #ffffff, rgba(0,0,0,0))`,
+                backgroundSize: '500px 500px',
+              }}
+            />
+          )}
 
           {/* SVG Canvas with Zoom & Pan Transformation */}
           <svg
@@ -1440,6 +1490,14 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               </filter>
               <filter id="nebula-dust-blur" x="-20%" y="-20%" width="140%" height="140%">
                 <feGaussianBlur stdDeviation="7" result="blur" />
+              </filter>
+              <filter id="sector-noise-clouds" x="0%" y="0%" width="100%" height="100%">
+                <feTurbulence type="fractalNoise" baseFrequency="0.0028" numOctaves="4" seed={config.seed} result="noise" />
+                <feColorMatrix type="matrix" values="
+                  0.95 0    0    0 0.18
+                  0    0.15 0    0 0.02
+                  0.5  0    0.85 0 0.22
+                  0    0    0    0.38 0" result="coloredNoise" />
               </filter>
 
               {gridData.nebula?.blobs.map((blob, idx) => (
@@ -1469,42 +1527,57 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 width={gridData.sectorWidth}
                 height={gridData.sectorHeight}
                 rx={16}
-                fill="rgba(6, 11, 24, 0.45)"
+                fill={gridData.hasNebula ? "rgba(6, 11, 24, 0.45)" : "#000000"}
                 stroke="rgba(56, 189, 248, 0.30)"
                 strokeWidth={1.5}
                 strokeDasharray="6,4"
               />
 
-              {/* Procedural H-II Purple-Red Cloud Nebula (Young Sectors < 1.0 Gyr) */}
-              {showNebulae && gridData.nebula && (
-                <g className="sector-nebula-layer pointer-events-none" style={{ mixBlendMode: 'screen' }}>
-                  {gridData.nebula.blobs.map((blob, idx) => (
-                    <ellipse
-                      key={`nebula-blob-${idx}`}
-                      cx={blob.cx}
-                      cy={blob.cy}
-                      rx={blob.rx}
-                      ry={blob.ry}
-                      transform={`rotate(${blob.rotation}, ${blob.cx}, ${blob.cy})`}
-                      fill={`url(#nebula-blob-grad-${idx})`}
-                      filter="url(#nebula-soft-blur)"
-                    />
-                  ))}
-                  {/* Subtle dark interstellar dust absorption filaments */}
-                  {gridData.nebula.dustLanes.map((dust, idx) => (
-                    <line
-                      key={`nebula-dust-${idx}`}
-                      x1={dust.x1}
-                      y1={dust.y1}
-                      x2={dust.x2}
-                      y2={dust.y2}
-                      stroke="#05030a"
-                      strokeWidth={dust.strokeWidth}
-                      opacity={dust.opacity}
-                      strokeLinecap="round"
-                      filter="url(#nebula-dust-blur)"
-                    />
-                  ))}
+              {/* Procedural H-II Purple-Red Cloud Nebula & Fractal Noise Clouds */}
+              {gridData.hasNebula && showNebulae && (
+                <g className="sector-nebula-layer pointer-events-none">
+                  {/* Fractal Noise Clouds Atmosphere */}
+                  <rect
+                    x={0}
+                    y={0}
+                    width={gridData.sectorWidth}
+                    height={gridData.sectorHeight}
+                    rx={16}
+                    filter="url(#sector-noise-clouds)"
+                    opacity={0.65}
+                    style={{ mixBlendMode: 'screen' }}
+                  />
+                  {gridData.nebula && (
+                    <g style={{ mixBlendMode: 'screen' }}>
+                      {gridData.nebula.blobs.map((blob, idx) => (
+                        <ellipse
+                          key={`nebula-blob-${idx}`}
+                          cx={blob.cx}
+                          cy={blob.cy}
+                          rx={blob.rx}
+                          ry={blob.ry}
+                          transform={`rotate(${blob.rotation}, ${blob.cx}, ${blob.cy})`}
+                          fill={`url(#nebula-blob-grad-${idx})`}
+                          filter="url(#nebula-soft-blur)"
+                        />
+                      ))}
+                      {/* Subtle dark interstellar dust absorption filaments */}
+                      {gridData.nebula.dustLanes.map((dust, idx) => (
+                        <line
+                          key={`nebula-dust-${idx}`}
+                          x1={dust.x1}
+                          y1={dust.y1}
+                          x2={dust.x2}
+                          y2={dust.y2}
+                          stroke="#05030a"
+                          strokeWidth={dust.strokeWidth}
+                          opacity={dust.opacity}
+                          strokeLinecap="round"
+                          filter="url(#nebula-dust-blur)"
+                        />
+                      ))}
+                    </g>
+                  )}
                 </g>
               )}
 
@@ -2159,20 +2232,29 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 <Tag className="w-3.5 h-3.5" />
                 <span>Labels</span>
               </button>
-              {gridData.nebula && (
-                <button
-                  onClick={() => setShowNebulae((v) => !v)}
-                  className={`px-2 py-1 hover:bg-slate-800 rounded text-[10.5px] transition flex items-center gap-1 ${
-                    showNebulae
-                      ? 'text-fuchsia-400 bg-fuchsia-950/40 border border-fuchsia-800/60'
-                      : 'text-slate-500 hover:text-slate-300'
-                  }`}
-                  title="Toggle Purple-Red Emission Nebula Cloud"
-                >
-                  <Cloud className="w-3.5 h-3.5" />
-                  <span>Nebula</span>
-                </button>
-              )}
+              <button
+                onClick={() => {
+                  if (gridData.hasNebula) {
+                    setShowNebulae((v) => !v);
+                  } else {
+                    setConfig((prev) => ({ ...prev, hasNebula: true }));
+                    setShowNebulae(true);
+                  }
+                }}
+                className={`px-2 py-1 hover:bg-slate-800 rounded text-[10.5px] transition flex items-center gap-1 ${
+                  gridData.hasNebula && showNebulae
+                    ? 'text-fuchsia-400 bg-fuchsia-950/40 border border-fuchsia-800/60'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+                title={
+                  gridData.hasNebula
+                    ? (showNebulae ? 'Toggle Noise Clouds Off' : 'Toggle Noise Clouds On')
+                    : 'Plain Black Background (Click to enable Noise Clouds)'
+                }
+              >
+                <Cloud className="w-3.5 h-3.5" />
+                <span>{gridData.hasNebula ? (showNebulae ? 'Noise Clouds' : 'Clouds Hidden') : 'Plain Black'}</span>
+              </button>
               <span className="text-[10px] text-slate-500 pl-1">
                 {Math.round(zoom * 100)}%
               </span>

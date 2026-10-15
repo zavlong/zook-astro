@@ -561,6 +561,15 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               <span>Radius: <strong className="text-slate-200">{config.radiusKpc} kpc</strong></span>
               <span className="text-slate-600">&bull;</span>
               <span>Est. <strong className="text-emerald-300">~{(galaxyData.stats.totalEstimatedStars / 1000).toFixed(0)}k</strong> Systems</span>
+              {galaxyData.stats.nebulaCount > 0 && (
+                <>
+                  <span className="text-slate-600">&bull;</span>
+                  <span className="text-fuchsia-300 font-semibold flex items-center gap-1">
+                    <span>🌌</span>
+                    <span>{galaxyData.stats.nebulaCount} Nebulae</span>
+                  </span>
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -718,6 +727,17 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                   <feMergeNode in="SourceGraphic" />
                 </feMerge>
               </filter>
+
+              {/* Purple-Red Emission Nebula Gas Cloud Glow */}
+              <radialGradient id="galaxyNebulaGlow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.88" />
+                <stop offset="35%" stopColor="#e11d48" stopOpacity="0.70" />
+                <stop offset="70%" stopColor="#c026d3" stopOpacity="0.40" />
+                <stop offset="100%" stopColor="#9333ea" stopOpacity="0" />
+              </radialGradient>
+              <filter id="nebulaCloudBlur" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="3.0" result="blur" />
+              </filter>
             </defs>
 
             <g
@@ -774,6 +794,41 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                       fillOpacity={sector.opacity * sectorOpacity}
                       stroke="none"
                     />
+
+                    {/* Active Emission Nebula (Purple-Red Gas Cloud on Galaxy Map) */}
+                    {sector.hasNebula && (
+                      <g className="pointer-events-none" style={{ mixBlendMode: 'screen' }}>
+                        {/* Soft diffuse purple-red gaseous cloud envelope */}
+                        <circle
+                          r={hexRadius * 1.08}
+                          fill="url(#galaxyNebulaGlow)"
+                          opacity={0.82}
+                        />
+                        {/* Filamentary emission cloud lobes */}
+                        <ellipse
+                          rx={hexRadius * 0.78}
+                          ry={hexRadius * 0.44}
+                          fill="#e11d48"
+                          opacity={0.52}
+                          transform={`rotate(${(sector.seed % 180)}, 0, 0)`}
+                          filter="url(#nebulaCloudBlur)"
+                        />
+                        <ellipse
+                          rx={hexRadius * 0.65}
+                          ry={hexRadius * 0.36}
+                          fill="#c026d3"
+                          opacity={0.58}
+                          transform={`rotate(${(sector.seed * 3 % 180)}, 0, 0)`}
+                          filter="url(#nebulaCloudBlur)"
+                        />
+                        <circle
+                          r={hexRadius * 0.35}
+                          fill="#fb7185"
+                          opacity={0.68}
+                          filter="url(#nebulaCloudBlur)"
+                        />
+                      </g>
+                    )}
 
                     {/* Atmospheric Fuzzy Hex Border */}
                     {showHexBoundaries && (
@@ -1263,6 +1318,26 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                   </p>
                 </div>
               </div>
+
+              {/* Active Emission Nebula Card */}
+              {selectedSector.hasNebula && (
+                <div className="p-3.5 rounded-xl bg-gradient-to-r from-fuchsia-950/70 via-purple-950/50 to-slate-900/80 border border-fuchsia-500/50 font-mono space-y-1.5 shadow-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-fuchsia-300 flex items-center gap-1.5">
+                      <span>🌌</span> Active Emission Nebula
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-fuchsia-950/90 text-fuchsia-300 border border-fuchsia-700 font-bold">
+                      &lt;1.0 Gyr
+                    </span>
+                  </div>
+                  <div className="text-xs font-bold text-white tracking-wide">
+                    {selectedSector.nebulaName || 'H-II Starburst Complex'}
+                  </div>
+                  <div className="text-[10px] text-fuchsia-200/80 leading-relaxed">
+                    Glowing purple-red H-II gas cloud on galaxy map. Sector map background will render as colored noise clouds!
+                  </div>
+                </div>
+              )}
 
               {/* Giant Star Systems Card */}
               <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 font-mono space-y-2">

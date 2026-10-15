@@ -54,6 +54,7 @@ export const App: React.FC = () => {
           ? +(sector.ageRange / Math.sqrt(12)).toFixed(2)
           : +(sector.ageRange / 3.2).toFixed(2),
       metallicityMean: sector.metallicityMean,
+      hasNebula: sector.hasNebula,
     });
 
     if (typeof document !== 'undefined' && 'startViewTransition' in document) {

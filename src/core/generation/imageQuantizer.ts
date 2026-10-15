@@ -147,6 +147,7 @@ export function quantizeImageToGalaxy(
   let totalFeh = 0;
   let activeCount = 0;
   let totalEstimatedStars = 0;
+  let nebulaCount = 0;
 
   // Padding and cell dimensions on sampling canvas
   const paddingPx = 25;
@@ -294,6 +295,21 @@ export function quantizeImageToGalaxy(
 
       const giantStars = generateGalaxyGiantStars(density, meanAge, sectorSeedNum, 26);
 
+      // Nebula generation in quantized galaxy: only in young sectors (< 1.0 Gyr)
+      const hasNebula = meanAge < 1.0 && density >= 0.08 && secRng.next() < 0.55;
+      const NEBULA_NAMES = [
+        'Carina Emission Nursery',
+        'Tarantula Ionization Complex',
+        'Orion H-II Veil',
+        'Rosette Starburst Cloud',
+        'Eagle Molecular Shroud',
+        'Lagoon Ionized Ridge',
+        'Omega Primordial Gas',
+        'Cygnus-OB Complex',
+      ];
+      const nebulaName = hasNebula ? NEBULA_NAMES[Math.floor(secRng.next() * NEBULA_NAMES.length)] : undefined;
+      if (hasNebula) nebulaCount++;
+
       sectors.push({
         col: c,
         row: r,
@@ -316,6 +332,8 @@ export function quantizeImageToGalaxy(
         region,
         estimatedStars50x50,
         giantStars,
+        hasNebula,
+        nebulaName,
       });
     }
   }
@@ -342,6 +360,7 @@ export function quantizeImageToGalaxy(
       avgAge,
       avgMetallicity,
       totalEstimatedStars,
+      nebulaCount,
     },
   };
 }

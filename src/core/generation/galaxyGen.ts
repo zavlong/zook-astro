@@ -57,6 +57,8 @@ export interface GalaxySectorHex {
   region: string; // "Galactic Bulge", "Spiral Arm Ridge", "Inter-arm Disk", etc.
   estimatedStars50x50: number; // Stars if generated at 50x50
   giantStars: GalaxyGiantStar[]; // Giant star systems (mass 10 to 50 M_sun)
+  hasNebula: boolean; // True if young sector (<1.0 Gyr) contains an active purple-red emission nebula
+  nebulaName?: string; // Procedural nebula complex designation
 }
 
 export interface GalaxyGridData {
@@ -69,6 +71,7 @@ export interface GalaxyGridData {
     avgAge: number;
     avgMetallicity: number;
     totalEstimatedStars: number;
+    nebulaCount: number;
   };
 }
 
@@ -483,6 +486,7 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
   let totalFeh = 0;
   let activeCount = 0;
   let totalEstimatedStars = 0;
+  let nebulaCount = 0;
 
   const armWidthMultiplier = config.armWidth ?? 1.0;
   const armStrengthMultiplier = config.armStrength ?? 1.0;
@@ -734,6 +738,28 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
 
       const giantStars = generateGalaxyGiantStars(density, meanAge, sectorSeedNum, 26);
 
+      // Nebulae can ONLY generate in young sectors (< 1.0 Gyr) with sufficient density
+      const hasNebula = meanAge < 1.0 && density >= 0.08 && secRng.next() < 0.55;
+      let nebulaName: string | undefined = undefined;
+      if (hasNebula) {
+        nebulaCount++;
+        const NEBULA_NAMES = [
+          'Carina Starburst Complex',
+          'Tarantula Ionization Nursery',
+          'Orion H-II Emission Complex',
+          'Rosette Molecular Cloud',
+          'Eagle Star-Forming Nebula',
+          'Lagoon Photo-Ionized Cloud',
+          'Trifid Relativistic Gas Complex',
+          'Omega Starburst Cloud',
+          'Cygnus-OB Emission Cloud',
+          'Vela Ionized Shroud',
+          'Perseus Starburst Veil',
+          'Centaurus Primordial Cloud',
+        ];
+        nebulaName = NEBULA_NAMES[Math.floor(secRng.next() * NEBULA_NAMES.length)];
+      }
+
       sectors.push({
         col: c,
         row: r,
@@ -756,6 +782,8 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
         region,
         estimatedStars50x50,
         giantStars,
+        hasNebula,
+        nebulaName,
       });
     }
   }
@@ -774,6 +802,7 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
       avgAge,
       avgMetallicity,
       totalEstimatedStars,
+      nebulaCount,
     },
   };
 }

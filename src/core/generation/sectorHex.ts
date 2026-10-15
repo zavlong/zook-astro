@@ -70,6 +70,7 @@ export interface SectorHexConfig {
   ageDistribution?: 'normal' | 'uniform'; // Galactic bulge has uniform distribution
   metallicityMean: number; // -1.5 to +0.4 dex
   metallicitySigma: number;
+  hasNebula?: boolean; // Flag: whether background is plain black or noise clouds
 }
 
 export interface SectorHyperlane {
@@ -126,6 +127,7 @@ export interface SectorHexGridData {
   systems: SectorHexSystem[];
   hyperlanes: SectorHyperlane[]; // Procedural hyperlanes connecting neighboring stars
   integratedColorHex: string; // Luminosity-weighted average color of all constituent stars in sector
+  hasNebula: boolean; // Flag: whether sector map background should be noise clouds (true) or plain black (false)
   nebula: SectorNebula | null; // Procedural purple-red cloud nebula (only present in young sectors < 1.0 Gyr)
   stats: {
     totalHexes: number;
@@ -156,6 +158,7 @@ export const DEFAULT_SECTOR_CONFIG: SectorHexConfig = {
   ageSigma: 1.8,
   metallicityMean: 0.04,
   metallicitySigma: 0.22,
+  hasNebula: false,
 };
 
 // Procedural catalog star names
@@ -717,11 +720,18 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
     }
   }
 
-  // Procedural H-II Purple-Red Cloud Nebula (Only young sectors < 1.0 Gyr qualify)
-  const nebula = generateSectorNebula(config.seed, sectorWidth, sectorHeight, config.meanAge);
+  // Nebulae flag determines whether background is noise clouds vs plain black
+  const hasNebula = Boolean(
+    typeof config.hasNebula === 'boolean'
+      ? config.hasNebula
+      : (config.meanAge < 1.0 && config.density >= 0.08)
+  );
+
+  // If hasNebula is true, generate the nebula cloud structures for the noise clouds
+  const nebula = hasNebula ? generateSectorNebula(config.seed, sectorWidth, sectorHeight, 0.5) : null;
 
   return {
-    config,
+    config: { ...config, hasNebula },
     sectorWidth,
     sectorHeight,
     parsecWidth,
@@ -730,6 +740,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
     systems,
     hyperlanes,
     integratedColorHex,
+    hasNebula,
     nebula,
     stats: {
       totalHexes,
