@@ -1,0 +1,947 @@
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import {
+  Compass,
+  Sparkles,
+  RefreshCw,
+  Search,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Sliders,
+  X,
+  Copy,
+  Check,
+  ArrowRight,
+  Disc,
+  Home,
+} from 'lucide-react';
+import {
+  GalaxyConfig,
+  GalaxySectorHex,
+  GalaxyMorphology,
+  DEFAULT_GALAXY_CONFIG,
+  generateGalaxyGrid,
+} from '../../core/generation/galaxyGen';
+
+interface GalaxyGenAppProps {
+  onSelectSector: (sector: GalaxySectorHex) => void;
+  onGoHome?: () => void;
+  initialConfig?: Partial<GalaxyConfig>;
+}
+
+interface MorphologyOption {
+  id: GalaxyMorphology;
+  label: string;
+  desc: string;
+  icon: string;
+}
+
+const MORPHOLOGY_OPTIONS: MorphologyOption[] = [
+  { id: 'spiral', label: 'Grand Design Spiral', desc: 'Symmetric logarithmic arms, active starburst ridges, bright core', icon: '🌀' },
+  { id: 'barred-spiral', label: 'Barred Spiral (SBb)', desc: 'Prominent stellar bar crossing the nucleus feeding spiral arms', icon: '🌌' },
+  { id: 'elliptical', label: 'Elliptical (E0-E4)', desc: 'Smooth de Vaucouleurs profile, ancient red Population II stars', icon: '⚪' },
+  { id: 'lenticular', label: 'Lenticular (S0)', desc: 'Dense spheroidal core with a smooth, gas-depleted stellar disk', icon: '💿' },
+  { id: 'ring', label: 'Collisional Ring', desc: 'Ring galaxy formed by bullet collision with blue starburst rim', icon: '🪐' },
+  { id: 'irregular', label: 'Irregular Clump', desc: 'Chaotic starburst knots and turbulent gas streams (Magellanic type)', icon: '✨' },
+];
+
+export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
+  onSelectSector,
+  onGoHome,
+  initialConfig,
+}) => {
+  // Galaxy configuration state
+  const [config, setConfig] = useState<GalaxyConfig>(() => ({
+    ...DEFAULT_GALAXY_CONFIG,
+    ...(initialConfig || {}),
+  }));
+
+  // Drawer / Modal for advanced customization sliders
+  const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
+  const [draftConfig, setDraftConfig] = useState<GalaxyConfig>(config);
+
+  // Search input & Copy feedback
+  const [searchCoord, setSearchCoord] = useState<string>('');
+  const [copiedId, setCopiedId] = useState<boolean>(false);
+
+  // Sync draft when config changes
+  useEffect(() => {
+    setDraftConfig(config);
+  }, [config]);
+
+  // Generate full 50x50 Galaxy Grid (2,500 sectors)
+  const galaxyData = useMemo(() => generateGalaxyGrid(config), [config]);
+
+  // Selected Sector
+  const [selectedSector, setSelectedSector] = useState<GalaxySectorHex | null>(() => {
+    // Default to central core or first active sector
+    const coreSector = galaxyData.sectors.find((s) => s.col === 25 && s.row === 25);
+    return coreSector || galaxyData.sectors[0] || null;
+  });
+
+  // Keep selected sector valid on regeneration
+  useEffect(() => {
+    if (selectedSector) {
+      const match = galaxyData.sectors.find((s) => s.coord === selectedSector.coord);
+      if (match) {
+        setSelectedSector(match);
+        return;
+      }
+    }
+    const core = galaxyData.sectors.find((s) => s.col === 25 && s.row === 25);
+    setSelectedSector(core || galaxyData.sectors[0] || null);
+  }, [galaxyData]);
+
+  // ============================================================================
+  // HEX GEOMETRY (Pointy-topped)
+  // ============================================================================
+  const hexRadius = 26; // Radius in px for galaxy overview
+  const hexWidth = Math.sqrt(3) * hexRadius; // ~45.03 px
+  const hexHeight = 2 * hexRadius; // 52 px
+  const colSpacing = hexWidth;
+  const rowSpacing = 1.5 * hexRadius; // 39 px
+
+  // Calculate pixel center for (col, row)
+  const getHexCenter = useCallback(
+    (col: number, row: number) => {
+      const xOffset = row % 2 === 1 ? hexWidth * 0.5 : 0;
+      const cx = (col - 1) * colSpacing + hexRadius + xOffset + 40;
+      const cy = (row - 1) * rowSpacing + hexRadius + 40;
+      return { cx, cy };
+    },
+    [colSpacing, rowSpacing, hexRadius, hexWidth]
+  );
+
+  // Polygon points string for pointy-topped hexagon
+  const hexPoints = useMemo(() => {
+    const pts: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 180) * (60 * i - 30);
+      const x = hexRadius * Math.cos(angle);
+      const y = hexRadius * Math.sin(angle);
+      pts.push(`${x.toFixed(2)},${y.toFixed(2)}`);
+    }
+    return pts.join(' ');
+  }, [hexRadius]);
+
+  // Total grid dimensions
+  const gridBoundingSize = useMemo(() => {
+    const totalW = config.columns * colSpacing + hexWidth + 80;
+    const totalH = config.rows * rowSpacing + hexHeight + 80;
+    return { width: Math.max(900, totalW), height: Math.max(700, totalH) };
+  }, [config.columns, config.rows, colSpacing, rowSpacing, hexWidth, hexHeight]);
+
+  // Viewport container size
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({
+    width: 1200,
+    height: 800,
+  });
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerSize({
+          width: Math.max(300, entry.contentRect.width),
+          height: Math.max(300, entry.contentRect.height),
+        });
+      }
+    });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  // Pan & Zoom state
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState<number>(0.48);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Auto-fit galaxy to screen
+  const handleFitGalaxy = useCallback(() => {
+    if (!containerRef.current) return;
+    const { clientWidth, clientHeight } = containerRef.current;
+    const scaleX = (clientWidth - 80) / gridBoundingSize.width;
+    const scaleY = (clientHeight - 80) / gridBoundingSize.height;
+    const fitScale = Math.max(0.12, Math.min(1.2, Math.min(scaleX, scaleY)));
+    setZoom(fitScale);
+    setPan({
+      x: (clientWidth - gridBoundingSize.width * fitScale) / 2,
+      y: (clientHeight - gridBoundingSize.height * fitScale) / 2,
+    });
+  }, [gridBoundingSize]);
+
+  // Initial fit on mount
+  useEffect(() => {
+    handleFitGalaxy();
+  }, [handleFitGalaxy]);
+
+  // Pan handlers
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    setIsDragging(true);
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
+    panStartRef.current = { ...pan };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    const dx = e.clientX - dragStartRef.current.x;
+    const dy = e.clientY - dragStartRef.current.y;
+    setPan({
+      x: panStartRef.current.x + dx,
+      y: panStartRef.current.y + dy,
+    });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  // Zoom handlers
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
+    setZoom((prev) => Math.max(0.08, Math.min(2.5, prev * zoomFactor)));
+  };
+
+  // Frustum Culling: Only render visible sectors within viewport + 2 buffer sectors
+  const visibleSectors = useMemo(() => {
+    const minX = -pan.x / zoom;
+    const maxX = (containerSize.width - pan.x) / zoom;
+    const minY = -pan.y / zoom;
+    const maxY = (containerSize.height - pan.y) / zoom;
+
+    const minCol = Math.max(1, Math.floor((minX - 40) / colSpacing) - 2);
+    const maxCol = Math.min(config.columns, Math.ceil((maxX - 40) / colSpacing) + 2);
+    const minRow = Math.max(1, Math.floor((minY - 40) / rowSpacing) - 2);
+    const maxRow = Math.min(config.rows, Math.ceil((maxY - 40) / rowSpacing) + 2);
+
+    const culled: GalaxySectorHex[] = [];
+    for (const sector of galaxyData.sectors) {
+      if (
+        sector.col >= minCol &&
+        sector.col <= maxCol &&
+        sector.row >= minRow &&
+        sector.row <= maxRow
+      ) {
+        culled.push(sector);
+      }
+    }
+    return culled;
+  }, [
+    galaxyData.sectors,
+    config.columns,
+    config.rows,
+    pan.x,
+    pan.y,
+    zoom,
+    containerSize,
+    colSpacing,
+    rowSpacing,
+  ]);
+
+  // Jump to coordinate
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchCoord.trim()) return;
+    const clean = searchCoord.trim().padStart(4, '0');
+    const match = galaxyData.sectors.find((s) => s.coord === clean);
+    if (match) {
+      setSelectedSector(match);
+      const { cx, cy } = getHexCenter(match.col, match.row);
+      if (containerRef.current) {
+        const { clientWidth, clientHeight } = containerRef.current;
+        setPan({
+          x: clientWidth / 2 - cx * zoom,
+          y: clientHeight / 2 - cy * zoom,
+        });
+      }
+    }
+  };
+
+  // Roll new galaxy
+  const handleRollGalaxy = () => {
+    const newSeed = Math.floor(Math.random() * 90000) + 1000;
+    setConfig((prev) => ({
+      ...prev,
+      seed: newSeed,
+    }));
+  };
+
+  // Switch morphology
+  const handleMorphologyChange = (morph: GalaxyMorphology) => {
+    setConfig((prev) => ({
+      ...prev,
+      morphology: morph,
+    }));
+  };
+
+  // Copy seed / ID
+  const handleCopyId = (id: string) => {
+    navigator.clipboard.writeText(id);
+    setCopiedId(true);
+    setTimeout(() => setCopiedId(false), 1800);
+  };
+
+  // Apply custom sliders
+  const handleApplySliders = () => {
+    setConfig({ ...draftConfig });
+    setShowConfigModal(false);
+  };
+
+  return (
+    <div className="w-full h-full flex flex-col bg-[#030611] text-slate-100 overflow-hidden font-sans select-none relative">
+      {/* ============================================================================ */}
+      {/* TOP COMMAND BAR                                                              */}
+      {/* ============================================================================ */}
+      <div className="w-full px-4 py-2.5 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 z-20">
+        {/* Left: Branding & Core Stats */}
+        <div className="flex items-center gap-3">
+          {onGoHome && (
+            <button
+              onClick={onGoHome}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700/80 flex items-center gap-1.5 cursor-pointer transition shadow text-xs font-mono"
+              title="Return to Home Showcase"
+            >
+              <Home className="w-3.5 h-3.5 text-blue-400" />
+              <span className="hidden sm:inline">Home</span>
+            </button>
+          )}
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/20 border border-blue-400/30">
+            <Disc className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold text-white tracking-wide flex items-center gap-1.5">
+                GALAXY GENERATOR
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-950/80 text-blue-400 border border-blue-800">
+                  Seed #{config.seed}
+                </span>
+              </h2>
+            </div>
+            <p className="text-[11px] text-slate-400 flex items-center gap-2">
+              <span className="text-cyan-300 font-semibold">{config.columns}&times;{config.rows} Sectors</span>
+              <span className="text-slate-600">&bull;</span>
+              <span>{galaxyData.stats.activeSectors.toLocaleString()} Active Sectors</span>
+              <span className="text-slate-600">&bull;</span>
+              <span>Radius: <strong className="text-slate-200">{config.radiusKpc} kpc</strong></span>
+              <span className="text-slate-600">&bull;</span>
+              <span>Est. <strong className="text-emerald-300">~{(galaxyData.stats.totalEstimatedStars / 1000).toFixed(0)}k</strong> Systems</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Center: Morphology Switcher */}
+        <div className="hidden lg:flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800 text-xs font-mono">
+          {MORPHOLOGY_OPTIONS.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => handleMorphologyChange(m.id)}
+              className={`px-2.5 py-1 rounded-lg transition text-[11px] cursor-pointer flex items-center gap-1.5 ${
+                config.morphology === m.id
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold shadow-md shadow-blue-500/20'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+              title={m.desc}
+            >
+              <span>{m.icon}</span>
+              <span>{m.label.split(' ')[0]}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Right: Customization, Search, Roll */}
+        <div className="flex items-center gap-2">
+          {/* Sliders Modal Button */}
+          <button
+            onClick={() => setShowConfigModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700/80 hover:border-blue-500 text-xs font-mono font-medium flex items-center gap-2 transition shadow cursor-pointer"
+            title="Customize Galaxy Morphology, Arms, Density Scale, and Radii"
+          >
+            <Sliders className="w-3.5 h-3.5 text-blue-400" />
+            <span className="hidden sm:inline">Galaxy Parameters</span>
+          </button>
+
+          {/* Search Sector Coordinate */}
+          <form onSubmit={handleSearchSubmit} className="flex items-center gap-1.5">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Sector coord (e.g. 2525)..."
+                value={searchCoord}
+                onChange={(e) => setSearchCoord(e.target.value)}
+                className="w-40 pl-8 pr-2 py-1 text-xs font-mono bg-slate-900/90 border border-slate-800 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
+              />
+            </div>
+            <button
+              type="submit"
+              className="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-mono transition cursor-pointer"
+            >
+              Go
+            </button>
+          </form>
+
+          {/* Roll Galaxy Button */}
+          <button
+            onClick={handleRollGalaxy}
+            className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg shadow-blue-500/20 transition cursor-pointer"
+            title="Generate a brand new procedural galaxy with random astrophysical seed"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Roll Galaxy</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ============================================================================ */}
+      {/* MAIN VIEWPORT: 50x50 HEX GALAXY MAP + SECTOR INSPECTOR                       */}
+      {/* ============================================================================ */}
+      <div className="flex-1 flex flex-row min-h-0 relative overflow-hidden">
+        {/* Viewport Canvas Container */}
+        <div
+          ref={containerRef}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onWheel={handleWheel}
+          className={`flex-1 h-full relative overflow-hidden ${
+            isDragging ? 'cursor-grabbing' : 'cursor-grab'
+          } bg-[#02040b]`}
+        >
+          {/* Subtle Deep Space Star Dust Background */}
+          <div
+            className="absolute inset-0 pointer-events-none opacity-40"
+            style={{
+              backgroundImage:
+                'radial-gradient(1px 1px at 20px 30px, #ffffff, rgba(0,0,0,0)), radial-gradient(1px 1px at 40px 70px, rgba(255,255,255,0.7), rgba(0,0,0,0)), radial-gradient(1.5px 1.5px at 150px 180px, #38bdf8, rgba(0,0,0,0)), radial-gradient(2px 2px at 240px 320px, #f43f5e, rgba(0,0,0,0))',
+              backgroundSize: '350px 350px',
+            }}
+          />
+
+          {/* Central Galactic Core Glow */}
+          <div
+            className="absolute pointer-events-none rounded-full blur-3xl opacity-30"
+            style={{
+              left: `${pan.x + (gridBoundingSize.width / 2) * zoom - 200}px`,
+              top: `${pan.y + (gridBoundingSize.height / 2) * zoom - 200}px`,
+              width: '400px',
+              height: '400px',
+              background: 'radial-gradient(circle, rgba(245, 158, 11, 0.45) 0%, rgba(239, 68, 68, 0.25) 45%, rgba(59, 130, 246, 0.15) 75%, transparent 100%)',
+              transform: `scale(${zoom})`,
+              transformOrigin: 'center center',
+            }}
+          />
+
+          {/* Main SVG Hex Grid Viewport */}
+          <svg
+            className="w-full h-full absolute inset-0"
+            style={{ touchAction: 'none' }}
+          >
+            <defs>
+              <filter id="galaxyGlow" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="3.5" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+
+            <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
+              {/* Render visible sector hexes */}
+              {visibleSectors.map((sector) => {
+                const { cx, cy } = getHexCenter(sector.col, sector.row);
+                const isSelected = selectedSector?.coord === sector.coord;
+                const isCore = sector.col === 25 && sector.row === 25;
+
+                return (
+                  <g
+                    key={sector.coord}
+                    transform={`translate(${cx}, ${cy})`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedSector(sector);
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      onSelectSector(sector);
+                    }}
+                    className="cursor-pointer group"
+                  >
+                    {/* Hexagon polygon with age-based color and density-based opacity */}
+                    <polygon
+                      points={hexPoints}
+                      fill={sector.colorHex}
+                      fillOpacity={sector.opacity}
+                      stroke={
+                        isSelected
+                          ? '#38bdf8'
+                          : isCore
+                          ? '#f59e0b'
+                          : sector.density > 0.35
+                          ? 'rgba(255, 255, 255, 0.18)'
+                          : 'rgba(148, 163, 184, 0.08)'
+                      }
+                      strokeWidth={isSelected ? 2.8 : isCore ? 1.8 : 0.8}
+                      className="transition-colors duration-150"
+                    />
+
+                    {/* Selection Pulse Ring */}
+                    {isSelected && (
+                      <polygon
+                        points={hexPoints}
+                        fill="none"
+                        stroke="#38bdf8"
+                        strokeWidth={1.2}
+                        strokeDasharray="4,2"
+                        className="animate-pulse"
+                      />
+                    )}
+
+                    {/* Center Core Marker */}
+                    {isCore && (
+                      <circle
+                        r={4.5}
+                        fill="#fbbf24"
+                        stroke="#ffffff"
+                        strokeWidth={1}
+                        filter="url(#galaxyGlow)"
+                      />
+                    )}
+
+                    {/* LOD Text: Coordinates visible when zoomed in */}
+                    {zoom >= 0.38 && (
+                      <text
+                        y={zoom >= 0.8 ? -4 : 3}
+                        textAnchor="middle"
+                        fontSize={zoom >= 0.8 ? 8 : 7}
+                        fontFamily="monospace"
+                        fontWeight={isSelected ? 'bold' : 'normal'}
+                        fill={
+                          isSelected
+                            ? '#ffffff'
+                            : sector.opacity > 0.3
+                            ? '#ffffff'
+                            : 'rgba(226, 232, 240, 0.55)'
+                        }
+                        pointerEvents="none"
+                      >
+                        {sector.coord}
+                      </text>
+                    )}
+
+                    {/* Detailed Density / System Badge when zoomed in close */}
+                    {zoom >= 0.85 && (
+                      <text
+                        y={8}
+                        textAnchor="middle"
+                        fontSize={6.5}
+                        fontFamily="monospace"
+                        fill="rgba(148, 163, 184, 0.85)"
+                        pointerEvents="none"
+                      >
+                        {Math.round(sector.density * 100)}%
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </g>
+          </svg>
+
+          {/* Viewport Floating Zoom & Fit Controls */}
+          <div className="absolute bottom-5 left-5 flex items-center gap-1.5 bg-slate-950/85 backdrop-blur-md p-1.5 rounded-xl border border-slate-800 text-xs font-mono shadow-xl z-10">
+            <button
+              onClick={() => setZoom((z) => Math.min(2.5, z * 1.25))}
+              className="p-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition cursor-pointer"
+              title="Zoom In"
+            >
+              <ZoomIn className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setZoom((z) => Math.max(0.08, z * 0.8))}
+              className="p-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition cursor-pointer"
+              title="Zoom Out"
+            >
+              <ZoomOut className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleFitGalaxy}
+              className="p-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition cursor-pointer flex items-center gap-1"
+              title="Fit Entire Galaxy in Viewport"
+            >
+              <Maximize2 className="w-4 h-4" />
+              <span className="text-[10px] hidden sm:inline">Fit Galaxy</span>
+            </button>
+            <div className="h-4 w-px bg-slate-800 mx-1" />
+            <span className="px-2 text-[10px] text-slate-400 font-mono">
+              {Math.round(zoom * 100)}%
+            </span>
+          </div>
+
+          {/* Color & Opacity Astrophysics Legend Overlay */}
+          <div className="absolute top-4 left-4 bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-xl border border-slate-800 text-[10px] font-mono shadow-lg pointer-events-none hidden sm:block">
+            <div className="text-slate-400 font-bold mb-1 uppercase tracking-wider flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-cyan-400" />
+              <span>Astrophysical Color Scale</span>
+            </div>
+            <div className="flex items-center gap-1 mb-1.5">
+              <span className="w-3 h-2 rounded-sm bg-[#00d2ff]" />
+              <span className="w-3 h-2 rounded-sm bg-[#38bdf8]" />
+              <span className="w-3 h-2 rounded-sm bg-[#60a5fa]" />
+              <span className="w-3 h-2 rounded-sm bg-[#facc15]" />
+              <span className="w-3 h-2 rounded-sm bg-[#fb923c]" />
+              <span className="w-3 h-2 rounded-sm bg-[#ef4444]" />
+              <span className="w-3 h-2 rounded-sm bg-[#dc2626]" />
+            </div>
+            <div className="flex justify-between text-[9px] text-slate-500">
+              <span className="text-cyan-300 font-bold">Young (Blue)</span>
+              <span className="text-amber-300 font-bold">Old (Red)</span>
+            </div>
+            <div className="text-[9px] text-slate-400 mt-1 border-t border-slate-800/80 pt-1">
+              Opacity: <strong className="text-slate-200">Dense</strong> (Opaque) &rarr; <strong className="text-slate-500">Sparse</strong> (Transparent)
+            </div>
+          </div>
+        </div>
+
+        {/* ============================================================================ */}
+        {/* RIGHT SECTOR INSPECTOR PANEL                                                 */}
+        {/* ============================================================================ */}
+        <aside
+          style={{ containIntrinsicSize: 'auto 380px' }}
+          className="w-80 md:w-96 h-full flex flex-col bg-slate-950/95 backdrop-blur-xl border-l border-slate-800/90 z-10 overflow-y-auto"
+        >
+          {selectedSector ? (
+            <div className="p-4 flex flex-col gap-4">
+              {/* Sector Header Card */}
+              <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 relative overflow-hidden">
+                <div
+                  className="absolute top-0 right-0 w-24 h-24 rounded-full blur-2xl opacity-20 pointer-events-none"
+                  style={{ backgroundColor: selectedSector.colorHex }}
+                />
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-blue-950/80 text-blue-300 border border-blue-800 font-bold">
+                    SECTOR {selectedSector.coord}
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    Row {selectedSector.row}, Col {selectedSector.col}
+                  </span>
+                </div>
+
+                <h3 className="text-base font-extrabold text-white mb-1">
+                  {selectedSector.name}
+                </h3>
+
+                <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+                  <span>ID: <code className="text-slate-200">{selectedSector.seedString}</code></span>
+                  <button
+                    onClick={() => handleCopyId(selectedSector.seedString)}
+                    className="p-1 hover:bg-slate-800 rounded transition text-slate-400 hover:text-white cursor-pointer"
+                    title="Copy Sector Seed String"
+                  >
+                    {copiedId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* PRIMARY ACTION BUTTON: ENTER 50x50 SECTOR MAP */}
+              <button
+                onClick={() => onSelectSector(selectedSector)}
+                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-mono text-xs font-bold uppercase tracking-wider transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer group"
+              >
+                <span>Enter Sector Hex Map (50&times;50)</span>
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              </button>
+              <p className="text-[10px] text-slate-500 font-mono text-center -mt-2">
+                Double-clicking the hex on the galaxy map also opens it directly.
+              </p>
+
+              {/* Galactic Position & Region */}
+              <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 text-xs font-mono">
+                <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold mb-2 flex items-center gap-1.5">
+                  <Compass className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Galactic Cartography</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800">
+                    <span className="text-slate-500 block text-[9px]">Galactic Radius</span>
+                    <strong className="text-white text-xs">{selectedSector.rKpc} kpc</strong>
+                    <span className="text-slate-400 text-[9px] block">({Math.round(selectedSector.rNorm * 100)}% of rim)</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800">
+                    <span className="text-slate-500 block text-[9px]">Polar Angle &theta;</span>
+                    <strong className="text-white text-xs">{(selectedSector.thetaRad * 57.2958).toFixed(1)}&deg;</strong>
+                    <span className="text-slate-400 text-[9px] block">({selectedSector.thetaRad} rad)</span>
+                  </div>
+                </div>
+
+                <div className="mt-2 p-2 rounded-lg bg-slate-950/60 border border-slate-800">
+                  <span className="text-slate-500 block text-[9px]">Galactic Region Classification</span>
+                  <strong className="text-blue-300 text-xs">{selectedSector.region}</strong>
+                </div>
+              </div>
+
+              {/* Astrophysical Sector Environment */}
+              <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 text-xs font-mono flex flex-col gap-3">
+                <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Sector Astrophysical Environment</span>
+                </div>
+
+                {/* Stellar Density */}
+                <div>
+                  <div className="flex justify-between text-[11px] mb-1">
+                    <span className="text-slate-400">Stellar Density</span>
+                    <span className="text-white font-bold">{Math.round(selectedSector.density * 100)}% ({selectedSector.density})</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-blue-500 to-emerald-400 rounded-full"
+                      style={{ width: `${Math.min(100, selectedSector.density * 100)}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[9px] text-slate-500 mt-1">
+                    <span>Opacity: {selectedSector.opacity}</span>
+                    <span className="text-emerald-400 font-semibold">~{selectedSector.estimatedStars50x50.toLocaleString()} Systems (50&times;50)</span>
+                  </div>
+                </div>
+
+                {/* Mean Stellar Age */}
+                <div className="border-t border-slate-800/80 pt-2.5">
+                  <div className="flex justify-between text-[11px] mb-1">
+                    <span className="text-slate-400">Mean Stellar Age</span>
+                    <span className="font-bold flex items-center gap-1.5" style={{ color: selectedSector.colorHex }}>
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: selectedSector.colorHex }} />
+                      {selectedSector.meanAge} Gyr
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    {selectedSector.meanAge < 2.0
+                      ? 'Young Population I starburst with massive O/B/A giants and bright blue spiral arms.'
+                      : selectedSector.meanAge < 6.0
+                      ? 'Intermediate Solar-age thin disk population with abundant G/K stars.'
+                      : 'Ancient Population II stars dominated by red dwarfs and cool white dwarf remnants.'}
+                  </p>
+                </div>
+
+                {/* Mean Metallicity */}
+                <div className="border-t border-slate-800/80 pt-2.5">
+                  <div className="flex justify-between text-[11px] mb-1">
+                    <span className="text-slate-400">Mean Metallicity [Fe/H]</span>
+                    <span className={`font-bold ${selectedSector.metallicityMean >= 0 ? 'text-amber-300' : 'text-cyan-300'}`}>
+                      {selectedSector.metallicityMean >= 0 ? `+${selectedSector.metallicityMean}` : selectedSector.metallicityMean} dex
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    {selectedSector.metallicityMean >= 0.15
+                      ? 'Super-solar metallicity: promotes giant planet formation and heavy rocky cores.'
+                      : selectedSector.metallicityMean >= -0.3
+                      ? 'Near-solar metallicity: balanced terrestrial and gas giant disk partitions.'
+                      : 'Sub-solar / metal-poor: terrestrial planets are smaller; gas giants rare.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Seed & Transfer Metadata */}
+              <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-800/60 text-[10px] font-mono text-slate-400">
+                <div className="text-slate-500 uppercase tracking-wider font-bold mb-1">Parameters Passed to SectorHex</div>
+                <div className="space-y-0.5 text-slate-300">
+                  <div>&bull; Seed: <code className="text-blue-300">{selectedSector.seed}</code></div>
+                  <div>&bull; Grid Dimensions: <code className="text-blue-300">50 &times; 50</code> (2,500 hexes)</div>
+                  <div>&bull; Density: <code className="text-blue-300">{selectedSector.density}</code></div>
+                  <div>&bull; Mean Age: <code className="text-blue-300">{selectedSector.meanAge} Gyr</code></div>
+                  <div>&bull; Metallicity: <code className="text-blue-300">{selectedSector.metallicityMean} dex</code></div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-8 text-center text-slate-500 text-xs font-mono">
+              Click any sector hexagon to inspect its galactic astrophysics.
+            </div>
+          )}
+        </aside>
+      </div>
+
+      {/* ============================================================================ */}
+      {/* ADVANCED GALAXY CUSTOMIZATION MODAL                                          */}
+      {/* ============================================================================ */}
+      {showConfigModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-2xl text-slate-100 flex flex-col gap-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-5 h-5 text-blue-400" />
+                <h3 className="text-base font-bold text-white tracking-wide">
+                  Customize Galaxy Parameters
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowConfigModal(false)}
+                className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs font-mono">
+              {/* Galaxy Morphology */}
+              <div>
+                <label className="text-slate-300 block mb-1.5 font-bold">
+                  Galaxy Morphology Type
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {MORPHOLOGY_OPTIONS.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setDraftConfig((d) => ({ ...d, morphology: m.id }))}
+                      className={`p-2 rounded-xl text-left border transition ${
+                        draftConfig.morphology === m.id
+                          ? 'bg-blue-950/80 border-blue-500 text-white font-bold'
+                          : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-800/80'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <span>{m.icon}</span>
+                        <span>{m.label.split(' ')[0]}</span>
+                      </div>
+                      <div className="text-[9px] text-slate-500 truncate mt-0.5">{m.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Galaxy Seed */}
+              <div>
+                <label className="text-slate-300 block mb-1 font-bold">
+                  Galaxy PRNG Seed
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={draftConfig.seed}
+                    onChange={(e) =>
+                      setDraftConfig((d) => ({ ...d, seed: parseInt(e.target.value) || 1 }))
+                    }
+                    className="flex-1 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDraftConfig((d) => ({
+                        ...d,
+                        seed: Math.floor(Math.random() * 90000) + 1000,
+                      }))
+                    }
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition"
+                  >
+                    Random
+                  </button>
+                </div>
+              </div>
+
+              {/* Arm Count & Arm Winding (for spirals) */}
+              {(draftConfig.morphology === 'spiral' || draftConfig.morphology === 'barred-spiral') && (
+                <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+                  <div>
+                    <label className="text-slate-300 block mb-1">
+                      Arm Count: <strong className="text-blue-400">{draftConfig.armCount}</strong>
+                    </label>
+                    <input
+                      type="range"
+                      min={2}
+                      max={6}
+                      step={1}
+                      value={draftConfig.armCount}
+                      onChange={(e) =>
+                        setDraftConfig((d) => ({ ...d, armCount: parseInt(e.target.value) }))
+                      }
+                      className="w-full accent-blue-500 cursor-pointer"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-300 block mb-1">
+                      Arm Winding: <strong className="text-blue-400">{draftConfig.armWinding.toFixed(2)}</strong>
+                    </label>
+                    <input
+                      type="range"
+                      min={0.6}
+                      max={2.4}
+                      step={0.05}
+                      value={draftConfig.armWinding}
+                      onChange={(e) =>
+                        setDraftConfig((d) => ({ ...d, armWinding: parseFloat(e.target.value) }))
+                      }
+                      className="w-full accent-blue-500 cursor-pointer"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Galaxy Radius & Overall Density Scale */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 block mb-1">
+                    Radius: <strong className="text-emerald-400">{draftConfig.radiusKpc} kpc</strong>
+                  </label>
+                  <input
+                    type="range"
+                    min={15}
+                    max={45}
+                    step={1}
+                    value={draftConfig.radiusKpc}
+                    onChange={(e) =>
+                      setDraftConfig((d) => ({ ...d, radiusKpc: parseInt(e.target.value) }))
+                    }
+                    className="w-full accent-emerald-500 cursor-pointer"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-300 block mb-1">
+                    Density Scale: <strong className="text-emerald-400">{draftConfig.overallDensityScale.toFixed(2)}x</strong>
+                  </label>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={1.5}
+                    step={0.05}
+                    value={draftConfig.overallDensityScale}
+                    onChange={(e) =>
+                      setDraftConfig((d) => ({
+                        ...d,
+                        overallDensityScale: parseFloat(e.target.value),
+                      }))
+                    }
+                    className="w-full accent-emerald-500 cursor-pointer"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-800 pt-3">
+              <button
+                type="button"
+                onClick={() => setShowConfigModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-mono transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleApplySliders}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-mono font-bold transition shadow-lg shadow-blue-500/20 cursor-pointer"
+              >
+                Generate Galaxy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

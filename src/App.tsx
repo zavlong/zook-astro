@@ -18,7 +18,10 @@ import { ShowcaseHome } from './components/home/ShowcaseHome';
 import { AstroArchitectApp } from './components/architect/AstroArchitectApp';
 import { RealisticStarGenApp } from './components/stargen/RealisticStarGenApp';
 import { SectorHexApp } from './components/sector/SectorHexApp';
+import { GalaxyGenApp } from './components/galaxy/GalaxyGenApp';
 import { StarGenParams } from './core/generation/realisticStarGen';
+import { GalaxySectorHex } from './core/generation/galaxyGen';
+import { SectorHexConfig } from './core/generation/sectorHex';
 
 export const App: React.FC = () => {
   // Application mode starts at the sensational homepage showcase
@@ -27,6 +30,21 @@ export const App: React.FC = () => {
     useState<ArchitectSystem | null>(null);
   const [starGenInitialParams, setStarGenInitialParams] =
     useState<StarGenParams | null>(null);
+  const [sectorInitialConfig, setSectorInitialConfig] =
+    useState<Partial<SectorHexConfig> | null>(null);
+
+  const handleSelectGalaxySector = (sector: GalaxySectorHex) => {
+    setSectorInitialConfig({
+      seed: sector.seed,
+      name: sector.name,
+      columns: 50,
+      rows: 50,
+      density: sector.density,
+      meanAge: sector.meanAge,
+      metallicityMean: sector.metallicityMean,
+    });
+    setActiveApp('sector-hex');
+  };
 
   const [config, setConfig] = useState<SectorConfiguration>({
     starCount: 1000,
@@ -140,15 +158,22 @@ export const App: React.FC = () => {
         <main className="w-full flex-1 min-h-0 relative rounded-xl overflow-hidden glass-hud border border-slate-800/80">
           <ShowcaseHome onSelectApp={setActiveApp} />
         </main>
+      ) : activeApp === 'galaxy-gen' ? (
+        <main className="w-full flex-1 min-h-0 relative rounded-xl overflow-hidden glass-hud border border-slate-800/80">
+          <GalaxyGenApp
+            onSelectSector={handleSelectGalaxySector}
+            onGoHome={() => setActiveApp('home')}
+          />
+        </main>
       ) : activeApp === 'sector-hex' ? (
         <main className="w-full flex-1 min-h-0 relative rounded-xl overflow-hidden glass-hud border border-slate-800/80">
           <SectorHexApp
+            initialConfig={sectorInitialConfig}
+            onBackToGalaxy={() => setActiveApp('galaxy-gen')}
             onLaunchStarGen={(params) => {
               setStarGenInitialParams(params);
               setActiveApp('stargen-lab');
             }}
-            onGoHome={() => setActiveApp('home')}
-            onOpenSector3D={() => setActiveApp('sector-3d')}
           />
         </main>
       ) : activeApp === 'sector-3d' ? (

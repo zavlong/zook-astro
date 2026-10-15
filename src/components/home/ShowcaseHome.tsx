@@ -12,7 +12,9 @@ import {
   ArrowRight,
   Volume2,
   VolumeX,
-  Radio
+  Radio,
+  Disc,
+  Hexagon,
 } from 'lucide-react';
 
 interface Props {
@@ -1020,9 +1022,18 @@ export const ShowcaseHome: React.FC<Props> = ({ onSelectApp }) => {
           </div>
           <div className="flex flex-col sm:flex-row items-center gap-2.5 flex-shrink-0">
             <button
+              onClick={() => onSelectApp('galaxy-gen')}
+              className="w-full sm:w-auto px-4 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-mono text-xs font-bold tracking-wider uppercase transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Disc className="w-4 h-4" />
+              <span>Galaxy Map (50&times;50)</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+            <button
               onClick={() => onSelectApp('sector-hex')}
               className="w-full sm:w-auto px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-600 via-indigo-600 to-purple-600 hover:from-cyan-500 hover:to-purple-500 text-white font-mono text-xs font-bold tracking-wider uppercase transition-all shadow-lg shadow-cyan-600/30 flex items-center justify-center gap-2 cursor-pointer"
             >
+              <Hexagon className="w-4 h-4" />
               <span>Sector Hex Map</span>
               <ArrowRight className="w-4 h-4" />
             </button>

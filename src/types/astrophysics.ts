@@ -218,6 +218,7 @@ export interface SectorConfiguration {
 
 export type ActiveAppMode =
   | 'home'
+  | 'galaxy-gen'
   | 'sector-hex'
   | 'stargen-lab'
   | 'astro-architect'

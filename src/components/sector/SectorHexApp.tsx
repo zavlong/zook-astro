@@ -28,8 +28,8 @@ import { SpectralCategory } from '../../types/astrophysics';
 
 interface SectorHexAppProps {
   onLaunchStarGen: (params: StarGenParams) => void;
-  onGoHome?: () => void;
-  onOpenSector3D?: () => void;
+  onBackToGalaxy?: () => void;
+  initialConfig?: Partial<SectorHexConfig> | null;
 }
 
 type SectorPresetKey = 'disk' | 'young-cluster' | 'old-halo' | 'dense-core';
@@ -90,9 +90,25 @@ const SECTOR_PRESETS: SectorPreset[] = [
 
 export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   onLaunchStarGen,
+  onBackToGalaxy,
+  initialConfig,
 }) => {
-  // Sector Configuration state
-  const [config, setConfig] = useState<SectorHexConfig>(DEFAULT_SECTOR_CONFIG);
+  // Sector Configuration state initialized with initialConfig if provided
+  const [config, setConfig] = useState<SectorHexConfig>(() => ({
+    ...DEFAULT_SECTOR_CONFIG,
+    ...(initialConfig || {}),
+  }));
+
+  // Re-sync if initialConfig updates
+  useEffect(() => {
+    if (initialConfig) {
+      setConfig((prev) => ({
+        ...prev,
+        ...initialConfig,
+      }));
+    }
+  }, [initialConfig]);
+
   const [activePreset, setActivePreset] = useState<SectorPresetKey>('disk');
   const [searchCoord, setSearchCoord] = useState<string>('');
   const [filterCat, setFilterCat] = useState<'all' | SpectralCategory | 'habitable'>('all');
@@ -102,13 +118,19 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   const [draftCols, setDraftCols] = useState<number>(config.columns);
   const [draftRows, setDraftRows] = useState<number>(config.rows);
   const [draftDensity, setDraftDensity] = useState<number>(config.density);
+  const [draftAge, setDraftAge] = useState<number>(config.meanAge);
+  const [draftFeh, setDraftFeh] = useState<number>(config.metallicityMean);
+  const [draftSeed, setDraftSeed] = useState<number>(config.seed);
 
   // Sync draft inputs when config changes
   useEffect(() => {
     setDraftCols(config.columns);
     setDraftRows(config.rows);
     setDraftDensity(config.density);
-  }, [config.columns, config.rows, config.density]);
+    setDraftAge(config.meanAge);
+    setDraftFeh(config.metallicityMean);
+    setDraftSeed(config.seed);
+  }, [config.columns, config.rows, config.density, config.meanAge, config.metallicityMean, config.seed]);
 
   // Generated Grid Data
   const gridData = useMemo(() => generateSectorHexGrid(config), [config]);
@@ -270,15 +292,27 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   };
 
   // Apply Custom Grid Size and Density
-  const handleApplyCustomGrid = (newCols: number, newRows: number, newDensity: number) => {
+  const handleApplyCustomGrid = (
+    newCols: number,
+    newRows: number,
+    newDensity: number,
+    newAge: number,
+    newFeh: number,
+    newSeed: number
+  ) => {
     const clampedCols = Math.max(4, Math.min(100, Math.round(newCols)));
     const clampedRows = Math.max(4, Math.min(100, Math.round(newRows)));
     const clampedDensity = Math.max(0.05, Math.min(0.85, +newDensity.toFixed(2)));
+    const clampedAge = Math.max(0.2, Math.min(12.8, +newAge.toFixed(2)));
+    const clampedFeh = Math.max(-1.7, Math.min(0.5, +newFeh.toFixed(2)));
     setConfig((prev) => ({
       ...prev,
       columns: clampedCols,
       rows: clampedRows,
       density: clampedDensity,
+      meanAge: clampedAge,
+      metallicityMean: clampedFeh,
+      seed: newSeed,
     }));
     setShowConfigModal(false);
   };
@@ -492,6 +526,17 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       {/* TOP COMMAND & SECTOR CONFIGURATION TOOLBAR                                   */}
       {/* ============================================================================ */}
       <div className="w-full px-4 py-2.5 bg-slate-950/85 backdrop-blur-md border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 z-20">
+        {/* Back to Galaxy Map button if opened from GalaxyGen */}
+        {onBackToGalaxy && (
+          <button
+            onClick={onBackToGalaxy}
+            className="px-2.5 py-1.5 rounded-xl bg-indigo-950/90 hover:bg-indigo-900 text-indigo-200 border border-indigo-700/80 flex items-center gap-1.5 cursor-pointer transition shadow text-xs font-mono font-bold"
+            title="Return to 50x50 Galaxy Sector Map"
+          >
+            <span>&larr; Galaxy Map</span>
+          </button>
+        )}
+
         {/* Title & Sector Info */}
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-600 via-indigo-600 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 border border-cyan-400/30">
@@ -538,12 +583,14 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
         <button
           onClick={() => setShowConfigModal(true)}
           className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700/80 hover:border-cyan-500 text-xs font-mono font-medium flex items-center gap-2 transition shadow cursor-pointer"
-          title="Customize Hex Grid Dimensions (up to 100x100) and Stellar Density"
+          title="Customize Hex Grid Dimensions (up to 100x100), Density, Age & Metallicity"
         >
           <Sliders className="w-3.5 h-3.5 text-cyan-400" />
           <span>Grid: <strong className="text-white">{config.columns}&times;{config.rows}</strong></span>
           <span className="text-slate-500">&bull;</span>
           <span>Density: <strong className="text-emerald-300">{Math.round(config.density * 100)}%</strong></span>
+          <span className="text-slate-500">&bull;</span>
+          <span className="hidden md:inline">Age: <strong className="text-cyan-300">{config.meanAge.toFixed(1)} Gyr</strong></span>
         </button>
 
         {/* Search Hex Coordinate */}
@@ -580,16 +627,16 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       </div>
 
       {/* ============================================================================ */}
-      {/* GRID SIZE & DENSITY CUSTOMIZATION MODAL (UP TO 100x100!)                     */}
+      {/* GRID SIZE, DENSITY, AGE & METALLICITY CUSTOMIZATION MODAL (UP TO 100x100!)   */}
       {/* ============================================================================ */}
       {showConfigModal && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="w-full max-w-md bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-2xl flex flex-col gap-4 font-mono text-xs">
+          <div className="w-full max-w-md bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-2xl flex flex-col gap-4 font-mono text-xs max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Grid className="w-4 h-4 text-cyan-400" />
                 <h3 className="text-sm font-bold text-white tracking-wide">
-                  Customize Grid Size &amp; Density
+                  Customize Sector Parameters
                 </h3>
               </div>
               <button
@@ -697,6 +744,72 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               </div>
             </div>
 
+            {/* Average Stellar Age Slider */}
+            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-slate-400">Average Stellar Age:</span>
+                <span className="text-cyan-300 font-bold">{draftAge.toFixed(1)} Gyr</span>
+              </div>
+              <input
+                type="range"
+                min={0.2}
+                max={12.5}
+                step={0.1}
+                value={draftAge}
+                onChange={(e) => setDraftAge(parseFloat(e.target.value))}
+                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+              />
+              <div className="text-[9.5px] text-slate-500 mt-1 flex justify-between">
+                <span>Young Starburst (0.2 Gyr)</span>
+                <span>Solar (4.8 Gyr)</span>
+                <span>Ancient Halo (12.0 Gyr)</span>
+              </div>
+            </div>
+
+            {/* Average Metallicity [Fe/H] Slider */}
+            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-slate-400">Average Metallicity ([Fe/H]):</span>
+                <span className="text-amber-300 font-bold">
+                  {draftFeh > 0 ? `+${draftFeh.toFixed(2)}` : draftFeh.toFixed(2)} dex
+                </span>
+              </div>
+              <input
+                type="range"
+                min={-1.6}
+                max={0.5}
+                step={0.02}
+                value={draftFeh}
+                onChange={(e) => setDraftFeh(parseFloat(e.target.value))}
+                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+              />
+              <div className="text-[9.5px] text-slate-500 mt-1 flex justify-between">
+                <span>Metal-Poor (-1.6 dex)</span>
+                <span>Solar (0.0 dex)</span>
+                <span>Super Metal-Rich (+0.5 dex)</span>
+              </div>
+            </div>
+
+            {/* Master Seed Input */}
+            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between gap-3">
+              <div>
+                <span className="text-slate-400 block mb-0.5">Master Seed:</span>
+                <input
+                  type="number"
+                  value={draftSeed}
+                  onChange={(e) => setDraftSeed(parseInt(e.target.value) || 1)}
+                  className="w-28 px-2 py-1 bg-slate-950 border border-slate-800 rounded text-slate-200 text-xs font-bold"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setDraftSeed(Math.floor(Math.random() * 90000) + 1000)}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition cursor-pointer self-end"
+              >
+                Randomize Seed
+              </button>
+            </div>
+
             {/* Action Buttons */}
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
               <button
@@ -706,7 +819,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 Cancel
               </button>
               <button
-                onClick={() => handleApplyCustomGrid(draftCols, draftRows, draftDensity)}
+                onClick={() => handleApplyCustomGrid(draftCols, draftRows, draftDensity, draftAge, draftFeh, draftSeed)}
                 className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold transition shadow-lg shadow-cyan-500/20 cursor-pointer"
               >
                 Apply &amp; Regenerate
