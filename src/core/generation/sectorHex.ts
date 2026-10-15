@@ -74,7 +74,7 @@ export interface SectorHexConfig {
 }
 
 export interface SectorHyperlane {
-  id: string; // "HL-SYS1__SYS2"
+  id: string; // "HL-SYS1__SYS2" or "HL-EDGE-SYS"
   sourceId: string;
   targetId: string;
   sourceCoord: string;
@@ -85,6 +85,7 @@ export interface SectorHyperlane {
   y2: number;
   lengthPx: number;
   lengthLy: number;
+  isEdgeLane?: boolean; // Connects border star to hexagon perimeter
 }
 
 export interface SectorNebulaBlob {
@@ -753,8 +754,8 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
     }
   }
 
-  // Generate procedural hyperlanes connecting each star to its 6 closest systems and deleting overlapping lanes
-  const hyperlanes = generateProceduralHyperlanes(systems);
+  // Generate procedural hyperlanes connecting each star to its 4 closest systems, plus edge jump lanes
+  const hyperlanes = generateProceduralHyperlanes(systems, hexVertices);
 
   const totalHexes = config.columns * config.rows;
   const occupiedHexes = systems.length;
@@ -1043,11 +1044,41 @@ function doSegmentsCross(
 }
 
 /**
- * Procedural Hyperlanes Generator:
- * Connects each star to its 6 closest systems, then deletes any lanes that overlap (cross)
- * each other or pass directly through intermediate stars, creating a clean, planar interstellar network.
+ * Projects a 2D point onto a line segment and returns the projected coordinates and distance
  */
-export function generateProceduralHyperlanes(systems: SectorHexSystem[]): SectorHyperlane[] {
+function projectPointToSegment(
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number
+): { x: number; y: number; dist: number } {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const l2 = dx * dx + dy * dy;
+  if (l2 === 0) {
+    const d = Math.hypot(px - x1, py - y1);
+    return { x: x1, y: y1, dist: d };
+  }
+  let t = ((px - x1) * dx + (py - y1) * dy) / l2;
+  t = Math.max(0.08, Math.min(0.92, t)); // Stay slightly away from extreme vertex corners
+  const projX = Math.round(x1 + t * dx);
+  const projY = Math.round(y1 + t * dy);
+  const dist = Math.hypot(px - projX, py - projY);
+  return { x: projX, y: projY, dist };
+}
+
+/**
+ * Procedural Hyperlanes Generator:
+ * Connects each star to its 4 closest systems, then deletes any lanes that overlap (cross)
+ * each other or pass directly through intermediate stars, creating a clean, planar interstellar network.
+ * Also connects stars within range of the sector border to the hexagon edge with one edge jump lane.
+ */
+export function generateProceduralHyperlanes(
+  systems: SectorHexSystem[],
+  hexVertices?: { x: number; y: number }[]
+): SectorHyperlane[] {
   if (systems.length < 2) return [];
 
   interface CandidateEdge {
@@ -1059,7 +1090,7 @@ export function generateProceduralHyperlanes(systems: SectorHexSystem[]): Sector
 
   const candidateEdgesMap = new Map<string, CandidateEdge>();
 
-  // 1. Connect each star to its 6 closest systems
+  // 1. Connect each star to its 4 closest systems (reduced from 6 to maximize performance)
   for (let i = 0; i < systems.length; i++) {
     const starA = systems[i];
     const neighbors: { star: SectorHexSystem; distSq: number }[] = [];
@@ -1071,11 +1102,11 @@ export function generateProceduralHyperlanes(systems: SectorHexSystem[]): Sector
       neighbors.push({ star: starB, distSq: dx * dx + dy * dy });
     }
 
-    // Sort by distance ascending and pick 6 closest
+    // Sort by distance ascending and pick 4 closest
     neighbors.sort((a, b) => a.distSq - b.distSq);
-    const closest6 = neighbors.slice(0, 6);
+    const closest4 = neighbors.slice(0, 4);
 
-    for (const nb of closest6) {
+    for (const nb of closest4) {
       const idKey = starA.id < nb.star.id ? `${starA.id}__${nb.star.id}` : `${nb.star.id}__${starA.id}`;
       if (!candidateEdgesMap.has(idKey)) {
         const dist = Math.sqrt(nb.distSq);
@@ -1137,7 +1168,7 @@ export function generateProceduralHyperlanes(systems: SectorHexSystem[]): Sector
   }
 
   // 4. Map to SectorHyperlane objects
-  return acceptedEdges.map((e) => {
+  const mappedHyperlanes: SectorHyperlane[] = acceptedEdges.map((e) => {
     const key = `${e.source.id}__${e.target.id}`;
     // 54px ~ 2.5 pc -> ~0.15 ly/px
     const lengthLy = +(e.dist * 0.15).toFixed(1);
@@ -1155,4 +1186,83 @@ export function generateProceduralHyperlanes(systems: SectorHexSystem[]): Sector
       lengthLy,
     };
   });
+
+  // 5. Connect border systems within range to the nearest hexagon edge with ONE lane
+  if (hexVertices && hexVertices.length === 6) {
+    const EDGE_THRESHOLD_PX = 135; // Systems within 135px of an edge qualify for an edge lane
+    const edgeLanes: SectorHyperlane[] = [];
+
+    for (const star of systems) {
+      let closestEdgeIdx = -1;
+      let minEdgeDist = Infinity;
+      let bestProjX = 0;
+      let bestProjY = 0;
+
+      for (let k = 0; k < 6; k++) {
+        const v1 = hexVertices[k];
+        const v2 = hexVertices[(k + 1) % 6];
+        const proj = projectPointToSegment(star.x, star.y, v1.x, v1.y, v2.x, v2.y);
+        if (proj.dist < minEdgeDist) {
+          minEdgeDist = proj.dist;
+          closestEdgeIdx = k;
+          bestProjX = proj.x;
+          bestProjY = proj.y;
+        }
+      }
+
+      if (closestEdgeIdx >= 0 && minEdgeDist <= EDGE_THRESHOLD_PX) {
+        // Check that this edge lane does not pass through another star
+        let blocked = false;
+        for (let s = 0; s < systems.length; s++) {
+          const other = systems[s];
+          if (other.id === star.id) continue;
+          const dSq = distToSegmentSq(other.x, other.y, star.x, star.y, bestProjX, bestProjY);
+          if (dSq < 14 * 14) {
+            blocked = true;
+            break;
+          }
+        }
+        if (blocked) continue;
+
+        // Check that this edge lane does not cross existing accepted hyperlanes
+        for (const existing of mappedHyperlanes) {
+          if (existing.sourceId === star.id || existing.targetId === star.id) continue;
+          if (doSegmentsCross(star.x, star.y, bestProjX, bestProjY, existing.x1, existing.y1, existing.x2, existing.y2)) {
+            blocked = true;
+            break;
+          }
+        }
+        if (blocked) continue;
+
+        // Check that this edge lane does not cross another already accepted edge lane
+        for (const existingEdge of edgeLanes) {
+          if (doSegmentsCross(star.x, star.y, bestProjX, bestProjY, existingEdge.x1, existingEdge.y1, existingEdge.x2, existingEdge.y2)) {
+            blocked = true;
+            break;
+          }
+        }
+        if (blocked) continue;
+
+        // Connect this system to the nearest hexagon edge with ONE lane!
+        edgeLanes.push({
+          id: `HL-EDGE-${star.id}`,
+          sourceId: star.id,
+          targetId: `EDGE-${closestEdgeIdx}`,
+          sourceCoord: star.coord,
+          targetCoord: 'EDGE',
+          x1: star.x,
+          y1: star.y,
+          x2: bestProjX,
+          y2: bestProjY,
+          lengthPx: Math.round(minEdgeDist),
+          lengthLy: +(minEdgeDist * 0.15).toFixed(1),
+          isEdgeLane: true,
+        });
+      }
+    }
+
+    return [...mappedHyperlanes, ...edgeLanes];
+  }
+
+  return mappedHyperlanes;
 }

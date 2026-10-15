@@ -1708,13 +1708,28 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                                 : '#a5b4fc'
                               : isSameEmpire
                               ? empireColor!
+                              : lane.isEdgeLane
+                              ? 'rgba(56, 189, 248, 0.55)'
                               : 'rgba(56, 189, 248, 0.32)'
                           }
-                          strokeWidth={isHighlighted ? 1.8 : isSameEmpire ? 1.5 : 1.0}
-                          strokeDasharray={isHighlighted || isSameEmpire ? undefined : '3,4'}
-                          opacity={isHighlighted ? 1.0 : isSameEmpire ? 0.95 : 0.65}
+                          strokeWidth={isHighlighted ? 1.8 : isSameEmpire ? 1.5 : lane.isEdgeLane ? 1.3 : 1.0}
+                          strokeDasharray={lane.isEdgeLane ? '5,3' : isHighlighted || isSameEmpire ? undefined : '3,4'}
+                          opacity={isHighlighted ? 1.0 : isSameEmpire ? 0.95 : lane.isEdgeLane ? 0.85 : 0.65}
                           strokeLinecap="round"
                         />
+
+                        {/* Border Jump Point Waypoint Marker at the hexagon perimeter */}
+                        {lane.isEdgeLane && (
+                          <circle
+                            cx={lane.x2}
+                            cy={lane.y2}
+                            r={isHighlighted ? 3.8 : 2.6}
+                            fill={isHighlighted ? '#38bdf8' : isSameEmpire ? empireColor! : '#0284c7'}
+                            stroke="#e0f2fe"
+                            strokeWidth={1}
+                            opacity={isHighlighted ? 1.0 : 0.85}
+                          />
+                        )}
                       </g>
                     );
                   })}
