@@ -14,6 +14,8 @@ import {
   ArrowRight,
   Disc,
   Home,
+  Image as ImageIcon,
+  Undo2,
 } from 'lucide-react';
 import {
   GalaxyConfig,
@@ -21,7 +23,9 @@ import {
   GalaxyMorphology,
   DEFAULT_GALAXY_CONFIG,
   generateGalaxyGrid,
+  GalaxyGridData,
 } from '../../core/generation/galaxyGen';
+import { ImageQuantizerModal } from './ImageQuantizerModal';
 
 interface GalaxyGenAppProps {
   onSelectSector: (sector: GalaxySectorHex) => void;
@@ -64,6 +68,12 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
   const [draftConfig, setDraftConfig] = useState<GalaxyConfig>(config);
 
+  // Image Quantizer state
+  const [showImageModal, setShowImageModal] = useState<boolean>(false);
+  const [customGalaxyData, setCustomGalaxyData] = useState<GalaxyGridData | null>(null);
+  const [bgImageUrl, setBgImageUrl] = useState<string | null>(null);
+  const [bgImageOpacity, setBgImageOpacity] = useState<number>(0.35);
+
   // Search input & Copy feedback
   const [searchCoord, setSearchCoord] = useState<string>('');
   const [copiedId, setCopiedId] = useState<boolean>(false);
@@ -73,8 +83,11 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     setDraftConfig(config);
   }, [config]);
 
-  // Generate full 50x50 Galaxy Grid (2,500 sectors)
-  const galaxyData = useMemo(() => generateGalaxyGrid(config), [config]);
+  // Generate full 50x50 Galaxy Grid (2,500 sectors) or use custom quantized image data
+  const galaxyData = useMemo(
+    () => customGalaxyData || generateGalaxyGrid(config),
+    [customGalaxyData, config]
+  );
 
   // Transition and Interaction state
   const [hoveredSector, setHoveredSector] = useState<GalaxySectorHex | null>(null);
@@ -427,6 +440,8 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
 
   // Roll new galaxy
   const handleRollGalaxy = () => {
+    setCustomGalaxyData(null);
+    setBgImageUrl(null);
     const newSeed = Math.floor(Math.random() * 90000) + 1000;
     setConfig((prev) => ({
       ...prev,
@@ -436,10 +451,30 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
 
   // Switch morphology
   const handleMorphologyChange = (morph: GalaxyMorphology) => {
+    setCustomGalaxyData(null);
+    setBgImageUrl(null);
     setConfig((prev) => ({
       ...prev,
       morphology: morph,
     }));
+  };
+
+  // Apply custom quantized galaxy from uploaded / procedural image
+  const handleApplyQuantizedGalaxy = (data: GalaxyGridData, imageUrl?: string) => {
+    setCustomGalaxyData(data);
+    if (imageUrl) {
+      setBgImageUrl(imageUrl);
+    }
+    const core = data.sectors.find((s) => s.col === 25 && s.row === 25);
+    if (core) {
+      setSelectedSector(core);
+    }
+  };
+
+  // Reset from quantized image back to procedural generation
+  const handleResetToProcedural = () => {
+    setCustomGalaxyData(null);
+    setBgImageUrl(null);
   };
 
   // Copy seed / ID
@@ -481,7 +516,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               <h2 className="text-sm font-bold text-white tracking-wide flex items-center gap-1.5">
                 GALAXY GENERATOR
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-950/80 text-blue-400 border border-blue-800">
-                  Seed #{config.seed}
+                  {customGalaxyData ? '🖼️ Quantized Image' : `Seed #${config.seed}`}
                 </span>
               </h2>
             </div>
@@ -518,6 +553,28 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
 
         {/* Right: Customization, Search, Roll */}
         <div className="flex items-center gap-2">
+          {/* Import / Quantize Image Button */}
+          <button
+            onClick={() => setShowImageModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-purple-300 border border-purple-800/80 hover:border-purple-500 text-xs font-mono font-medium flex items-center gap-1.5 transition shadow cursor-pointer"
+            title="Import an image of a galaxy to quantize into sector hex data"
+          >
+            <ImageIcon className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden sm:inline">Import Image</span>
+          </button>
+
+          {/* Reset to Procedural if Custom Quantized Galaxy is Active */}
+          {customGalaxyData && (
+            <button
+              onClick={handleResetToProcedural}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-800/60 hover:border-amber-500 text-xs font-mono text-[11px] flex items-center gap-1 transition cursor-pointer"
+              title="Return to procedural galaxy generation"
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Procedural</span>
+            </button>
+          )}
+
           {/* Sliders Modal Button */}
           <button
             onClick={() => setShowConfigModal(true)}
@@ -625,6 +682,20 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                     : 'none',
               }}
             >
+              {/* Optional Quantized Galaxy Astrophotograph Backdrop */}
+              {bgImageUrl && (
+                <image
+                  href={bgImageUrl}
+                  x={40}
+                  y={40}
+                  width={config.columns * colSpacing + hexWidth}
+                  height={config.rows * rowSpacing + hexHeight}
+                  opacity={bgImageOpacity}
+                  preserveAspectRatio="none"
+                  style={{ pointerEvents: 'none' }}
+                />
+              )}
+
               {/* Render visible sector hexes */}
               {visibleSectors.map((sector) => {
                 const { cx, cy } = getHexCenter(sector.col, sector.row);
@@ -780,6 +851,30 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
             <span className="px-2 text-[10px] text-slate-400 font-mono">
               {Math.round(zoom * 100)}%
             </span>
+
+            {/* Photo Backdrop Opacity Slider */}
+            {bgImageUrl && (
+              <>
+                <div className="h-4 w-px bg-slate-800 mx-1" />
+                <div className="flex items-center gap-1.5 px-2 py-0.5 text-purple-300">
+                  <ImageIcon className="w-3.5 h-3.5 text-purple-400" />
+                  <span className="text-[10px] hidden sm:inline">Photo:</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={bgImageOpacity}
+                    onChange={(e) => setBgImageOpacity(parseFloat(e.target.value))}
+                    className="w-16 h-1 accent-purple-500 cursor-pointer"
+                    title="Galactic photograph overlay opacity"
+                  />
+                  <span className="text-[10px] font-mono text-purple-300 w-7 text-right">
+                    {Math.round(bgImageOpacity * 100)}%
+                  </span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* High Zoom Threshold Indicator Pill */}
@@ -1286,6 +1381,16 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Galaxy Astrophotography Image Quantizer Modal */}
+      {showImageModal && (
+        <ImageQuantizerModal
+          isOpen={showImageModal}
+          onClose={() => setShowImageModal(false)}
+          onApplyQuantizedGalaxy={handleApplyQuantizedGalaxy}
+          currentRadiusKpc={config.radiusKpc}
+        />
       )}
     </div>
   );
