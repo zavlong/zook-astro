@@ -18,6 +18,7 @@ import {
   Undo2,
   Hexagon,
   Tag,
+  Layers,
 } from 'lucide-react';
 import {
   GalaxyConfig,
@@ -26,6 +27,7 @@ import {
   DEFAULT_GALAXY_CONFIG,
   generateGalaxyGrid,
   GalaxyGridData,
+  generateBlurredGalaxyBackground,
 } from '../../core/generation/galaxyGen';
 import { ImageQuantizerModal } from './ImageQuantizerModal';
 
@@ -70,11 +72,12 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
   const [draftConfig, setDraftConfig] = useState<GalaxyConfig>(config);
 
-  // Image Quantizer state
+  // Image Quantizer & Backdrop state
   const [showImageModal, setShowImageModal] = useState<boolean>(false);
   const [customGalaxyData, setCustomGalaxyData] = useState<GalaxyGridData | null>(null);
   const [bgImageUrl, setBgImageUrl] = useState<string | null>(null);
-  const [bgImageOpacity, setBgImageOpacity] = useState<number>(0.35);
+  const [bgImageOpacity, setBgImageOpacity] = useState<number>(0.75); // Opacity of imported photo or procedural blur
+  const [sectorOpacity, setSectorOpacity] = useState<number>(0.85); // 0.0 to 1.0 (hex fill opacity multiplier)
 
   // Search input & Copy feedback
   const [searchCoord, setSearchCoord] = useState<string>('');
@@ -166,6 +169,30 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     }
     return pts.join(' ');
   }, [hexRadius]);
+
+  // Procedural blurred galaxy background generated from hexes when no custom photo is imported
+  const [proceduralBgUrl, setProceduralBgUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (bgImageUrl) {
+      setProceduralBgUrl(null);
+      return;
+    }
+    const url = generateBlurredGalaxyBackground(
+      galaxyData.sectors,
+      config.columns,
+      config.rows,
+      colSpacing,
+      rowSpacing,
+      hexRadius,
+      hexWidth,
+      30
+    );
+    setProceduralBgUrl(url);
+  }, [galaxyData, bgImageUrl, config.columns, config.rows, colSpacing, rowSpacing, hexRadius, hexWidth]);
+
+  // Active background URL: imported photo takes precedence, otherwise procedural blur is used
+  const activeBgUrl = bgImageUrl || proceduralBgUrl;
 
   // Total grid dimensions
   const gridBoundingSize = useMemo(() => {
@@ -702,10 +729,10 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                     : 'none',
               }}
             >
-              {/* Optional Quantized Galaxy Astrophotograph Backdrop */}
-              {bgImageUrl && (
+              {/* Quantized Photo or Procedurally Blurred Galaxy Backdrop */}
+              {activeBgUrl && (
                 <image
-                  href={bgImageUrl}
+                  href={activeBgUrl}
                   x={40}
                   y={40}
                   width={config.columns * colSpacing + hexWidth}
@@ -740,11 +767,11 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                     }}
                     className="cursor-pointer group"
                   >
-                    {/* Hexagon polygon with age-based color and density-based opacity */}
+                    {/* Hexagon polygon with age-based color and density-based opacity scaled by sectorOpacity */}
                     <polygon
                       points={hexPoints}
                       fill={sector.colorHex}
-                      fillOpacity={sector.opacity}
+                      fillOpacity={sector.opacity * sectorOpacity}
                       stroke="none"
                     />
 
@@ -935,13 +962,35 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               <span>Labels</span>
             </button>
 
-            {/* Photo Backdrop Opacity Slider */}
-            {bgImageUrl && (
+            {/* Sector Fill Opacity Slider */}
+            <div className="h-4 w-px bg-slate-800 mx-1" />
+            <div className="flex items-center gap-1.5 px-2 py-0.5 text-blue-300">
+              <Layers className="w-3.5 h-3.5 text-blue-400" />
+              <span className="text-[10px] hidden sm:inline">Sector Fill:</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={sectorOpacity}
+                onChange={(e) => setSectorOpacity(parseFloat(e.target.value))}
+                className="w-16 h-1 accent-blue-500 cursor-pointer"
+                title="Sector hex fill opacity (0% = transparent hexes to reveal background)"
+              />
+              <span className="text-[10px] font-mono text-blue-300 w-7 text-right">
+                {Math.round(sectorOpacity * 100)}%
+              </span>
+            </div>
+
+            {/* Backdrop Opacity Slider (Imported photo or procedurally blurred galaxy) */}
+            {activeBgUrl && (
               <>
                 <div className="h-4 w-px bg-slate-800 mx-1" />
                 <div className="flex items-center gap-1.5 px-2 py-0.5 text-purple-300">
                   <ImageIcon className="w-3.5 h-3.5 text-purple-400" />
-                  <span className="text-[10px] hidden sm:inline">Photo:</span>
+                  <span className="text-[10px] hidden sm:inline">
+                    {bgImageUrl ? 'Photo:' : 'Glow:'}
+                  </span>
                   <input
                     type="range"
                     min={0}
@@ -950,7 +999,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                     value={bgImageOpacity}
                     onChange={(e) => setBgImageOpacity(parseFloat(e.target.value))}
                     className="w-16 h-1 accent-purple-500 cursor-pointer"
-                    title="Galactic photograph overlay opacity"
+                    title={bgImageUrl ? 'Imported astrophotograph overlay opacity' : 'Procedural blurred galaxy glow backdrop opacity'}
                   />
                   <span className="text-[10px] font-mono text-purple-300 w-7 text-right">
                     {Math.round(bgImageOpacity * 100)}%
