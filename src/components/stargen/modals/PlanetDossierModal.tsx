@@ -1,0 +1,606 @@
+import React from 'react';
+import {
+  Crosshair,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
+} from 'lucide-react';
+import {
+  RealisticPlanetBody,
+  RealisticMoon,
+  RealisticStarSystemResult,
+  SelectedMapEntity,
+  shortClassLabel,
+  shortMoonLabel,
+} from '../types';
+import { getMoonVisualColor, getPlanetVisualColor } from '../../../core/generation/realisticStarGen';
+import {
+  resolvePlanetClass,
+  resolveMoonClass,
+  deriveAtmosphereClassification,
+  formatSolventName,
+} from '../../../core/astrophysics/classifier';
+import {
+  ProceduralPlanetPortrait,
+  getProceduralPlanetIconDataUrl,
+} from '../ProceduralPlanetPortrait';
+
+interface PlanetDossierModalProps {
+  selectedEntity: Extract<SelectedMapEntity, { kind: 'planet' | 'moon' }>;
+  systemResult: RealisticStarSystemResult;
+  onSelectEntity: (entity: SelectedMapEntity) => void;
+  onTrackInOrrery: (entity: SelectedMapEntity) => void;
+  onClose: () => void;
+}
+
+export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
+  selectedEntity,
+  systemResult,
+  onSelectEntity,
+  onTrackInOrrery,
+  onClose,
+}) => {
+  const zone = systemResult.zones[selectedEntity.zoneIdx];
+  const hostPlanet = zone?.bodies[selectedEntity.bodyIdx] as RealisticPlanetBody | undefined;
+  if (!zone || !hostPlanet || hostPlanet.kind !== 'planet') return null;
+
+  const isMoon = selectedEntity.kind === 'moon';
+  const activeMoon: RealisticMoon | null =
+    isMoon && hostPlanet.moons[selectedEntity.moonIdx]
+      ? hostPlanet.moons[selectedEntity.moonIdx]
+      : null;
+
+  const rockF = isMoon && activeMoon ? activeMoon.rockFrac : hostPlanet.rockFrac;
+  const iceF = isMoon && activeMoon ? activeMoon.iceFrac : hostPlanet.iceFrac;
+  const gasF = isMoon && activeMoon ? activeMoon.gasFrac : hostPlanet.gasFrac;
+  const rPct = (rockF * 100).toFixed(1);
+  const iPct = (iceF * 100).toFixed(1);
+  const gPct = (gasF * 100).toFixed(1);
+
+  const Teq = isMoon && activeMoon ? activeMoon.T_eq : hostPlanet.T_eq;
+  const Tatm = isMoon && activeMoon ? activeMoon.T_atm : hostPlanet.T_atm;
+  const Tsurf = isMoon && activeMoon ? activeMoon.surfaceTempK : hostPlanet.surfaceTempK;
+  const ghK = isMoon && activeMoon ? activeMoon.greenhouseK : hostPlanet.greenhouseK;
+  const albedo = isMoon && activeMoon ? activeMoon.albedo : hostPlanet.albedo;
+  const pBar = isMoon && activeMoon ? activeMoon.pressureBar : hostPlanet.pressureBar;
+  const gases = isMoon && activeMoon ? activeMoon.gases : hostPlanet.gases;
+  const hydro = isMoon && activeMoon ? activeMoon.hydrosphere : hostPlanet.hydrosphere;
+  const sysAge = systemResult?.step1?.age ?? 4.5;
+
+  const effT = Tsurf ?? Tatm ?? Teq;
+  const cleanPlanetClass = resolvePlanetClass(
+    hostPlanet.planetClass,
+    effT,
+    hydro,
+    hostPlanet.massEarth,
+    iceF,
+    hostPlanet.planetClass.includes('Chthonian'),
+    hostPlanet.gasFrac >= 0.015 || hostPlanet.massEarth >= 15,
+    pBar,
+    gases
+  );
+
+  const cleanMoonClass = activeMoon
+    ? resolveMoonClass(
+        activeMoon.moonClass,
+        effT,
+        hydro,
+        iceF,
+        activeMoon.massEarth ?? 0.01,
+        pBar,
+        gases
+      )
+    : '';
+
+  const isGasGiant = !isMoon && (hostPlanet.gasFrac >= 0.015 || hostPlanet.massEarth >= 15);
+  const isSupercritical = isMoon
+    ? Boolean(activeMoon && (activeMoon.moonClass.includes('Supercritical') || activeMoon.moonClass.includes('Steam')))
+    : Boolean(
+        hydro?.solvent === 'Supercritical H2O' ||
+        Boolean(hydro?.state?.includes('Supercritical')) ||
+        cleanPlanetClass.includes('Supercritical') ||
+        cleanPlanetClass.includes('Steam') ||
+        cleanPlanetClass.includes('Water Giant')
+      );
+  const hasNoSurface = isMoon
+    ? false
+    : Boolean(
+        isGasGiant ||
+        isSupercritical ||
+        hydro?.state?.toLowerCase().includes('no surface') ||
+        cleanPlanetClass.includes('Supercritical') ||
+        cleanPlanetClass.includes('Water Giant') ||
+        cleanPlanetClass.includes('Steam')
+      );
+  const cleanAtmoClassification = deriveAtmosphereClassification(pBar, gases, isGasGiant, isSupercritical);
+
+  const title = isMoon && activeMoon
+    ? `Planet #${selectedEntity.bodyIdx + 1} ${activeMoon.name}: ${cleanMoonClass}`
+    : `Planet #${selectedEntity.bodyIdx + 1}: ${cleanPlanetClass}`;
+
+  const subtitle = isMoon && activeMoon
+    ? `a = ${activeMoon.a_Rp} Rp (${activeMoon.a_km.toLocaleString()} km) · e = ${activeMoon.e} · inc = ${activeMoon.incDeg}°${
+        activeMoon.retrograde ? ' [Retrograde]' : ''
+      } · ${activeMoon.origin}`
+    : `a = ${hostPlanet.a} AU · e = ${hostPlanet.e} · inc = ${hostPlanet.incDeg ?? 0}°`;
+
+  const massDisplay = isMoon && activeMoon
+    ? `${activeMoon.massLunar} M☾ (${activeMoon.massEarth} M⊕)`
+    : hostPlanet.massEarth >= 30
+    ? `${hostPlanet.massJup} MJ (${hostPlanet.massEarth} M⊕)`
+    : `${hostPlanet.massEarth} M⊕`;
+
+  const radDisplay = isMoon && activeMoon
+    ? `${activeMoon.radiusEarth} R⊕ (${activeMoon.radiusKm.toLocaleString()} km)`
+    : `${hostPlanet.radiusEarth} R⊕ (${Math.round(hostPlanet.radiusEarth * 6371).toLocaleString()} km)`;
+
+  const gravDisplay = isMoon && activeMoon ? `${activeMoon.gravityG} g` : `${hostPlanet.gravityG} g`;
+  const densDisplay = isMoon && activeMoon
+    ? `${activeMoon.densityGcm3} g/cm³`
+    : `${hostPlanet.densityGcm3} g/cm³`;
+  const periodDisplay = isMoon && activeMoon
+    ? `${activeMoon.periodDays} d (around Planet #${selectedEntity.bodyIdx + 1})`
+    : `${hostPlanet.orbitalPeriodDays} d (${(hostPlanet.orbitalPeriodDays / 365.25).toFixed(2)} yr)`;
+
+  const isLocked = isMoon && activeMoon
+    ? activeMoon.spinState.toLowerCase().includes('tidally locked') || activeMoon.spinState.includes('1:1')
+    : hostPlanet.spinState.toLowerCase().includes('tidally locked') || hostPlanet.spinState.includes('1:1');
+
+  const spinDisplay = isLocked
+    ? '1:1 Tidally Locked'
+    : isMoon && activeMoon
+    ? `${activeMoon.rotationHours} h`
+    : `${hostPlanet.rotationHours} h`;
+
+  const tiltDisplay = isMoon && activeMoon
+    ? `${activeMoon.axialTiltDeg}°`
+    : `${hostPlanet.axialTiltDeg}°`;
+
+  const visualColor =
+    isMoon && activeMoon
+      ? getMoonVisualColor(activeMoon)
+      : getPlanetVisualColor(hostPlanet);
+
+  const planetIndices = zone.bodies
+    .map((b, idx) => (b.kind === 'planet' ? idx : -1))
+    .filter((idx) => idx !== -1);
+  const curPosInPlanets = planetIndices.indexOf(selectedEntity.bodyIdx);
+  const prevPlanetBodyIdx = curPosInPlanets > 0 ? planetIndices[curPosInPlanets - 1] : null;
+  const nextPlanetBodyIdx =
+    curPosInPlanets >= 0 && curPosInPlanets < planetIndices.length - 1
+      ? planetIndices[curPosInPlanets + 1]
+      : null;
+
+  const inspectorStar =
+    systemResult.hierarchy.stars.find((s) => zone.title.includes(`Star ${s.label}`)) ||
+    systemResult.hierarchy.stars[0];
+  const hostIconUrl = getProceduralPlanetIconDataUrl(
+    hostPlanet,
+    null,
+    inspectorStar?.colorHex || '#fff4e6',
+    inspectorStar?.Teff || 5778,
+    0,
+    44
+  );
+  const activeIconUrl =
+    isMoon && activeMoon
+      ? getProceduralPlanetIconDataUrl(
+          hostPlanet,
+          activeMoon,
+          inspectorStar?.colorHex || '#fff4e6',
+          inspectorStar?.Teff || 5778,
+          selectedEntity.moonIdx,
+          76
+        )
+      : getProceduralPlanetIconDataUrl(
+          hostPlanet,
+          null,
+          inspectorStar?.colorHex || '#fff4e6',
+          inspectorStar?.Teff || 5778,
+          0,
+          76
+        );
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 md:p-6"
+      onClick={onClose}
+    >
+      <div
+        className="bg-[#0e131d] border border-sky-500/60 rounded-2xl max-w-4xl w-full p-5 flex flex-col gap-4 shadow-2xl max-h-[92vh] overflow-y-auto custom-scrollbar"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-800 pb-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() =>
+                onSelectEntity({
+                  kind: 'planet',
+                  zoneIdx: selectedEntity.zoneIdx,
+                  bodyIdx: selectedEntity.bodyIdx,
+                })
+              }
+              className={`px-3 py-1.5 rounded-lg text-xs font-mono flex items-center gap-2 cursor-pointer transition ${
+                !isMoon
+                  ? 'bg-sky-600 text-white font-bold shadow-md shadow-sky-500/20'
+                  : 'bg-slate-900 text-slate-300 border border-slate-700 hover:bg-slate-800'
+              }`}
+            >
+              <img src={hostIconUrl} alt="" className="w-5 h-5 object-contain -my-1" />
+              <span>
+                Planet #{selectedEntity.bodyIdx + 1} ({shortClassLabel(hostPlanet.planetClass)})
+              </span>
+            </button>
+
+            {hostPlanet.moons.map((m, mIdx) => {
+              const isThisMoon =
+                isMoon &&
+                selectedEntity.kind === 'moon' &&
+                selectedEntity.moonIdx === mIdx;
+              const mIconUrl = getProceduralPlanetIconDataUrl(
+                hostPlanet,
+                m,
+                inspectorStar?.colorHex || '#fff4e6',
+                inspectorStar?.Teff || 5778,
+                mIdx,
+                36
+              );
+              return (
+                <button
+                  key={m.id || mIdx}
+                  type="button"
+                  onClick={() =>
+                    onSelectEntity({
+                      kind: 'moon',
+                      zoneIdx: selectedEntity.zoneIdx,
+                      bodyIdx: selectedEntity.bodyIdx,
+                      moonIdx: mIdx,
+                    })
+                  }
+                  className={`px-2.5 py-1 rounded-lg text-xs font-mono flex items-center gap-1.5 cursor-pointer transition ${
+                    isThisMoon
+                      ? 'bg-indigo-600 text-white font-bold shadow-md shadow-indigo-500/20'
+                      : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800'
+                  }`}
+                >
+                  <img src={mIconUrl} alt="" className="w-4 h-4 object-contain -my-0.5" />
+                  <span>
+                    {m.name} ({shortMoonLabel(m.moonClass)})
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={prevPlanetBodyIdx === null}
+              onClick={() =>
+                prevPlanetBodyIdx !== null &&
+                onSelectEntity({
+                  kind: 'planet',
+                  zoneIdx: selectedEntity.zoneIdx,
+                  bodyIdx: prevPlanetBodyIdx,
+                })
+              }
+              className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-35 text-slate-300 border border-slate-700 text-xs font-mono flex items-center gap-1 cursor-pointer"
+              title="Previous Planet in Zone"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Prev
+            </button>
+            <button
+              type="button"
+              disabled={nextPlanetBodyIdx === null}
+              onClick={() =>
+                nextPlanetBodyIdx !== null &&
+                onSelectEntity({
+                  kind: 'planet',
+                  zoneIdx: selectedEntity.zoneIdx,
+                  bodyIdx: nextPlanetBodyIdx,
+                })
+              }
+              className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-35 text-slate-300 border border-slate-700 text-xs font-mono flex items-center gap-1 cursor-pointer"
+              title="Next Planet in Zone"
+            >
+              Next
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onTrackInOrrery(selectedEntity)}
+              className="px-2.5 py-1 rounded-lg bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-700 text-xs font-mono flex items-center gap-1 cursor-pointer transition shadow-sm"
+              title="Lock camera on this body and track its orbit in 3D Orrery"
+            >
+              <Crosshair className="w-3.5 h-3.5 text-indigo-400" />
+              Track Orbit
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Main World Title & Visual Banner */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[#151d2c] p-4 rounded-xl border border-[#2a3852]">
+          <div className="flex items-center gap-4">
+            <img
+              src={activeIconUrl}
+              alt=""
+              className="w-16 h-16 object-contain flex-shrink-0 drop-shadow-[0_0_14px_rgba(56,189,248,0.3)]"
+            />
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: visualColor }} />
+                <h2 className="text-lg font-bold text-white font-mono">{title}</h2>
+                {isMoon && (
+                  <span className="px-2 py-0.5 rounded text-xs font-mono font-bold bg-indigo-950 text-indigo-300 border border-indigo-700">
+                    Moon of #{selectedEntity.bodyIdx + 1}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-sky-400 font-mono mt-0.5">{subtitle}</p>
+            </div>
+          </div>
+
+          <div
+            className={`grid ${
+              +gPct > 0 ? 'grid-cols-3' : 'grid-cols-2'
+            } gap-3 bg-[#0c121d] p-2.5 rounded-lg border border-slate-800 text-center font-mono text-[11px] w-full md:w-auto`}
+          >
+            <div>
+              <span className="text-slate-400 block text-[9px]">ROCK</span>
+              <b className="text-slate-200">{rPct}%</b>
+            </div>
+            <div>
+              <span className="text-slate-400 block text-[9px]">ICE</span>
+              <b className="text-sky-300">{iPct}%</b>
+            </div>
+            {+gPct > 0 && (
+              <div>
+                <span className="text-slate-400 block text-[9px]">GAS</span>
+                <b className="text-amber-300">{gPct}%</b>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Procedural 3D World Portrait & Surface Horizon Vista */}
+        <ProceduralPlanetPortrait
+          planet={hostPlanet}
+          moon={activeMoon}
+          zone={zone}
+          stars={systemResult.hierarchy.stars}
+          bodyIndex={selectedEntity.bodyIdx}
+          moonIndex={isMoon ? selectedEntity.moonIdx : 0}
+        />
+
+        {/* Primary Astrophysical Telemetry Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-[#151d2c] p-3.5 rounded-xl border border-slate-800 font-mono text-xs">
+          <div>
+            <span className="text-slate-400 block text-[10px]">Mass</span>
+            <b className="text-white text-sm">{massDisplay}</b>
+          </div>
+          <div>
+            <span className="text-slate-400 block text-[10px]">Radius</span>
+            <b className="text-white text-sm">{radDisplay}</b>
+          </div>
+          <div>
+            <span className="text-slate-400 block text-[10px]">Gravity</span>
+            <b className="text-white text-sm">{gravDisplay}</b>
+          </div>
+          <div>
+            <span className="text-slate-400 block text-[10px]">Density</span>
+            <b className="text-sky-300 text-sm">{densDisplay}</b>
+          </div>
+          <div>
+            <span className="text-slate-400 block text-[10px]">{isMoon ? 'Month' : 'Year'}</span>
+            <b className="text-emerald-300 text-sm">{periodDisplay}</b>
+          </div>
+          <div>
+            <span className="text-slate-400 block text-[10px]">Day</span>
+            <b className="text-white text-sm">{spinDisplay}</b>
+          </div>
+          <div>
+            <span className="text-slate-400 block text-[10px]">Axial Tilt</span>
+            <b className="text-white text-sm">{tiltDisplay}</b>
+          </div>
+          <div>
+            <span className="text-slate-400 block text-[10px]">Albedo</span>
+            <b className="text-sky-300 text-sm">{albedo}</b>
+          </div>
+          <div>
+            <span className="text-slate-400 block text-[10px]">Equilibrium Temp</span>
+            <b className="text-white text-sm">{Teq} K</b>
+            <span className="text-[10px] text-slate-500 block">{(Teq - 273.15).toFixed(1)}°C</span>
+          </div>
+          <div>
+            <span className="text-slate-400 block text-[10px]">
+              {hasNoSurface ? 'Atmosphere Temp' : 'Surface Temperature'}
+            </span>
+            <b className="text-emerald-300 text-sm">{Tsurf} K</b>
+            <span className="text-[10px] text-emerald-400 block font-bold">
+              {(Tsurf - 273.15).toFixed(1)}°C
+            </span>
+          </div>
+        </div>
+
+        {/* Atmosphere & Hydrosphere Classification */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="bg-[#151d2c] p-3.5 rounded-xl border border-slate-800 flex flex-col gap-2.5 font-mono text-xs">
+            <span className="text-xs font-bold text-sky-300 uppercase tracking-wider">
+              Atmosphere & Volatiles
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <div>
+                <span className="text-slate-400 block text-[10px]">CLASSIFICATION</span>
+                <b className="text-white">{cleanAtmoClassification}</b>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px]">SURFACE PRESSURE</span>
+                <b className="text-sky-300">
+                  {pBar !== null
+                    ? `${pBar} bar`
+                    : isSupercritical
+                    ? '>220 bar (Supercritical Fluid)'
+                    : isGasGiant
+                    ? 'None (Continuous Envelope)'
+                    : 'Vacuum (0 bar)'}
+                </b>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px]">GREENHOUSE EFFECT</span>
+                <b className="text-amber-300">
+                  {ghK > 0 ? `+${ghK.toFixed(1)} K` : 'None'}
+                </b>
+              </div>
+            </div>
+            <div>
+              <span className="text-slate-400 block text-[10px] mb-1">
+                COMPOSITION (BY VOLUME FRACTION)
+              </span>
+              {Object.keys(gases).length === 0 ? (
+                <span className="text-slate-500 italic">No significant atmosphere retained</span>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(gases).map(([gas, frac]) => (
+                    <span
+                      key={gas}
+                      className="px-2 py-0.5 rounded bg-[#0d131f] border border-slate-700 text-slate-200 text-[11px]"
+                    >
+                      <b>{gas}:</b> {(frac * 100).toFixed(1)}%
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-[#151d2c] p-3.5 rounded-xl border border-slate-800 flex flex-col gap-2.5 font-mono text-xs">
+            <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider">
+              Hydrosphere
+            </span>
+            {hydro ? (
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <span className="text-slate-400 block text-[10px]">LIQUID COVERAGE</span>
+                  <b className="text-white">
+                    {hydro.coveragePct !== undefined ? `${hydro.coveragePct}%` : '100%'}
+                  </b>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">MEAN DEPTH</span>
+                  <b className="text-cyan-300">
+                    {hydro.liqKm > 0
+                      ? `${hydro.liqKm.toLocaleString()} km`
+                      : hydro.scKm > 0
+                      ? `${hydro.scKm.toLocaleString()} km`
+                      : '< 1 km'}
+                  </b>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">COMPOSITION</span>
+                  <b className="text-emerald-300">{formatSolventName(hydro.solvent)}</b>
+                </div>
+              </div>
+            ) : (
+              <div className="text-slate-500 italic flex items-center h-full">
+                No surface liquid or oceans (dry body)
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Dedicated Biosphere Section for bodies with life */}
+        {hydro?.biosphere && (
+          <div className="bg-[#151d2c] p-3.5 rounded-xl border border-emerald-500/50 flex flex-col gap-2.5 font-mono text-xs shadow-lg shadow-emerald-950/20">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                Biosphere & Evolutionary Complexity
+              </span>
+              <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-900/60 border border-emerald-500/60 text-emerald-300">
+                {sysAge >= 3.0 ? '🧬 Multicellular Life' : '🦠 Unicellular Life'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-[#0c121d] p-2.5 rounded-lg border border-slate-800">
+              <div>
+                <span className="text-slate-400 block text-[10px]">EVOLUTIONARY STAGE</span>
+                <b className={sysAge >= 3.0 ? 'text-emerald-300' : 'text-teal-300'}>
+                  {sysAge >= 3.0 ? 'Multicellular (Complex Organisms)' : 'Unicellular (Microbial Biosphere)'}
+                </b>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px]">SYSTEM EVOLUTION AGE</span>
+                <b className="text-white">{sysAge.toFixed(2)} Gyr</b>
+                <span className="text-[9px] text-slate-500 block">
+                  {sysAge >= 3.0 ? '≥ 3.0 Gyr (Multicellular Met)' : '< 3.0 Gyr (Microbial Phase)'}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px]">BIOCHEMISTRY SOLVENT</span>
+                <b className="text-sky-300">{formatSolventName(hydro.solvent)}</b>
+              </div>
+            </div>
+
+            <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/40 rounded-lg">
+              <span className="text-slate-400 block text-[10px] mb-0.5">ECOSYSTEM SUMMARY</span>
+              <p className="text-emerald-200 text-xs leading-relaxed">{hydro.biosphere}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Moons Sub-Inspector List */}
+        {!isMoon && hostPlanet.moons.length > 0 && (
+          <div className="bg-[#151d2c] p-3.5 rounded-xl border border-slate-800 flex flex-col gap-2 font-mono text-xs">
+            <span className="text-xs font-bold text-indigo-300 uppercase tracking-wider">
+              Natural Satellites & Moons ({hostPlanet.moons.length})
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {hostPlanet.moons.map((m, mIdx) => (
+                <button
+                  key={m.id || mIdx}
+                  type="button"
+                  onClick={() =>
+                    onSelectEntity({
+                      kind: 'moon',
+                      zoneIdx: selectedEntity.zoneIdx,
+                      bodyIdx: selectedEntity.bodyIdx,
+                      moonIdx: mIdx,
+                    })
+                  }
+                  className="w-full text-left px-3 py-2 rounded-lg border font-mono text-xs flex items-center justify-between transition cursor-pointer bg-slate-950/70 border-slate-800 hover:bg-slate-900 text-slate-200"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: getMoonVisualColor(m) }}
+                    />
+                    <div className="truncate">
+                      <b>{m.name}:</b> {m.moonClass}
+                      <div className="text-[10px] text-slate-400">
+                        {m.a_Rp} Rp ({m.periodDays}d) · {m.surfaceTempK}K
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0 ml-2">
+                    <span className="text-sky-300 font-bold block">{m.radiusKm} km</span>
+                    <span className="text-[10px] text-slate-400">{m.massLunar} M☾</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};

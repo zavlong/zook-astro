@@ -207,12 +207,7 @@ export const Header: React.FC<HeaderProps> = ({
             Random Target
           </button>
         </div>
-      ) : activeApp === 'stargen-lab' ? (
-        <div className="flex items-center gap-2 text-[11px] font-mono text-emerald-300 bg-emerald-950/60 px-3 py-1.5 rounded-lg border border-emerald-800">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span>Steps 1–6 Astrophysics &bull; 1–2% Disk Split &bull; Migration &amp; Water Worlds</span>
-        </div>
-      ) : activeApp === 'astro-architect' ? (
+      ) : activeApp === 'stargen-lab' ? null : activeApp === 'astro-architect' ? (
         <div className="flex items-center gap-2 text-[11px] font-mono text-amber-300 bg-amber-950/60 px-3 py-1.5 rounded-lg border border-amber-800">
           <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
           <span>3D Galaxy Cartographer &bull; 4-Tier Hierarchy &bull; Stellaris Mod Engine</span>

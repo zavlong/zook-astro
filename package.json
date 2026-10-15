@@ -2,13 +2,41 @@
   "name": "galactic-sector-simulator",
   "private": true,
   "version": "1.0.0",
+  "description": "Zook Astro — Realistic Star System & Galactic Sector Simulator",
+  "author": "Zav",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "tsc && vite build && npx.cmd --yes firebase-tools deploy --only hosting"
+  },
+  "build": {
+    "appId": "com.zookastro.simulator",
+    "productName": "ZookAstro",
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.exe"
+    }
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.2",
     "lucide-react": "^1.16.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -21,6 +49,8 @@
     "@types/three": "^0.174.0",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.21",
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3",
     "postcss": "^8.5.3",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.8.2",

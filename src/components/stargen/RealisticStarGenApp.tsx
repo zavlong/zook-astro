@@ -5,17 +5,17 @@ import {
   Code,
   Rocket,
   Wrench,
-  Copy,
-  Check,
   X,
-  Eye,
-  ChevronLeft,
-  ChevronRight,
   Compass,
   Layers,
   ZoomIn,
   ZoomOut,
   Maximize2,
+  Play,
+  Pause,
+  Move,
+  Crosshair,
+  Gauge,
 } from 'lucide-react';
 import {
   RealisticBeltBody,
@@ -26,7 +26,6 @@ import {
   StarGenParams,
   convertRealisticToArchitectSystem,
   convertRealisticToSectorStarSystem,
-  getMoonVisualColor,
   getPlanetVisualColor,
   rollStep1,
   runRealisticGenerator,
@@ -34,387 +33,33 @@ import {
 import { ArchitectSystem } from '../../types/architect';
 import {
   RealisticBinarySplit,
-  RealisticMoon,
   RealisticStarNode,
   StarSystem,
 } from '../../types/astrophysics';
-import { ExpandedSolarSystemTheater } from '../ui/inspector/ExpandedSolarSystemTheater';
 import {
-  ProceduralPlanetPortrait,
   getProceduralPlanetIconDataUrl,
 } from './ProceduralPlanetPortrait';
+import {
+  SelectedMapEntity,
+  Vec2AU,
+  shortClassLabel,
+  clamp,
+  lerp,
+  log10,
+} from './types';
+import {
+  computeSystem2DLayout,
+  getBodyWorldPosAU,
+} from './math/kepler';
+import { SystemJsonManagerModal } from './modals/SystemJsonManagerModal';
+import { StarDossierModal } from './modals/StarDossierModal';
+import { BinarySplitModal } from './modals/BinarySplitModal';
+import { BeltDossierModal } from './modals/BeltDossierModal';
+import { PlanetDossierModal } from './modals/PlanetDossierModal';
 
 interface RealisticStarGenAppProps {
   onOpenInArchitect: (archSystem: ArchitectSystem) => void;
   onInspectInSector3D?: (starSystem: StarSystem) => void;
-}
-
-type SelectedMapEntity =
-  | {
-      kind: 'planet';
-      zoneIdx: number;
-      bodyIdx: number;
-    }
-  | {
-      kind: 'moon';
-      zoneIdx: number;
-      bodyIdx: number;
-      moonIdx: number;
-    }
-  | {
-      kind: 'belt';
-      zoneIdx: number;
-      bodyIdx: number;
-    }
-  | {
-      kind: 'star';
-      starIdx: number;
-    }
-  | {
-      kind: 'split';
-      splitIdx: number;
-    };
-
-function log10(x: number): number {
-  return Math.log(Math.max(1e-12, x)) / Math.LN10;
-}
-
-function clamp(x: number, a: number, b: number): number {
-  return Math.max(a, Math.min(b, x));
-}
-
-function shortClassLabel(fullClass: string): string {
-  if (fullClass.includes('Hot Jupiter')) {
-    if (fullClass.includes('Class V')) return 'Class V Hot Jupiter';
-    if (fullClass.includes('Class IV')) return 'Class IV Hot Jupiter';
-    return 'Class III Hot Jupiter';
-  }
-  if (fullClass.includes('Sudarsky Class I ')) return 'Class I Giant';
-  if (fullClass.includes('Sudarsky Class II ')) return 'Class II Giant';
-  if (fullClass.includes('Sudarsky Class III ')) return 'Class III Giant';
-  if (fullClass.includes('Sudarsky Class IV ')) return 'Class IV Giant';
-  if (fullClass.includes('Sudarsky Class V ')) return 'Class V Giant';
-  if (fullClass.includes('Temperate Super-Earth')) return 'Habitable Super-Earth';
-  if (fullClass.includes('Temperate Terrestrial')) return 'Habitable Terra';
-  if (fullClass.includes('Pelagic Water World')) return 'Habitable Ocean';
-  if (fullClass.includes('Greenhouse Water World')) return 'Greenhouse Ocean';
-  if (fullClass.includes('Supercritical Water')) return 'Supercritical Steam';
-  if (fullClass.includes('Sulfuric Acid Marine')) return 'H2SO4 Acid Seas';
-  if (fullClass.includes('Sulfuric Acid Ocean')) return 'H2SO4 Acid Ocean';
-  if (fullClass.includes('Volcanic SO2 Marine')) return 'SO2 Volcanic Seas';
-  if (fullClass.includes('Volcanic SO2 Ocean')) return 'SO2 Volcanic Ocean';
-  if (fullClass.includes('Liquid CO2 Marine')) return 'Liquid CO2 Seas';
-  if (fullClass.includes('Liquid CO2 Ocean')) return 'Liquid CO2 Ocean';
-  if (fullClass.includes('Cryo-Ammonia Terrestrial')) return 'NH3 Habitable Terra';
-  if (fullClass.includes('Cryo-Ammonia Pelagic')) return 'NH3 Habitable Ocean';
-  if (fullClass.includes('Cryo-Ammonia Marine')) return 'NH3-H2O Cryo-Seas';
-  if (fullClass.includes('Cryo-Ammonia Ocean')) return 'NH3-H2O Cryo-Ocean';
-  if (fullClass.includes('Ice Giant')) return 'Ice Giant';
-  if (fullClass.includes('Hot Neptune')) return 'Hot Neptune';
-  if (fullClass.includes('Warm Neptune')) return 'Warm Neptune';
-  if (fullClass.includes('Gas Dwarf')) return 'Sub-Neptune';
-  if (fullClass.includes('Venusian')) return 'Venusian Toxic';
-  if (fullClass.includes('Molten') && fullClass.includes('Lava Seas')) return 'Molten Lava Seas';
-  if (fullClass.includes('Molten')) return 'Molten Magma World';
-  if (fullClass.includes('Titan-Class')) return 'Titan CH4 World';
-  if (fullClass.includes('Martian')) return 'Cold Martian';
-  return fullClass.split('(')[0].trim();
-}
-
-function shortMoonLabel(moonClass: string): string {
-  if (moonClass.includes('Molten')) return 'Molten Lava Moon';
-  if (moonClass.includes('SO2')) return 'SO2 Sea Moon';
-  if (moonClass.includes('Sulfuric Acid')) return 'H2SO4 Acid Moon';
-  if (moonClass.includes('CO2')) return 'CO2 Sea Moon';
-  if (moonClass.includes('Cryo-Ammonia Habitable')) return 'NH3 Habitable Moon';
-  if (moonClass.includes('Cryo-Ammonia')) return 'NH3 Sea Moon';
-  if (moonClass.includes('Io-Class')) return 'Io Volcanic';
-  if (moonClass.includes('Europa-Class')) return 'Europa Ocean';
-  if (moonClass.includes('Titan-Class')) return 'Titan CH4 Seas';
-  if (moonClass.includes('Ganymede-Class')) return 'Ganymede Icy';
-  if (moonClass.includes('Luna-Class')) return 'Luna Rocky';
-  if (moonClass.includes('Triton-Class')) return 'Triton Retro';
-  if (moonClass.includes('Habitable')) return 'Habitable Moon';
-  if (moonClass.includes('Captured Irregular')) return 'Captured Rock';
-  return 'Moonlet';
-}
-
-interface Vec2AU {
-  x: number;
-  y: number;
-}
-
-interface System2DLayout {
-  starPos: Record<string, Vec2AU>;
-  baryPos: Record<string, Vec2AU>;
-  binaryLinks: Array<{
-    splitIdx: number;
-    split: RealisticBinarySplit;
-    center: Vec2AU;
-    pos1: Vec2AU;
-    pos2: Vec2AU;
-    r1: number;
-    r2: number;
-  }>;
-  zoneCenters: Vec2AU[];
-  maxExtentAU: number;
-}
-
-/**
- * Computes exact 2D physical coordinates (in AU) for all stars, binary/trinary/quadruple
- * barycenters, and planetary zones so all zones around all stars can be plotted
- * simultaneously with proportional orbital radii.
- */
-function computeSystem2DLayout(res: RealisticStarSystemResult): System2DLayout {
-  const stars = res.hierarchy.stars;
-  const splits = res.hierarchy.splits;
-  const starPos: Record<string, Vec2AU> = {};
-  const baryPos: Record<string, Vec2AU> = {};
-  const binaryLinks: System2DLayout['binaryLinks'] = [];
-
-  const getStarMass = (label: string) =>
-    stars.find((s) => s.label === label)?.mass || 1.0;
-
-  if (stars.length === 1) {
-    starPos['A'] = { x: 0, y: 0 };
-  } else if (stars.length === 2 && splits[0]) {
-    const sp = splits[0];
-    const mA = getStarMass('A');
-    const mB = getStarMass('B');
-    const mTot = Math.max(0.05, mA + mB);
-    const rA = sp.a_AU * (mB / mTot);
-    const rB = sp.a_AU * (mA / mTot);
-    const angle = -0.28;
-    baryPos['AB'] = { x: 0, y: 0 };
-    starPos['A'] = { x: -rA * Math.cos(angle), y: -rA * Math.sin(angle) };
-    starPos['B'] = { x: rB * Math.cos(angle), y: rB * Math.sin(angle) };
-    binaryLinks.push({
-      splitIdx: 0,
-      split: sp,
-      center: baryPos['AB'],
-      pos1: starPos['A'],
-      pos2: starPos['B'],
-      r1: rA,
-      r2: rB,
-    });
-  } else if (stars.length === 3 && splits.length >= 2) {
-    const outerSp = splits[0];
-    const innerSp = splits[1];
-    const mA = getStarMass('A');
-    const mB = getStarMass('B');
-    const mC = getStarMass('C');
-
-    if (outerSp.pair === 'AB + C') {
-      const mAB = mA + mB;
-      const mTot = Math.max(0.05, mAB + mC);
-      const rAB = outerSp.a_AU * (mC / mTot);
-      const rC = outerSp.a_AU * (mAB / mTot);
-      const outerAngle = -0.18;
-      baryPos['AB + C'] = { x: 0, y: 0 };
-      baryPos['AB'] = {
-        x: -rAB * Math.cos(outerAngle),
-        y: -rAB * Math.sin(outerAngle),
-      };
-      starPos['C'] = {
-        x: rC * Math.cos(outerAngle),
-        y: rC * Math.sin(outerAngle),
-      };
-      binaryLinks.push({
-        splitIdx: 0,
-        split: outerSp,
-        center: baryPos['AB + C'],
-        pos1: baryPos['AB'],
-        pos2: starPos['C'],
-        r1: rAB,
-        r2: rC,
-      });
-
-      const rA = innerSp.a_AU * (mB / Math.max(0.05, mAB));
-      const rB = innerSp.a_AU * (mA / Math.max(0.05, mAB));
-      const innerAngle = 1.15;
-      starPos['A'] = {
-        x: baryPos['AB'].x - rA * Math.cos(innerAngle),
-        y: baryPos['AB'].y - rA * Math.sin(innerAngle),
-      };
-      starPos['B'] = {
-        x: baryPos['AB'].x + rB * Math.cos(innerAngle),
-        y: baryPos['AB'].y + rB * Math.sin(innerAngle),
-      };
-      binaryLinks.push({
-        splitIdx: 1,
-        split: innerSp,
-        center: baryPos['AB'],
-        pos1: starPos['A'],
-        pos2: starPos['B'],
-        r1: rA,
-        r2: rB,
-      });
-    } else {
-      // A + (B+C)
-      const mBC = mB + mC;
-      const mTot = Math.max(0.05, mA + mBC);
-      const rA = outerSp.a_AU * (mBC / mTot);
-      const rBC = outerSp.a_AU * (mA / mTot);
-      const outerAngle = -0.18;
-      baryPos['A + BC'] = { x: 0, y: 0 };
-      starPos['A'] = {
-        x: -rA * Math.cos(outerAngle),
-        y: -rA * Math.sin(outerAngle),
-      };
-      baryPos['BC'] = {
-        x: rBC * Math.cos(outerAngle),
-        y: rBC * Math.sin(outerAngle),
-      };
-      binaryLinks.push({
-        splitIdx: 0,
-        split: outerSp,
-        center: baryPos['A + BC'],
-        pos1: starPos['A'],
-        pos2: baryPos['BC'],
-        r1: rA,
-        r2: rBC,
-      });
-
-      const rB = innerSp.a_AU * (mC / Math.max(0.05, mBC));
-      const rC = innerSp.a_AU * (mB / Math.max(0.05, mBC));
-      const innerAngle = 1.15;
-      starPos['B'] = {
-        x: baryPos['BC'].x - rB * Math.cos(innerAngle),
-        y: baryPos['BC'].y - rB * Math.sin(innerAngle),
-      };
-      starPos['C'] = {
-        x: baryPos['BC'].x + rC * Math.cos(innerAngle),
-        y: baryPos['BC'].y + rC * Math.sin(innerAngle),
-      };
-      binaryLinks.push({
-        splitIdx: 1,
-        split: innerSp,
-        center: baryPos['BC'],
-        pos1: starPos['B'],
-        pos2: starPos['C'],
-        r1: rB,
-        r2: rC,
-      });
-    }
-  } else if (stars.length >= 4 && splits.length >= 3) {
-    const outerSp = splits[0];
-    const spAB = splits[1];
-    const spCD = splits[2];
-    const mA = getStarMass('A');
-    const mB = getStarMass('B');
-    const mC = getStarMass('C');
-    const mD = getStarMass('D');
-    const mAB = mA + mB;
-    const mCD = mC + mD;
-    const mTot = Math.max(0.05, mAB + mCD);
-
-    const rAB = outerSp.a_AU * (mCD / mTot);
-    const rCD = outerSp.a_AU * (mAB / mTot);
-    const outerAngle = -0.15;
-    baryPos['AB + CD'] = { x: 0, y: 0 };
-    baryPos['AB'] = {
-      x: -rAB * Math.cos(outerAngle),
-      y: -rAB * Math.sin(outerAngle),
-    };
-    baryPos['CD'] = {
-      x: rCD * Math.cos(outerAngle),
-      y: rCD * Math.sin(outerAngle),
-    };
-    binaryLinks.push({
-      splitIdx: 0,
-      split: outerSp,
-      center: baryPos['AB + CD'],
-      pos1: baryPos['AB'],
-      pos2: baryPos['CD'],
-      r1: rAB,
-      r2: rCD,
-    });
-
-    const rA = spAB.a_AU * (mB / Math.max(0.05, mAB));
-    const rB = spAB.a_AU * (mA / Math.max(0.05, mAB));
-    const angleAB = 1.1;
-    starPos['A'] = {
-      x: baryPos['AB'].x - rA * Math.cos(angleAB),
-      y: baryPos['AB'].y - rA * Math.sin(angleAB),
-    };
-    starPos['B'] = {
-      x: baryPos['AB'].x + rB * Math.cos(angleAB),
-      y: baryPos['AB'].y + rB * Math.sin(angleAB),
-    };
-    binaryLinks.push({
-      splitIdx: 1,
-      split: spAB,
-      center: baryPos['AB'],
-      pos1: starPos['A'],
-      pos2: starPos['B'],
-      r1: rA,
-      r2: rB,
-    });
-
-    const rC = spCD.a_AU * (mD / Math.max(0.05, mCD));
-    const rD = spCD.a_AU * (mC / Math.max(0.05, mCD));
-    const angleCD = -1.1;
-    starPos['C'] = {
-      x: baryPos['CD'].x - rC * Math.cos(angleCD),
-      y: baryPos['CD'].y - rC * Math.sin(angleCD),
-    };
-    starPos['D'] = {
-      x: baryPos['CD'].x + rD * Math.cos(angleCD),
-      y: baryPos['CD'].y + rD * Math.sin(angleCD),
-    };
-    binaryLinks.push({
-      splitIdx: 2,
-      split: spCD,
-      center: baryPos['CD'],
-      pos1: starPos['C'],
-      pos2: starPos['D'],
-      r1: rC,
-      r2: rD,
-    });
-  }
-
-  stars.forEach((s, idx) => {
-    if (!starPos[s.label]) {
-      starPos[s.label] = { x: idx * 10, y: 0 };
-    }
-  });
-
-  const zoneCenters: Vec2AU[] = res.zones.map((z) => {
-    if (z.title.startsWith('Star ')) {
-      const lbl = z.title.charAt(5);
-      return starPos[lbl] || { x: 0, y: 0 };
-    }
-    if (z.title.startsWith('Circumbinary ')) {
-      const pairName = z.title
-        .replace('Circumbinary ', '')
-        .replace(' (P-Type)', '')
-        .trim();
-      return baryPos[pairName] || { x: 0, y: 0 };
-    }
-    return { x: 0, y: 0 };
-  });
-
-  let maxExtentAU = 2.0;
-  Object.values(starPos).forEach((p) => {
-    maxExtentAU = Math.max(maxExtentAU, Math.hypot(p.x, p.y) * 1.25);
-  });
-  res.zones.forEach((z, idx) => {
-    const c = zoneCenters[idx] || { x: 0, y: 0 };
-    const distCenter = Math.hypot(c.x, c.y);
-    const furthestBodyAU = z.bodies.reduce(
-      (mx, b) => Math.max(mx, b.kind === 'planet' ? b.a * (1 + b.e) : b.a + b.beltWidth),
-      z.a_in * 2
-    );
-    maxExtentAU = Math.max(maxExtentAU, distCenter + furthestBodyAU * 1.18);
-  });
-
-  return {
-    starPos,
-    baryPos,
-    binaryLinks,
-    zoneCenters,
-    maxExtentAU,
-  };
 }
 
 export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
@@ -435,26 +80,34 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   const [mapMode, setMapMode] = useState<'schematic' | 'orrery2d'>('schematic');
   const [mapZoom, setMapZoom] = useState<number>(1.0);
 
-  // Proportional 2D Orrery Camera State (pxPerAU & center in AU)
+  // Proportional 3D Orrery Camera State (pxPerAU, center in AU, 3D Yaw & Pitch, Orbit Animation)
   const [orreryPxPerAU, setOrreryPxPerAU] = useState<number>(35);
   const [orreryCamAU, setOrreryCamAU] = useState<Vec2AU>({ x: 0, y: 0 });
+  const [orreryYaw, setOrreryYaw] = useState<number>(-0.42);
+  const [orreryPitch, setOrreryPitch] = useState<number>(0.94); // ~54° 3D perspective tilt
+  const [orreryDragMode, setOrreryDragMode] = useState<'rotate' | 'pan'>('rotate');
+  const [orreryIncScale, setOrreryIncScale] = useState<number>(1);
+  const [orreryPlaying, setOrreryPlaying] = useState<boolean>(false);
+  const [orrerySpeed, setOrrerySpeed] = useState<number>(1.0); // 0.1x (10x slower) to 2.0x
+  const [orreryTimeYr, setOrreryTimeYr] = useState<number>(0);
+  const [trackedTarget, setTrackedTarget] = useState<SelectedMapEntity | null>(null);
   const [isDraggingOrrery, setIsDraggingOrrery] = useState<boolean>(false);
   const dragStartRef = useRef<{
     clientX: number;
     clientY: number;
     camX: number;
     camY: number;
+    yaw: number;
+    pitch: number;
+    action: 'rotate' | 'pan';
   } | null>(null);
   const orrerySvgRef = useRef<SVGSVGElement | null>(null);
 
   // Click-to-Blow-Up Selected Entity Modal State
   const [selectedEntity, setSelectedEntity] = useState<SelectedMapEntity | null>(null);
 
-  // Modals (JSON & 3D Raytraced Theater)
+  // Modals (JSON Import/Export)
   const [showJsonModal, setShowJsonModal] = useState<boolean>(false);
-  const [copiedJson, setCopiedJson] = useState<boolean>(false);
-  const [theaterStar, setTheaterStar] = useState<StarSystem | null>(null);
-  const [theaterPlanetIdx, setTheaterPlanetIdx] = useState<number>(0);
 
   const sysMass = +Math.pow(10, logMass).toFixed(3);
 
@@ -463,12 +116,38 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     const fitPxPerAU = clamp(320 / Math.max(0.2, layout.maxExtentAU), 0.15, 4000);
     setOrreryPxPerAU(fitPxPerAU);
     setOrreryCamAU({ x: 0, y: 0 });
+    setTrackedTarget(null);
+  };
+
+  const handleTrackBody = (entity: SelectedMapEntity) => {
+    setTrackedTarget(entity);
+    setSelectedEntity(null);
+    if (systemResult) {
+      const targetPos = getBodyWorldPosAU(
+        systemResult,
+        entity,
+        orreryTimeYr,
+        orreryIncScale
+      );
+      if (targetPos) {
+        setOrreryCamAU(targetPos);
+      }
+    }
+  };
+
+  const handleSelectBody = (entity: SelectedMapEntity, e?: React.MouseEvent) => {
+    if (e?.shiftKey) {
+      handleTrackBody(entity);
+    } else {
+      setSelectedEntity(entity);
+    }
   };
 
   const triggerRun = (params: StarGenParams) => {
     const res = runRealisticGenerator(params);
     setSystemResult(res);
     setSelectedEntity(null);
+    setTrackedTarget(null);
     fitOrreryToFullSystem(res);
   };
 
@@ -481,7 +160,33 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     });
   }, []);
 
-  // Attach native non-passive wheel listener to the 2D Orrery SVG so wheel-zoom doesn't scroll page
+  // 3D Orrery live Keplerian orbit animation loop (with dynamic speed & camera tracking)
+  useEffect(() => {
+    if (!orreryPlaying || mapMode !== 'orrery2d') return;
+    let rafId = 0;
+    const step = () => {
+      setOrreryTimeYr((t) => {
+        const nextTime = t + 0.0045 * orrerySpeed;
+        if (trackedTarget && systemResult) {
+          const targetPos = getBodyWorldPosAU(
+            systemResult,
+            trackedTarget,
+            nextTime,
+            orreryIncScale
+          );
+          if (targetPos) {
+            setOrreryCamAU(targetPos);
+          }
+        }
+        return nextTime;
+      });
+      rafId = requestAnimationFrame(step);
+    };
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
+  }, [orreryPlaying, mapMode, orrerySpeed, trackedTarget, systemResult, orreryIncScale]);
+
+  // Attach native non-passive wheel listener to the 3D Orrery SVG so wheel-zoom doesn't scroll page
   useEffect(() => {
     const svgEl = orrerySvgRef.current;
     if (!svgEl || mapMode !== 'orrery2d') return;
@@ -489,29 +194,29 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       const rect = svgEl.getBoundingClientRect();
-      const viewW = 1040;
-      const viewH = 680;
-      const mouseSvgX = ((e.clientX - rect.left) / Math.max(1, rect.width)) * viewW;
-      const mouseSvgY = ((e.clientY - rect.top) / Math.max(1, rect.height)) * viewH;
+      const dxSvg = ((e.clientX - rect.left) / Math.max(1, rect.width) - 0.5) * 1040;
+      const dySvg = ((e.clientY - rect.top) / Math.max(1, rect.height) - 0.5) * 680;
+      const zoomFactor = e.deltaY < 0 ? 1.28 : 1 / 1.28;
 
-      const zoomFactor = e.deltaY < 0 ? 1.24 : 1 / 1.24;
       setOrreryPxPerAU((prevPx) => {
-        const nextPx = clamp(prevPx * zoomFactor, 0.05, 80000);
-        setOrreryCamAU((prevCam) => {
-          const worldX = prevCam.x + (mouseSvgX - viewW / 2) / prevPx;
-          const worldY = prevCam.y + (mouseSvgY - viewH / 2) / prevPx;
-          return {
-            x: worldX - (mouseSvgX - viewW / 2) / nextPx,
-            y: worldY - (mouseSvgY - viewH / 2) / nextPx,
-          };
-        });
+        const nextPx = clamp(prevPx * zoomFactor, 0.05, 5000000);
+        const ratio = 1 - prevPx / nextPx;
+        const cY = Math.cos(orreryYaw);
+        const sY = Math.sin(orreryYaw);
+        const effDy = dySvg / Math.max(0.25, Math.cos(orreryPitch));
+        const dWorldX = (dxSvg * cY + effDy * sY) / prevPx;
+        const dWorldY = (-dxSvg * sY + effDy * cY) / prevPx;
+        setOrreryCamAU((prevCam) => ({
+          x: prevCam.x + dWorldX * ratio,
+          y: prevCam.y + dWorldY * ratio,
+        }));
         return nextPx;
       });
     };
 
     svgEl.addEventListener('wheel', handleWheel, { passive: false });
     return () => svgEl.removeEventListener('wheel', handleWheel);
-  }, [mapMode, systemResult]);
+  }, [mapMode, systemResult, orreryYaw, orreryPitch]);
 
   // Close blow-up modal on Escape
   useEffect(() => {
@@ -577,44 +282,11 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     handleParamChange(newLogM, p.age, p.feh, p.forcedMult, false);
   };
 
-  const handleCopyJson = () => {
-    if (!systemResult) return;
-    navigator.clipboard.writeText(JSON.stringify(systemResult, null, 2));
-    setCopiedJson(true);
-    setTimeout(() => setCopiedJson(false), 2000);
-  };
-
-  const openZoneIn3DTheater = (zoneIdx: number, planetIdx = 0) => {
-    if (!systemResult) return;
-    const starSys = convertRealisticToSectorStarSystem(systemResult, zoneIdx);
-    setTheaterStar(starSys);
-    setTheaterPlanetIdx(planetIdx);
-  };
-
   const sendZoneToArchitect = (zoneIdx: number) => {
     if (!systemResult) return;
     const archSys = convertRealisticToArchitectSystem(systemResult, zoneIdx);
     onOpenInArchitect(archSys);
   };
-
-  const totalPlanets = systemResult
-    ? systemResult.zones.reduce(
-        (acc, z) => acc + z.bodies.filter((b) => b.kind === 'planet').length,
-        0
-      )
-    : 0;
-
-  const totalMoons = systemResult
-    ? systemResult.zones.reduce(
-        (acc, z) =>
-          acc +
-          z.bodies.reduce(
-            (mAcc, b) => mAcc + (b.kind === 'planet' ? b.moons.length : 0),
-            0
-          ),
-        0
-      )
-    : 0;
 
   // ============================================================================
   // UNIFIED FULL-SYSTEM LINEAR SCHEMATIC (CIRCUMBINARY ZONES BETWEEN BINARIES)
@@ -665,7 +337,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     const findStarZoneIdx = (label: string) =>
       zones.findIndex((z) => z.title.startsWith(`Star ${label} `));
     const findPZoneIdx = (pairName: string) =>
-      zones.findIndex((z) => z.title === `Circumbinary ${pairName} (P-Type)`);
+      zones.findIndex((z) => z.title.startsWith(`Circumbinary ${pairName}`));
     const findSplitIdx = (pairName: string) =>
       h.splits.findIndex((s) => s.pair === pairName);
 
@@ -731,7 +403,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       addStarRow(linearRows, 3);
     }
 
-    const topHeaderH = h.splits.length > 0 ? 92 : 52;
+    const topHeaderH = 52;
     const bottomAxisH = 54;
     const W = 1520;
     const totalRowsH = linearRows.reduce((acc, r) => acc + r.height, 0);
@@ -819,10 +491,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             fontWeight="bold"
             fontFamily="monospace"
           >
-            STELLAR HIERARCHY ({h.archName.toUpperCase()})
-          </text>
-          <text x={26} y={50} fill="#64748b" fontSize={10} fontFamily="monospace">
-            Click any Star, Split, Planet, Belt or Moon to inspect
+            {h.stars.length === 1 ? 'STELLAR SYSTEM' : 'STELLAR HIERARCHY'}
           </text>
 
           {/* Vertical AU Grid Lines across all orbital lanes */}
@@ -852,87 +521,107 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             );
           })}
 
-          {/* Top Binary / Trinary / Quadruple Separation Ribbon on the Shared AU Scale */}
-          {h.splits.length > 0 && (
+          {/* Left Column Binary Connector Line & Separation Badges in Gaps */}
+          {h.stars.length >= 2 && (
             <g>
-              <rect
-                x={trackX1}
-                y={12}
-                width={trackX2 - trackX1}
-                height={64}
-                rx={8}
-                fill="#0b1322"
-                stroke="#1e293b"
+              {/* Main vertical spine joining all stars */}
+              <line
+                x1={26}
+                y1={starRowMidY[h.stars[0].label] || topHeaderH + 40}
+                x2={26}
+                y2={starRowMidY[h.stars[h.stars.length - 1].label] || H - 80}
+                stroke="#38bdf8"
+                strokeWidth={2}
+                strokeDasharray="4,3"
               />
-              <text
-                x={trackX1 + 12}
-                y={28}
-                fill="#fbbf24"
-                fontSize={10.5}
-                fontWeight="bold"
-                fontFamily="monospace"
-              >
-                GRAVITATIONAL BINARY / TRINARY SPLITS &amp; RESONANCE GAPS (SHARED AU SCALE)
-              </text>
 
-              {h.splits.map((sp, sIdx) => {
-                const xSplit = mx(sp.a_AU);
-                const xSmax = sp.sMaxA > minAU ? mx(sp.sMaxA) : trackX1;
-                const xPmin = sp.pMin < maxAU ? mx(sp.pMin) : trackX2;
-                const yBar = 44 + sIdx * 14;
+              {/* Horizontal connector branches to each star card */}
+              {h.stars.map((st) => {
+                const y = starRowMidY[st.label];
+                if (y == null) return null;
+                return (
+                  <line
+                    key={`branch-${st.label}`}
+                    x1={26}
+                    y1={y}
+                    x2={42}
+                    y2={y}
+                    stroke="#38bdf8"
+                    strokeWidth={1.5}
+                  />
+                );
+              })}
+
+              {/* Split distance badges in the gaps between adjacent stars */}
+              {h.stars.slice(0, -1).map((st1, i) => {
+                const st2 = h.stars[i + 1];
+                const y1 = starRowMidY[st1.label];
+                const y2 = starRowMidY[st2.label];
+                if (y1 == null || y2 == null) return null;
+                const yMid = (y1 + y2) / 2;
+
+                let split: RealisticBinarySplit | undefined;
+                if (h.stars.length === 2) {
+                  split = h.splits.find((s) => s.pair === 'AB') || h.splits[0];
+                } else if (h.stars.length === 3) {
+                  split =
+                    i === 0
+                      ? h.splits.find((s) => s.pair === 'AB' || s.pair === 'A + BC') || h.splits[0]
+                      : h.splits.find((s) => s.pair === 'BC' || s.pair === 'AB + C') || h.splits[1];
+                } else if (h.stars.length === 4) {
+                  split =
+                    i === 0
+                      ? h.splits.find((s) => s.pair === 'AB')
+                      : i === 1
+                      ? h.splits.find((s) => s.pair === 'AB + CD')
+                      : h.splits.find((s) => s.pair === 'CD');
+                }
+
+                if (!split) return null;
+                const distLabel =
+                  split.a_AU >= 100
+                    ? `${Math.round(split.a_AU)} AU`
+                    : split.a_AU < 1
+                    ? `${split.a_AU.toFixed(2)} AU`
+                    : `${split.a_AU.toFixed(1)} AU`;
+
+                const spIdx = h.splits.findIndex((s) => s === split);
+
                 return (
                   <g
-                    key={sIdx}
+                    key={`split-gap-${i}`}
                     className="cursor-pointer"
-                    onClick={() => setSelectedEntity({ kind: 'split', splitIdx: sIdx })}
+                    onClick={() => {
+                      if (spIdx >= 0) setSelectedEntity({ kind: 'split', splitIdx: spIdx });
+                    }}
                   >
+                    <circle cx={26} cy={yMid} r={3} fill="#38bdf8" />
+                    <line x1={26} y1={yMid} x2={44} y2={yMid} stroke="#38bdf8" strokeWidth={1.5} />
                     <rect
-                      x={Math.min(xSmax, xPmin)}
-                      y={yBar - 5}
-                      width={Math.max(4, Math.abs(xPmin - xSmax))}
-                      height={10}
-                      fill="rgba(248,113,113,0.16)"
-                      stroke="rgba(248,113,113,0.4)"
-                      strokeDasharray="3,2"
-                      rx={3}
-                    />
-                    <circle
-                      cx={xSplit}
-                      cy={yBar}
-                      r={5.5}
-                      fill="#fbbf24"
-                      stroke="#0f172a"
-                      strokeWidth={1.5}
+                      x={44}
+                      y={yMid - 11}
+                      width={80}
+                      height={22}
+                      rx={5}
+                      fill="#0b1322"
+                      stroke="#38bdf8"
+                      strokeWidth={1.2}
                     />
                     <text
-                      x={xSplit + 9}
-                      y={yBar + 3.5}
-                      fill="#fde68a"
+                      x={84}
+                      y={yMid + 4}
+                      fill="#38bdf8"
                       fontSize={10}
                       fontWeight="bold"
                       fontFamily="monospace"
+                      textAnchor="middle"
                     >
-                      Split [{sp.pair}]: {sp.a_AU} AU (e={sp.e}) · {sp.regime}
+                      {distLabel}
                     </text>
                   </g>
                 );
               })}
             </g>
-          )}
-
-          {/* Left Column Binary Connector Line Joining First & Last Star */}
-          {h.stars.length >= 2 && (
-            <path
-              d={`M 48 ${starRowMidY[h.stars[0].label] || topHeaderH + 40} L 26 ${
-                starRowMidY[h.stars[0].label] || topHeaderH + 40
-              } L 26 ${
-                starRowMidY[h.stars[h.stars.length - 1].label] || H - 80
-              } L 48 ${starRowMidY[h.stars[h.stars.length - 1].label] || H - 80}`}
-              fill="none"
-              stroke="#38bdf8"
-              strokeWidth={2}
-              strokeDasharray="4,3"
-            />
           )}
 
           {/* Render Ordered Linear Rows (Stars + Circumbinary Zones Between Binaries) */}
@@ -951,7 +640,14 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                   return (
                     <g
                       className="cursor-pointer"
-                      onClick={() => setSelectedEntity({ kind: 'star', starIdx: sIdx })}
+                      onClick={(e) => {
+                        if (e.shiftKey) {
+                          setMapMode('orrery2d');
+                          handleTrackBody({ kind: 'star', starIdx: sIdx });
+                        } else {
+                          setSelectedEntity({ kind: 'star', starIdx: sIdx });
+                        }
+                      }}
                     >
                       <rect
                         x={42}
@@ -980,9 +676,9 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                       />
                       <text
                         x={104}
-                        y={midY - 12}
+                        y={midY - 4}
                         fill="#ffffff"
-                        fontSize={12.5}
+                        fontSize={13}
                         fontWeight="bold"
                         fontFamily="sans-serif"
                       >
@@ -990,18 +686,9 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                       </text>
                       <text
                         x={104}
-                        y={midY + 3}
-                        fill="#38bdf8"
-                        fontSize={10}
-                        fontFamily="monospace"
-                      >
-                        {st.category}
-                      </text>
-                      <text
-                        x={104}
-                        y={midY + 18}
+                        y={midY + 14}
                         fill="#94a3b8"
-                        fontSize={10}
+                        fontSize={10.5}
                         fontFamily="monospace"
                       >
                         {st.mass} M☉ · {st.lum} L☉ · {st.Teff}K
@@ -1125,25 +812,23 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                   strokeWidth={1.2}
                 />
 
-                {/* Zone Title & Archetype Header */}
+                {/* Zone Header Telemetry */}
                 <text
                   x={trackX1 + 8}
                   y={laneTop + 26}
-                  fill={isCircumbinary ? '#fde68a' : '#f8fafc'}
-                  fontSize={12}
-                  fontWeight="bold"
-                  fontFamily="sans-serif"
-                >
-                  {z.title}
-                </text>
-                <text
-                  x={trackX1 + 8}
-                  y={laneTop + 41}
                   fill="#38bdf8"
-                  fontSize={10}
+                  fontSize={10.5}
                   fontFamily="monospace"
                 >
-                  Type {z.archetype} Architecture · Disk: {z.diskMassEarth} M⊕
+                  {isCircumbinary ? (
+                    <tspan fill="#fde68a" fontWeight="bold">
+                      {z.title} &bull;{' '}
+                    </tspan>
+                  ) : null}
+                  Disk: {z.diskMassEarth} M⊕
+                  {showHZ && xH2 > xH1
+                    ? ` · Habitable Zone: ${hzInAU.toFixed(2)} – ${hzOutAU.toFixed(2)} AU`
+                    : ''}
                   {showSnow ? ` · Snow Line: ${z.a_snow.toFixed(2)} AU` : ''} · Stable Zone: [
                   {z.a_in.toFixed(2)} – {z.a_out.toFixed(2)} AU]
                 </text>
@@ -1186,15 +871,6 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                       strokeWidth={1.5}
                       strokeDasharray="5,4"
                     />
-                    <text
-                      x={xSnow + 5}
-                      y={laneTop + laneHeight - 24}
-                      fill="#38bdf8"
-                      fontSize={9}
-                      fontFamily="monospace"
-                    >
-                      ❄️ Snow ({z.a_snow.toFixed(2)} AU)
-                    </text>
                   </g>
                 )}
 
@@ -1400,16 +1076,26 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             className="cursor-pointer"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedEntity({
-                                kind: 'moon',
-                                zoneIdx: zIdx,
-                                bodyIdx: bIdx,
-                                moonIdx: mIdx,
-                              });
+                              if (e.shiftKey) {
+                                setMapMode('orrery2d');
+                                handleTrackBody({
+                                  kind: 'moon',
+                                  zoneIdx: zIdx,
+                                  bodyIdx: bIdx,
+                                  moonIdx: mIdx,
+                                });
+                              } else {
+                                setSelectedEntity({
+                                  kind: 'moon',
+                                  zoneIdx: zIdx,
+                                  bodyIdx: bIdx,
+                                  moonIdx: mIdx,
+                                });
+                              }
                             }}
                           >
                             <title>
-                              {m.name} ({m.moonClass}) — Click for full details
+                              {m.name} ({m.moonClass}) — Click for details · Shift+Click to track in Orrery
                             </title>
                             <circle cx={bx} cy={my} r={mRad + 3} fill="transparent" />
                             {isMoonSel && (
@@ -1436,14 +1122,24 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                       {/* Clickable Planet Group */}
                       <g
                         className="cursor-pointer"
-                        onClick={() =>
-                          setSelectedEntity({
-                            kind: 'planet',
-                            zoneIdx: zIdx,
-                            bodyIdx: bIdx,
-                          })
-                        }
+                        onClick={(e) => {
+                          if (e.shiftKey) {
+                            setMapMode('orrery2d');
+                            handleTrackBody({
+                              kind: 'planet',
+                              zoneIdx: zIdx,
+                              bodyIdx: bIdx,
+                            });
+                          } else {
+                            setSelectedEntity({
+                              kind: 'planet',
+                              zoneIdx: zIdx,
+                              bodyIdx: bIdx,
+                            });
+                          }
+                        }}
                       >
+                        <title>{`Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')} — Click for details · Shift+Click to track in Orrery`}</title>
                         {/* Selection / Habitable Halo */}
                         {(isPlanetSel || b.planetClass.includes('Habitable')) && (
                           <circle
@@ -1500,19 +1196,114 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     );
   };
 
+
+
   // ============================================================================
-  // 2D PROPORTIONAL MULTI-STAR ORBITAL MAP (ALL ZONES & ALL STARS SIMULTANEOUSLY)
+  // 3D INTERACTIVE PROPORTIONAL MULTI-STAR ORRERY & ORBITS VIEW
   // ============================================================================
   const render2DTopDownOrrery = (res: RealisticStarSystemResult) => {
-    const layout = computeSystem2DLayout(res);
+    const layout = computeSystem2DLayout(res, orreryTimeYr);
     const viewW = 1040;
     const viewH = 680;
     const cxScreen = viewW / 2;
     const cyScreen = viewH / 2;
 
-    const toScreenX = (auX: number) => cxScreen + (auX - orreryCamAU.x) * orreryPxPerAU;
-    const toScreenY = (auY: number) => cyScreen + (auY - orreryCamAU.y) * orreryPxPerAU;
-    const toScreenR = (auR: number) => auR * orreryPxPerAU;
+    const cosYaw = Math.cos(orreryYaw);
+    const sinYaw = Math.sin(orreryYaw);
+    const cosPitch = Math.cos(orreryPitch);
+    const sinPitch = Math.sin(orreryPitch);
+
+    // Camera distance in AU for subtle 3D perspective foreshortening
+    const camDistAU = 720 / Math.max(0.05, orreryPxPerAU);
+
+    const project3D = (wx: number, wy: number, wz = 0) => {
+      const dx = wx - orreryCamAU.x;
+      const dy = wy - orreryCamAU.y;
+      const dz = wz;
+      const x1 = dx * cosYaw - dy * sinYaw;
+      const y1 = dx * sinYaw + dy * cosYaw;
+      const xCam = x1;
+      const yCam = y1 * cosPitch - dz * sinPitch;
+      const zCam = y1 * sinPitch + dz * cosPitch;
+      const persp = clamp(
+        camDistAU / Math.max(camDistAU * 0.28, camDistAU + zCam * 0.36),
+        0.52,
+        1.75
+      );
+      return {
+        x: cxScreen + xCam * orreryPxPerAU * persp,
+        y: cyScreen + yCam * orreryPxPerAU * persp,
+        zCam,
+        scale: persp,
+      };
+    };
+
+    // Build a closed 3D circle/ellipse SVG path in the Z=0 plane around (cxAU, cyAU)
+    const build3DCirclePath = (
+      cxAU: number,
+      cyAU: number,
+      radiusAU: number,
+      steps = 56,
+      reverse = false
+    ): string => {
+      const pts: string[] = [];
+      for (let i = 0; i <= steps; i++) {
+        const idx = reverse ? steps - i : i;
+        const ang = (idx / steps) * Math.PI * 2;
+        const p = project3D(
+          cxAU + radiusAU * Math.cos(ang),
+          cyAU + radiusAU * Math.sin(ang),
+          0
+        );
+        pts.push(`${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`);
+      }
+      return pts.join(' ') + ' Z';
+    };
+
+    // Evaluate a 3D point on an inclined Keplerian orbit around centerAU
+    const evalKepler3D = (
+      centerAU: Vec2AU,
+      a: number,
+      e: number,
+      incRad: number,
+      omegaNode: number,
+      argPeri: number,
+      trueAnomaly: number
+    ) => {
+      const eSafe = clamp(e, 0, 0.92);
+      const r = (a * (1 - eSafe * eSafe)) / (1 + eSafe * Math.cos(trueAnomaly));
+      const u = argPeri + trueAnomaly;
+      const cosO = Math.cos(omegaNode);
+      const sinO = Math.sin(omegaNode);
+      const cosU = Math.cos(u);
+      const sinU = Math.sin(u);
+      const cosI = Math.cos(incRad);
+      const sinI = Math.sin(incRad);
+
+      const wx = centerAU.x + r * (cosO * cosU - sinO * sinU * cosI);
+      const wy = centerAU.y + r * (sinO * cosU + cosO * sinU * cosI);
+      const wz = r * (sinU * sinI);
+      return { wx, wy, wz, r };
+    };
+
+    const buildKepler3DPath = (
+      centerAU: Vec2AU,
+      a: number,
+      e: number,
+      incRad: number,
+      omegaNode: number,
+      argPeri: number,
+      steps = 64
+    ): string => {
+      const pts: string[] = [];
+      for (let i = 0; i <= steps; i++) {
+        const nu = (i / steps) * Math.PI * 2;
+        const pos3 = evalKepler3D(centerAU, a, e, incRad, omegaNode, argPeri, nu);
+        const p = project3D(pos3.wx, pos3.wy, pos3.wz);
+        pts.push(`${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`);
+      }
+      return pts.join(' ') + ' Z';
+    };
 
     // Compute a clean physical scale bar in AU for the bottom-left overlay
     const rawBarAU = 120 / Math.max(1e-6, orreryPxPerAU);
@@ -1527,9 +1318,12 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       setOrreryPxPerAU(clamp(260 / Math.max(0.05, targetOuterAU), 0.15, 60000));
     };
 
+    // Collect depth-sorted 3Dforeground renderables (stars, planets, moons) so nearer 3D bodies occlude farther ones
+    const depthNodes: Array<{ zCam: number; key: string; node: React.ReactNode }> = [];
+
     return (
       <div className="w-full flex flex-col gap-2.5 bg-[#04070e] rounded-xl border border-slate-800/90 p-3">
-        {/* Top Interactive Camera & Zoom Control Bar */}
+        {/* Top Interactive 3D Camera, Orientation & Zoom Control Bar */}
         <div className="flex flex-wrap items-center justify-between gap-2 bg-[#0b111e] px-3 py-2 rounded-lg border border-slate-800">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] font-mono text-slate-400 mr-1">
@@ -1537,11 +1331,35 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             </span>
             <button
               type="button"
-              onClick={() => fitOrreryToFullSystem(res)}
+              onClick={() => {
+                setTrackedTarget(null);
+                fitOrreryToFullSystem(res);
+              }}
               className="px-2.5 py-1 rounded bg-sky-600/90 hover:bg-sky-500 text-white text-xs font-mono font-bold cursor-pointer transition"
             >
               Whole System
             </button>
+            {trackedTarget && (
+              <div className="flex items-center gap-1.5 bg-indigo-950/90 text-indigo-200 border border-indigo-500/70 px-2 py-0.5 rounded text-[11px] font-mono shadow-sm">
+                <Crosshair className="w-3 h-3 text-indigo-400 animate-pulse" />
+                <span>
+                  Tracking{' '}
+                  {trackedTarget.kind === 'planet'
+                    ? `#${trackedTarget.bodyIdx + 1} (${res.zones[trackedTarget.zoneIdx]?.bodies[trackedTarget.bodyIdx]?.a.toFixed(2)} AU)`
+                    : trackedTarget.kind === 'moon'
+                    ? 'Moon'
+                    : 'Star'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTrackedTarget(null)}
+                  className="text-slate-400 hover:text-white ml-1 cursor-pointer"
+                  title="Unlock Camera Tracking"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
             {res.hierarchy.stars.map((st) => {
               const sPos = layout.starPos[st.label] || { x: 0, y: 0 };
               const sZone = res.zones.find((z) =>
@@ -1554,7 +1372,10 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                 <button
                   key={st.label}
                   type="button"
-                  onClick={() => focusCameraOn(sPos, maxPlanetA * 1.25)}
+                  onClick={() => {
+                    setTrackedTarget(null);
+                    focusCameraOn(sPos, maxPlanetA * 1.25);
+                  }}
                   className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-mono flex items-center gap-1.5 cursor-pointer transition"
                 >
                   <span
@@ -1578,7 +1399,10 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                   <button
                     key={z.title}
                     type="button"
-                    onClick={() => focusCameraOn(cPos, maxBodyA * 1.25)}
+                    onClick={() => {
+                      setTrackedTarget(null);
+                      focusCameraOn(cPos, maxBodyA * 1.25);
+                    }}
                     className="px-2.5 py-1 rounded bg-amber-950/60 hover:bg-amber-900/70 text-amber-200 border border-amber-700/60 text-xs font-mono cursor-pointer transition"
                   >
                     {z.title.replace(' (P-Type)', '')}
@@ -1587,12 +1411,132 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               })}
           </div>
 
-          {/* Dynamic Zoom Controls */}
-          <div className="flex items-center gap-2 text-xs font-mono">
+          {/* 3D Orientation Presets, Orbit Animation & Zoom Controls */}
+          <div className="flex flex-wrap items-center gap-1.5 text-xs font-mono">
+            {/* Play / Pause Live 3D Orbits */}
+            <button
+              type="button"
+              onClick={() => setOrreryPlaying((p) => !p)}
+              className={`px-2 py-1 rounded flex items-center gap-1 border cursor-pointer transition ${
+                orreryPlaying
+                  ? 'bg-emerald-600 text-white border-emerald-400 font-bold'
+                  : 'bg-slate-900 hover:bg-slate-800 text-emerald-300 border-slate-700'
+              }`}
+              title="Animate 3D Keplerian Orbits"
+            >
+              {orreryPlaying ? (
+                <Pause className="w-3 h-3" />
+              ) : (
+                <Play className="w-3 h-3" />
+              )}
+              {orreryPlaying ? 'Pause' : 'Orbit'}
+            </button>
+
+            {/* Keplerian Orbit Speed Slider (up to 10x slower) */}
+            <div
+              className="flex items-center gap-1.5 bg-slate-900 px-2 py-1 rounded border border-slate-700 text-[11px] font-mono"
+              title="Orbit Speed Slider: 0.1× is 10× slower than baseline"
+            >
+              <Gauge className="w-3 h-3 text-sky-400" />
+              <span className="text-slate-400 text-[10px]">Speed:</span>
+              <input
+                type="range"
+                min={0.1}
+                max={2.0}
+                step={0.05}
+                value={orrerySpeed}
+                onChange={(e) => setOrrerySpeed(parseFloat(e.target.value))}
+                className="w-16 accent-sky-400 cursor-pointer"
+              />
+              <span className="text-sky-300 min-w-[34px] text-right font-bold text-[10px]">
+                {orrerySpeed <= 0.1 ? '0.1× (10× slow)' : `${orrerySpeed.toFixed(1)}×`}
+              </span>
+            </div>
+
+            {/* Left-Drag Mode Toggle: 3D Rotate vs Pan */}
+            <div className="flex items-center bg-slate-950 p-0.5 rounded border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setOrreryDragMode('rotate')}
+                className={`px-2 py-0.5 rounded text-[11px] flex items-center gap-1 cursor-pointer ${
+                  orreryDragMode === 'rotate'
+                    ? 'bg-sky-600 text-white font-bold'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Left-Drag Rotates 3D Camera (Shift+Drag or Right-Drag Pans)"
+              >
+                <Compass className="w-3 h-3" />
+                3D Rotate
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrreryDragMode('pan')}
+                className={`px-2 py-0.5 rounded text-[11px] flex items-center gap-1 cursor-pointer ${
+                  orreryDragMode === 'pan'
+                    ? 'bg-sky-600 text-white font-bold'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Left-Drag Pans Camera"
+              >
+                <Move className="w-3 h-3" />
+                Pan
+              </button>
+            </div>
+
+            {/* 3D Camera Angle Presets */}
+            <button
+              type="button"
+              onClick={() => {
+                setOrreryYaw(-0.42);
+                setOrreryPitch(0.94);
+              }}
+              className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-sky-300 border border-slate-700 text-[11px] cursor-pointer"
+              title="3D Isometric Perspective (54° Pitch)"
+            >
+              3D Iso
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOrreryYaw(0);
+                setOrreryPitch(1.42);
+              }}
+              className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 text-[11px] cursor-pointer"
+              title="Edge-On Orbital Plane View (81° Pitch)"
+            >
+              Edge-On
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOrreryYaw(0);
+                setOrreryPitch(0);
+              }}
+              className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 text-[11px] cursor-pointer"
+              title="Top-Down Plan View (0° Pitch)"
+            >
+              Top-Down
+            </button>
+
+            {/* Inclination Vertical Exaggeration Toggle */}
+            <button
+              type="button"
+              onClick={() => setOrreryIncScale((s) => (s === 1 ? 4 : 1))}
+              className={`px-2 py-1 rounded border text-[11px] cursor-pointer ${
+                orreryIncScale > 1
+                  ? 'bg-indigo-950/80 text-indigo-300 border-indigo-600'
+                  : 'bg-slate-900 text-slate-400 border-slate-700'
+              }`}
+              title="Toggle Vertical Inclination Exaggeration (1× True vs 4× Exaggerated)"
+            >
+              Inc {orreryIncScale}×
+            </button>
+
+            {/* Dynamic Zoom Slider */}
             <button
               type="button"
               onClick={() =>
-                setOrreryPxPerAU((p) => clamp(p / 1.45, 0.05, 80000))
+                setOrreryPxPerAU((p) => clamp(p / 1.45, 0.05, 5000000))
               }
               className="p-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 cursor-pointer"
               title="Zoom Out"
@@ -1602,26 +1546,26 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             <input
               type="range"
               min={-1.3}
-              max={4.9}
+              max={6.7}
               step={0.02}
               value={log10(Math.max(0.05, orreryPxPerAU))}
               onChange={(e) =>
                 setOrreryPxPerAU(Math.pow(10, parseFloat(e.target.value)))
               }
-              className="w-28 accent-sky-400 cursor-pointer"
+              className="w-24 accent-sky-400 cursor-pointer"
               title="Proportional Zoom (px/AU)"
             />
             <button
               type="button"
               onClick={() =>
-                setOrreryPxPerAU((p) => clamp(p * 1.45, 0.05, 80000))
+                setOrreryPxPerAU((p) => clamp(p * 1.45, 0.05, 5000000))
               }
               className="p-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 cursor-pointer"
               title="Zoom In"
             >
               <ZoomIn className="w-3.5 h-3.5" />
             </button>
-            <span className="text-[11px] text-sky-400 min-w-[82px] text-right">
+            <span className="text-[11px] text-sky-400 min-w-[78px] text-right">
               {orreryPxPerAU >= 10
                 ? `${Math.round(orreryPxPerAU)} px/AU`
                 : `${orreryPxPerAU.toFixed(2)} px/AU`}
@@ -1629,7 +1573,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
           </div>
         </div>
 
-        {/* Interactive 2D Proportional SVG Canvas (Scroll to Zoom, Drag to Pan) */}
+        {/* Interactive 3D Proportional SVG Orrery (Drag to Rotate 3D, Shift+Drag/Right-Drag to Pan, Scroll to Zoom) */}
         <div className="relative w-full overflow-hidden rounded-xl border border-slate-800/80 bg-[#03060c]">
           <svg
             ref={orrerySvgRef}
@@ -1637,32 +1581,54 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             className={`w-full h-auto block select-none ${
               isDraggingOrrery ? 'cursor-grabbing' : 'cursor-grab'
             }`}
+            onContextMenu={(e) => e.preventDefault()}
             onMouseDown={(e) => {
-              if (e.button !== 0) return;
+              if (e.button !== 0 && e.button !== 2) return;
+              const action: 'rotate' | 'pan' =
+                e.button === 2 || e.shiftKey
+                  ? orreryDragMode === 'rotate'
+                    ? 'pan'
+                    : 'rotate'
+                  : orreryDragMode;
               setIsDraggingOrrery(true);
               dragStartRef.current = {
                 clientX: e.clientX,
                 clientY: e.clientY,
                 camX: orreryCamAU.x,
                 camY: orreryCamAU.y,
+                yaw: orreryYaw,
+                pitch: orreryPitch,
+                action,
               };
             }}
             onMouseMove={(e) => {
               if (!isDraggingOrrery || !dragStartRef.current || !orrerySvgRef.current)
                 return;
               const rect = orrerySvgRef.current.getBoundingClientRect();
-              const dxSvg =
-                ((e.clientX - dragStartRef.current.clientX) /
-                  Math.max(1, rect.width)) *
-                viewW;
-              const dySvg =
-                ((e.clientY - dragStartRef.current.clientY) /
-                  Math.max(1, rect.height)) *
-                viewH;
-              setOrreryCamAU({
-                x: dragStartRef.current.camX - dxSvg / orreryPxPerAU,
-                y: dragStartRef.current.camY - dySvg / orreryPxPerAU,
-              });
+              const dxPx = e.clientX - dragStartRef.current.clientX;
+              const dyPx = e.clientY - dragStartRef.current.clientY;
+
+              if (dragStartRef.current.action === 'rotate') {
+                setOrreryYaw(dragStartRef.current.yaw + dxPx * 0.0085);
+                setOrreryPitch(
+                  clamp(dragStartRef.current.pitch - dyPx * 0.0075, 0, 1.48)
+                );
+              } else {
+                setTrackedTarget(null);
+                const dxSvg = (dxPx / Math.max(1, rect.width)) * viewW;
+                const dySvg = (dyPx / Math.max(1, rect.height)) * viewH;
+                const dCamX = -dxSvg / orreryPxPerAU;
+                const dCamY =
+                  -dySvg /
+                  (orreryPxPerAU * Math.max(0.22, Math.cos(orreryPitch)));
+                // Unrotate pan vector by camera yaw into world ecliptic plane
+                const cY = Math.cos(orreryYaw);
+                const sY = Math.sin(orreryYaw);
+                setOrreryCamAU({
+                  x: dragStartRef.current.camX + dCamX * cY + dCamY * sY,
+                  y: dragStartRef.current.camY - dCamX * sY + dCamY * cY,
+                });
+              }
             }}
             onMouseUp={() => {
               setIsDraggingOrrery(false);
@@ -1676,53 +1642,43 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
           >
             <rect x={0} y={0} width={viewW} height={viewH} fill="#03060c" />
 
-            {/* 1. Binary / Trinary / Quadruple Barycentric Orbit Links */}
+            {/* 1. Binary / Trinary / Quadruple Barycentric 3D Orbit Links */}
             {layout.binaryLinks.map((bl) => {
-              const bx = toScreenX(bl.center.x);
-              const by = toScreenY(bl.center.y);
-              const p1x = toScreenX(bl.pos1.x);
-              const p1y = toScreenY(bl.pos1.y);
-              const p2x = toScreenX(bl.pos2.x);
-              const p2y = toScreenY(bl.pos2.y);
-              const r1Px = toScreenR(bl.r1);
-              const r2Px = toScreenR(bl.r2);
+              const bProj = project3D(bl.center.x, bl.center.y, 0);
+              const p1Proj = project3D(bl.pos1.x, bl.pos1.y, 0);
+              const p2Proj = project3D(bl.pos2.x, bl.pos2.y, 0);
+              const r1Px = bl.r1 * orreryPxPerAU;
+              const r2Px = bl.r2 * orreryPxPerAU;
 
               return (
                 <g key={`bin-link-${bl.splitIdx}`}>
-                  {/* Barycentric Stellar Orbits */}
                   {r1Px > 2 && r1Px < 60000 && (
-                    <circle
-                      cx={bx}
-                      cy={by}
-                      r={r1Px}
+                    <path
+                      d={build3DCirclePath(bl.center.x, bl.center.y, bl.r1, 56)}
                       fill="none"
-                      stroke="rgba(251, 191, 36, 0.25)"
+                      stroke="rgba(251, 191, 36, 0.28)"
                       strokeWidth={1.2}
                       strokeDasharray="6,4"
                     />
                   )}
                   {r2Px > 2 && r2Px < 60000 && (
-                    <circle
-                      cx={bx}
-                      cy={by}
-                      r={r2Px}
+                    <path
+                      d={build3DCirclePath(bl.center.x, bl.center.y, bl.r2, 56)}
                       fill="none"
-                      stroke="rgba(251, 191, 36, 0.25)"
+                      stroke="rgba(251, 191, 36, 0.28)"
                       strokeWidth={1.2}
                       strokeDasharray="6,4"
                     />
                   )}
-                  {/* Line connecting binary components through barycenter */}
                   <line
-                    x1={p1x}
-                    y1={p1y}
-                    x2={p2x}
-                    y2={p2y}
+                    x1={p1Proj.x}
+                    y1={p1Proj.y}
+                    x2={p2Proj.x}
+                    y2={p2Proj.y}
                     stroke="rgba(251, 191, 36, 0.35)"
                     strokeWidth={1}
                     strokeDasharray="3,3"
                   />
-                  {/* Clickable Barycenter Crosshair */}
                   <g
                     className="cursor-pointer"
                     onClick={(e) => {
@@ -1731,16 +1687,16 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                     }}
                   >
                     <circle
-                      cx={bx}
-                      cy={by}
-                      r={5}
+                      cx={bProj.x}
+                      cy={bProj.y}
+                      r={4.5}
                       fill="#1e293b"
                       stroke="#fbbf24"
                       strokeWidth={1.5}
                     />
                     <text
-                      x={bx}
-                      y={by - 8}
+                      x={bProj.x}
+                      y={bProj.y - 8}
                       fill="#fde68a"
                       fontSize={9}
                       fontFamily="monospace"
@@ -1753,11 +1709,9 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               );
             })}
 
-            {/* 2. All Planetary Zones Around All Stars & Barycenters Simultaneously */}
+            {/* 2. All Planetary Zones (3D Habitable Zone Annuli, 3D Snow Lines, 3D Asteroid Swarms & 3D Inclined Orbits) */}
             {res.zones.map((z, zIdx) => {
               const centerAU = layout.zoneCenters[zIdx] || { x: 0, y: 0 };
-              const zx = toScreenX(centerAU.x);
-              const zy = toScreenY(centerAU.y);
               const isCircumbinary = z.title.includes('Circumbinary');
 
               const hzInAU = 0.75 * Math.sqrt(z.lum);
@@ -1771,43 +1725,60 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                 ? z.a_snow >= z.a_in && z.a_snow <= z.a_out
                 : z.a_snow <= z.a_out;
 
-              const rHZIn = toScreenR(Math.max(z.a_in, hzInAU));
-              const rHZOut = toScreenR(Math.min(z.a_out, hzOutAU));
-              const rSnow = toScreenR(z.a_snow);
+              const hzInnerClampAU = Math.max(z.a_in, hzInAU);
+              const hzOuterClampAU = Math.min(z.a_out, hzOutAU);
+              const rHZInPx = hzInnerClampAU * orreryPxPerAU;
+              const rHZOutPx = hzOuterClampAU * orreryPxPerAU;
+              const rSnowPx = z.a_snow * orreryPxPerAU;
+
+              const snowLabelPt = project3D(
+                centerAU.x + z.a_snow * 0.707,
+                centerAU.y - z.a_snow * 0.707,
+                0
+              );
 
               return (
-                <g key={`zone-2d-${zIdx}`}>
-                  {/* Habitable Zone Proportional Annulus */}
+                <g key={`zone-3d-${zIdx}`}>
+                  {/* 3D Habitable Zone Shaded Annulus */}
                   {showHZ &&
-                    rHZOut > rHZIn &&
-                    rHZOut > 3 &&
-                    rHZIn < 60000 && (
-                      <circle
-                        cx={zx}
-                        cy={zy}
-                        r={(rHZIn + rHZOut) / 2}
-                        fill="none"
-                        stroke="rgba(16, 185, 129, 0.16)"
-                        strokeWidth={Math.max(2, rHZOut - rHZIn)}
+                    rHZOutPx > rHZInPx &&
+                    rHZOutPx > 3 &&
+                    rHZInPx < 60000 && (
+                      <path
+                        d={`${build3DCirclePath(
+                          centerAU.x,
+                          centerAU.y,
+                          hzOuterClampAU,
+                          56,
+                          false
+                        )} ${build3DCirclePath(
+                          centerAU.x,
+                          centerAU.y,
+                          hzInnerClampAU,
+                          56,
+                          true
+                        )}`}
+                        fill="rgba(16, 185, 129, 0.14)"
+                        fillRule="evenodd"
+                        stroke="rgba(16, 185, 129, 0.35)"
+                        strokeWidth={0.9}
                       />
                     )}
 
-                  {/* Snow Line Proportional Circle */}
-                  {showSnow && rSnow > 4 && rSnow < 60000 && (
+                  {/* 3D Snow Line Ring */}
+                  {showSnow && rSnowPx > 4 && rSnowPx < 60000 && (
                     <g>
-                      <circle
-                        cx={zx}
-                        cy={zy}
-                        r={rSnow}
+                      <path
+                        d={build3DCirclePath(centerAU.x, centerAU.y, z.a_snow, 56)}
                         fill="none"
                         stroke="rgba(56, 189, 248, 0.55)"
                         strokeWidth={1.2}
                         strokeDasharray="5,5"
                       />
-                      {rSnow > 28 && rSnow < 2000 && (
+                      {rSnowPx > 28 && rSnowPx < 2000 && (
                         <text
-                          x={zx + rSnow * 0.707 + 4}
-                          y={zy - rSnow * 0.707 - 4}
+                          x={snowLabelPt.x + 4}
+                          y={snowLabelPt.y - 4}
                           fill="#38bdf8"
                           fontSize={8.5}
                           fontFamily="monospace"
@@ -1818,268 +1789,674 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                     </g>
                   )}
 
-                  {/* Planets & Belts on True Proportional Orbits */}
-                  {z.bodies.map((b, bIdx) => {
-                    const rOrbitPx = toScreenR(b.a);
-                    if (rOrbitPx < 1.5 || rOrbitPx > 90000) return null;
-
-                    const theta =
-                      -Math.PI / 3 + bIdx * 2.39996 + zIdx * 0.85;
-
-                    if (b.kind === 'belt') {
-                      const beltWidthPx = Math.max(
-                        3,
-                        toScreenR(b.beltWidth * 2)
-                      );
-                      const bxPos = zx + rOrbitPx * Math.cos(theta);
-                      const byPos = zy + rOrbitPx * Math.sin(theta);
-                      return (
-                        <g
-                          key={`body-${zIdx}-${bIdx}`}
-                          className="cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedEntity({
-                              kind: 'belt',
-                              zoneIdx: zIdx,
-                              bodyIdx: bIdx,
-                            });
-                          }}
-                        >
-                          <circle
-                            cx={zx}
-                            cy={zy}
-                            r={rOrbitPx}
-                            fill="none"
-                            stroke="rgba(148, 163, 184, 0.28)"
-                            strokeWidth={beltWidthPx}
-                            strokeDasharray="3,6"
-                          />
-                          {rOrbitPx > 22 && (
-                            <text
-                              x={bxPos}
-                              y={byPos}
-                              fill="#94a3b8"
-                              fontSize={8.5}
-                              fontFamily="monospace"
-                              textAnchor="middle"
-                            >
-                              #{bIdx + 1} ({b.a.toFixed(2)} AU)
-                            </text>
-                          )}
-                        </g>
-                      );
-                    }
-
-                    // True Keplerian Eccentricity Ellipse in Proportional AU Space
-                    const eVal = clamp(b.e, 0, 0.92);
-                    const rxPx = rOrbitPx;
-                    const ryPx = rOrbitPx * Math.sqrt(1 - eVal * eVal);
-                    const focusOffsetPx = rOrbitPx * eVal;
-                    const rAtThetaPx =
-                      (rOrbitPx * (1 - eVal * eVal)) /
-                      (1 + eVal * Math.cos(theta));
-                    const px = zx + rAtThetaPx * Math.cos(theta);
-                    const py = zy + rAtThetaPx * Math.sin(theta);
-
-                    const pRad = clamp(
-                      5.5 + (3.2 * Math.log(Math.max(0.5, b.radiusEarth))) / Math.LN2,
-                      5.5,
-                      15
-                    );
-                    const zoneStar2D =
+                  {/* 3D Orbit Curves, 3D Asteroid Belt Swarms & Depth-Sorted 3D Planet Globes */}
+                  {(() => {
+                    // Find host star for this zone:
+                    const zoneStar =
                       res.hierarchy.stars.find((s) =>
                         z.title.includes(`Star ${s.label}`)
                       ) || res.hierarchy.stars[0];
-                    const planetIcon2DUrl = getProceduralPlanetIconDataUrl(
-                      b,
-                      null,
-                      zoneStar2D?.colorHex || '#fff4e6',
-                      zoneStar2D?.Teff || 5778,
-                      0,
-                      56
+                    const starBaseRadAU = Math.max(
+                      0.012,
+                      Math.min(0.35, 0.035 * Math.sqrt(Math.max(0.08, zoneStar?.radius || 1.0)))
                     );
-                    const planet2DImgSize = b.rings ? pRad * 3.85 : pRad * 2.75;
-                    const isPlanetSel =
-                      selectedEntity?.kind === 'planet' &&
-                      selectedEntity.zoneIdx === zIdx &&
-                      selectedEntity.bodyIdx === bIdx;
+                    const innermostBodyPeriAU = z.bodies[0]
+                      ? z.bodies[0].a *
+                        (1 - (z.bodies[0].kind === 'planet' ? z.bodies[0].e : 0))
+                      : z.a_in;
+                    const maxStarAU = Math.max(0.008, innermostBodyPeriAU * 0.42);
+                    const starRadAU = Math.min(starBaseRadAU, maxStarAU);
+                    const starProj = project3D(centerAU.x, centerAU.y, 0);
+                    const starPxRad = Math.max(
+                      4.5,
+                      starRadAU * orreryPxPerAU * starProj.scale
+                    );
 
-                    return (
-                      <g key={`body-${zIdx}-${bIdx}`}>
-                        {/* Proportional Orbit Path */}
-                        <ellipse
-                          cx={zx - focusOffsetPx}
-                          cy={zy}
-                          rx={rxPx}
-                          ry={ryPx}
-                          fill="none"
-                          stroke={
-                            isPlanetSel
-                              ? '#38bdf8'
-                              : isCircumbinary
-                              ? 'rgba(251, 191, 36, 0.28)'
-                              : 'rgba(51, 65, 85, 0.85)'
-                          }
-                          strokeWidth={isPlanetSel ? 1.8 : 1.1}
-                        />
+                    // Find closest planet in this zone:
+                    const closestPlanet = z.bodies.find(
+                      (body): body is RealisticPlanetBody => body.kind === 'planet'
+                    );
+                    const closestPhysRadEarth = Math.max(
+                      0.05,
+                      closestPlanet ? closestPlanet.radiusEarth : 1.0
+                    );
+                    const closestPeriAU = closestPlanet
+                      ? closestPlanet.a * (1 - closestPlanet.e)
+                      : z.a_in;
+                    const baselineClosestRadAU = Math.min(
+                      0.08,
+                      Math.max(0.012, 0.04 * closestPeriAU)
+                    );
 
-                        {/* Moons around planet when sufficiently zoomed in */}
-                        {rOrbitPx > 28 &&
-                          b.moons.map((m, mIdx) => {
-                            const mAngle =
-                              theta +
-                              (mIdx * Math.PI * 2) / Math.max(1, b.moons.length);
-                            const mDist = pRad + 8 + mIdx * 5.2;
-                            const mxPos = px + mDist * Math.cos(mAngle);
-                            const myPos = py + mDist * Math.sin(mAngle);
-                            const moonIcon2DUrl = getProceduralPlanetIconDataUrl(
-                              b,
-                              m,
-                              zoneStar2D?.colorHex || '#fff4e6',
-                              zoneStar2D?.Teff || 5778,
-                              mIdx,
-                              36
-                            );
-                            const moon2DImgSize = 9.5;
-                            return (
-                              <g
-                                key={m.id || mIdx}
-                                className="cursor-pointer"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedEntity({
-                                    kind: 'moon',
+                    return z.bodies.map((b, bIdx) => {
+                      const rOrbitPx = b.a * orreryPxPerAU;
+                      if (rOrbitPx < 1.2) return null;
+
+                      const meanMotion = 1.0 / Math.max(0.02, Math.pow(b.a, 1.5));
+                      const theta =
+                        -Math.PI / 3 +
+                        bIdx * 2.39996 +
+                        zIdx * 0.85 +
+                        orreryTimeYr * meanMotion * Math.PI * 2;
+
+                      if (b.kind === 'belt') {
+                        if (rOrbitPx > 90000) return null;
+                        const beltHalfWidthAU = Math.max(b.a * 0.06, b.beltWidth);
+                        const beltHitWidthPx = clamp(
+                          beltHalfWidthAU * 2 * orreryPxPerAU,
+                          10,
+                          80
+                        );
+                        const beltInc = b.incDeg ?? 1.8;
+                        const beltNode = ((b.omegaNodeDeg ?? (bIdx * 15)) * Math.PI) / 180;
+                        const beltIncRad = (clamp(beltInc * orreryIncScale, 0, 75) * Math.PI) / 180;
+
+                        const beltLblPos3 = evalKepler3D(
+                          centerAU,
+                          b.a,
+                          0.02,
+                          beltIncRad,
+                          beltNode,
+                          0,
+                          theta
+                        );
+                        const bLblPt = project3D(beltLblPos3.wx, beltLblPos3.wy, beltLblPos3.wz);
+                        const isIceBelt =
+                          b.role.toLowerCase().includes('kuiper') ||
+                          b.role.toLowerCase().includes('icy') ||
+                          b.a >= z.a_snow;
+                        const rockPalette = isIceBelt
+                          ? ['#cbd5e1', '#94a3b8', '#bae6fd', '#64748b']
+                          : ['#a8a29e', '#78716c', '#cbd5e1', '#94a3b8'];
+
+                        const numAsteroids = 165;
+                        const asteroidNodes: React.ReactNode[] = [];
+                        for (let k = 0; k < numAsteroids; k++) {
+                          // Deterministic pseudo-random radial, vertical & angular scatter
+                          const h1 =
+                            Math.sin(k * 127.1 + bIdx * 311.7 + zIdx * 74.7) *
+                            43758.5453;
+                          const u1 = h1 - Math.floor(h1);
+                          const h2 =
+                            Math.sin(k * 269.5 + bIdx * 183.3 + zIdx * 19.1) *
+                            43758.5453;
+                          const u2 = h2 - Math.floor(h2);
+                          const h3 =
+                            Math.sin(k * 419.2 + bIdx * 97.1 + zIdx * 53.3) *
+                            43758.5453;
+                          const u3 = h3 - Math.floor(h3);
+
+                          // Radial offset concentrated near center of belt (triangular distribution)
+                          const radialFrac = (u1 + u2 - 1.0) * 0.95;
+                          const aAst = Math.max(
+                            0.02,
+                            b.a + radialFrac * beltHalfWidthAU
+                          );
+                          const astMeanMotion =
+                            1.0 / Math.max(0.02, Math.pow(aAst, 1.5));
+                          const astAngle =
+                            (k / numAsteroids) * Math.PI * 2 +
+                            (u3 - 0.5) * 0.08 +
+                            orreryTimeYr * astMeanMotion * Math.PI * 2;
+
+                          // 3D vertical scatter above/below orbital plane aligned with belt inclination
+                          const astPos3 = evalKepler3D(
+                            centerAU,
+                            aAst,
+                            0.02,
+                            beltIncRad,
+                            beltNode,
+                            0,
+                            astAngle
+                          );
+                          const zScatterAU = astPos3.wz + (u2 - 0.5) * 0.04 * aAst * Math.sin(astAngle + k * 0.7);
+                          const astProj = project3D(astPos3.wx, astPos3.wy, zScatterAU);
+
+                          // Small, crisp asteroid rock size that scales gently with belt zoom
+                          const beltSpanPx = beltHalfWidthAU * orreryPxPerAU;
+                          const baseRockSz = 0.35 + Math.pow(u3, 2.6) * 0.58;
+                          const rockRad = clamp(
+                            baseRockSz *
+                              clamp(Math.pow(beltSpanPx / 18, 0.35), 0.55, 1.55) *
+                              astProj.scale,
+                            0.35,
+                            1.4
+                          );
+                          const col = rockPalette[k % rockPalette.length];
+                          const rotDeg = Math.round(u1 * 360 + orreryTimeYr * 90);
+                          const rx = rockRad * (1.12 + (k % 3) * 0.18);
+                          const ry = rockRad * (0.72 + ((k + 1) % 3) * 0.12);
+
+                          asteroidNodes.push(
+                            <ellipse
+                              key={k}
+                              cx={astProj.x}
+                              cy={astProj.y}
+                              rx={rx}
+                              ry={ry}
+                              transform={`rotate(${rotDeg} ${astProj.x.toFixed(1)} ${astProj.y.toFixed(1)})`}
+                              fill={col}
+                              fillOpacity={0.5 + u3 * 0.4}
+                            />
+                          );
+                        }
+
+                        return (
+                          <g
+                            key={`belt-3d-${zIdx}-${bIdx}`}
+                            className="cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedEntity({
+                                kind: 'belt',
+                                zoneIdx: zIdx,
+                                bodyIdx: bIdx,
+                              });
+                            }}
+                          >
+                            {/* Subtle diffuse zodiacal dust glow & wide transparent click hit-ring */}
+                            <path
+                              d={buildKepler3DPath(
+                                centerAU,
+                                b.a,
+                                0.02,
+                                beltIncRad,
+                                beltNode,
+                                0,
+                                60
+                              )}
+                              fill="none"
+                              stroke={
+                                isIceBelt
+                                  ? 'rgba(186, 230, 253, 0.04)'
+                                  : 'rgba(168, 162, 158, 0.04)'
+                              }
+                              strokeWidth={beltHitWidthPx}
+                            />
+                            {/* 165 Individual Small 3D Asteroid Specks */}
+                            {asteroidNodes}
+                            {rOrbitPx > 36 && (
+                              <text
+                                x={bLblPt.x}
+                                y={bLblPt.y - 6}
+                                fill="#94a3b8"
+                                fontSize={8.5}
+                                fontFamily="monospace"
+                                textAnchor="middle"
+                              >
+                                #{bIdx + 1} ({b.a.toFixed(2)} AU)
+                              </text>
+                            )}
+                          </g>
+                        );
+                      }
+
+                      // 3D Keplerian Inclined Orbit Geometry (Using physically generated inclination, ascending node & periapsis)
+                      const rawIncDeg = b.incDeg ?? clamp(1.2 + b.e * 8, 0.5, 12);
+                      const incRad =
+                        (clamp(rawIncDeg * orreryIncScale, 0, 75) * Math.PI) /
+                        180;
+                      const omegaNode = ((b.omegaNodeDeg ?? (bIdx * 15)) * Math.PI) / 180;
+                      const argPeri = ((b.argPeriDeg ?? 0) * Math.PI) / 180;
+
+                      const orbitPath3D =
+                        rOrbitPx <= 120000
+                          ? buildKepler3DPath(
+                              centerAU,
+                              b.a,
+                              b.e,
+                              incRad,
+                              omegaNode,
+                              argPeri,
+                              64
+                            )
+                          : '';
+                      const pos3 = evalKepler3D(
+                        centerAU,
+                        b.a,
+                        b.e,
+                        incRad,
+                        omegaNode,
+                        argPeri,
+                        theta
+                      );
+                      const pProj = project3D(pos3.wx, pos3.wy, pos3.wz);
+
+                      // Calculate distance to previous and next orbital paths (clearance):
+                      let deltaInnerAU: number;
+                      if (bIdx === 0) {
+                        // Distance from innermost planet periapsis to host star surface
+                        const periAU = b.a * (1 - b.e);
+                        deltaInnerAU = Math.max(0.003, periAU - starRadAU);
+                      } else {
+                        const prevBody = z.bodies[bIdx - 1];
+                        const prevApoAU =
+                          prevBody.a *
+                          (1 + (prevBody.kind === 'planet' ? prevBody.e : 0));
+                        const currPeriAU = b.a * (1 - b.e);
+                        deltaInnerAU = Math.max(0.003, currPeriAU - prevApoAU);
+                      }
+
+                      let deltaOuterAU: number;
+                      if (bIdx === z.bodies.length - 1) {
+                        deltaOuterAU = Math.max(0.008, b.a * 0.32);
+                      } else {
+                        const nextBody = z.bodies[bIdx + 1];
+                        const nextPeriAU =
+                          nextBody.a *
+                          (1 - (nextBody.kind === 'planet' ? nextBody.e : 0));
+                        const currApoAU = b.a * (1 + b.e);
+                        deltaOuterAU = Math.max(0.003, nextPeriAU - currApoAU);
+                      }
+
+                      // 0.36 clearance guarantees adjacent planets can never touch
+                      // and a planet can never reach its neighbor's orbit line!
+                      const laneClearanceAU = Math.min(deltaInnerAU, deltaOuterAU);
+                      const maxOrbitClearanceAU = 0.36 * laneClearanceAU;
+
+                      // Visible viewport span in AU (used to detect when solo on screen)
+                      const viewSpanAU = viewW / Math.max(1e-4, orreryPxPerAU);
+                      const soloThresholdAU = laneClearanceAU * 1.8;
+                      const soloRatio = clamp(
+                        (soloThresholdAU - viewSpanAU) /
+                          Math.max(0.001, soloThresholdAU * 0.5),
+                        0,
+                        1
+                      );
+
+                      // Scale factor is sqrt(relative radius) relative to closest planet
+                      const relRadius = Math.max(
+                        0.0001,
+                        b.radiusEarth / closestPhysRadEarth
+                      );
+                      const rawPlanetRadAU =
+                        baselineClosestRadAU * Math.sqrt(relRadius);
+
+                      // When multiple bodies are on screen (soloRatio = 0):
+                      // 1. Planet visual radius CANNOT exceed maxOrbitClearanceAU (never crosses neighbor orbit or touches neighbor planet)
+                      // 2. Planet visual radius CANNOT exceed starRadAU * 0.88 (planets shall never render larger than their star)
+                      const nonSoloMaxAU = Math.min(
+                        maxOrbitClearanceAU,
+                        starRadAU * 0.88
+                      );
+                      // Absolute hard cap: no planet visual diameter > 1.0 AU (radius <= 0.5 AU) at all times
+                      const soloMaxAU = 0.5;
+
+                      // Interpolate allowed visual radius in AU based on soloRatio:
+                      const effectiveMaxRadAU = lerp(
+                        nonSoloMaxAU,
+                        soloMaxAU,
+                        soloRatio
+                      );
+                      const visualPlanetRadAU = Math.min(
+                        effectiveMaxRadAU,
+                        rawPlanetRadAU
+                      );
+
+                      // Convert to screen pixels:
+                      const logicalPlanetRadPx =
+                        visualPlanetRadAU * orreryPxPerAU;
+                      const maxAllowedPx =
+                        effectiveMaxRadAU * orreryPxPerAU * pProj.scale;
+                      const maxStarCapPx = lerp(
+                        starPxRad * 0.88,
+                        5000,
+                        soloRatio
+                      );
+
+                      // Compute pRad:
+                      let pRad = Math.min(
+                        maxAllowedPx,
+                        Math.min(maxStarCapPx, logicalPlanetRadPx * pProj.scale)
+                      );
+                      const minFloorPx = Math.min(
+                        2.0,
+                        maxOrbitClearanceAU * orreryPxPerAU * pProj.scale
+                      );
+                      pRad = Math.max(minFloorPx, pRad);
+
+                      const isPlanetTracked =
+                        trackedTarget?.kind === 'planet' &&
+                        trackedTarget.zoneIdx === zIdx &&
+                        trackedTarget.bodyIdx === bIdx;
+                      const isPlanetDossier =
+                        selectedEntity?.kind === 'planet' &&
+                        selectedEntity.zoneIdx === zIdx &&
+                        selectedEntity.bodyIdx === bIdx;
+                      const isPlanetSel = isPlanetTracked || isPlanetDossier;
+
+                      // Actual Procedural Planet Texture from Planet Info View:
+                      const planetIconUrl = getProceduralPlanetIconDataUrl(
+                        b,
+                        null,
+                        zoneStar?.colorHex || '#fff4e6',
+                        zoneStar?.Teff || 5778,
+                        0,
+                        144,
+                        0,
+                        0
+                      );
+                      const planetImgSize = b.rings
+                        ? pRad / 0.33
+                        : pRad / 0.44;
+
+                      // Push planet & moon 3D globes into depth-sorted queue
+                      depthNodes.push({
+                        zCam: pProj.zCam,
+                        key: `planet-node-${zIdx}-${bIdx}`,
+                        node: (
+                          <g key={`planet-fg-${zIdx}-${bIdx}`}>
+                            {/* Moons around planet in 3D: procedural textures from info view */}
+                            {pRad > 5 &&
+                              b.moons.map((m, mIdx) => {
+                                const mSpeed = 12 + mIdx * 5;
+                                const mAngle =
+                                  theta +
+                                  (mIdx * Math.PI * 2) /
+                                    Math.max(1, b.moons.length) +
+                                  orreryTimeYr * mSpeed;
+                                const mDist =
+                                  pRad +
+                                  Math.max(4, pRad * (0.55 + mIdx * 0.38));
+                                const mxPos = pProj.x + mDist * Math.cos(mAngle);
+                                const myPos =
+                                  pProj.y +
+                                  mDist *
+                                    Math.sin(mAngle) *
+                                    Math.max(
+                                      0.32,
+                                      Math.cos(orreryPitch * 0.78)
+                                    );
+                                const relMoonRadius = Math.max(
+                                  0.00001,
+                                  m.radiusKm / 6371 / closestPhysRadEarth
+                                );
+                                const moonRadAU = Math.min(
+                                  0.04,
+                                  visualPlanetRadAU *
+                                    0.35 *
+                                    Math.sqrt(relMoonRadius)
+                                );
+                                const mRad = Math.max(
+                                  0.8,
+                                  Math.min(
+                                    pRad * 0.3,
+                                    moonRadAU * orreryPxPerAU * pProj.scale
+                                  )
+                                );
+                                const moonIconUrl =
+                                  getProceduralPlanetIconDataUrl(
+                                    b,
+                                    m,
+                                    zoneStar?.colorHex || '#fff4e6',
+                                    zoneStar?.Teff || 5778,
+                                    mIdx,
+                                    72,
+                                    0,
+                                    0
+                                  );
+                                const moonImgSize = mRad / 0.44;
+
+                                return (
+                                  <g
+                                    key={m.id || mIdx}
+                                    className="cursor-pointer"
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSelectBody(
+                                        {
+                                          kind: 'moon',
+                                          zoneIdx: zIdx,
+                                          bodyIdx: bIdx,
+                                          moonIdx: mIdx,
+                                        },
+                                        e
+                                      );
+                                    }}
+                                  >
+                                    <title>{`${m.name} (${m.moonClass})\n• Click: View Details\n• Shift+Click: Lock Camera & Track Orbit`}</title>
+                                    <ellipse
+                                      cx={pProj.x}
+                                      cy={pProj.y}
+                                      rx={mDist}
+                                      ry={
+                                        mDist *
+                                        Math.max(
+                                          0.32,
+                                          Math.cos(orreryPitch * 0.78)
+                                        )
+                                      }
+                                      fill="none"
+                                      stroke="rgba(100,116,139,0.28)"
+                                      strokeWidth={0.7}
+                                      strokeDasharray="2,2"
+                                    />
+                                    <g
+                                      transform={`translate(${mxPos.toFixed(1)}, ${myPos.toFixed(1)})`}
+                                    >
+                                      <image
+                                        href={moonIconUrl}
+                                        x={-moonImgSize / 2}
+                                        y={-moonImgSize / 2}
+                                        width={moonImgSize}
+                                        height={moonImgSize}
+                                        preserveAspectRatio="xMidYMid meet"
+                                      />
+                                    </g>
+                                  </g>
+                                );
+                              })}
+
+                            {/* Clickable Dynamically-Sized Procedural Planet Globe & Label */}
+                            <g
+                              className="cursor-pointer"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSelectBody(
+                                  {
+                                    kind: 'planet',
                                     zoneIdx: zIdx,
                                     bodyIdx: bIdx,
-                                    moonIdx: mIdx,
-                                  });
-                                }}
-                              >
+                                  },
+                                  e
+                                );
+                              }}
+                            >
+                              <title>{`Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}\n• Click: View Planet Details\n• Shift+Click: Lock Camera & Track Orbit`}</title>
+                              {/* Invisible click target for easy selection */}
+                              <circle
+                                cx={pProj.x}
+                                cy={pProj.y}
+                                r={Math.max(8, pRad + 3)}
+                                fill="transparent"
+                              />
+
+                              {/* Planet Selection Halo */}
+                              {isPlanetSel && (
                                 <circle
-                                  cx={px}
-                                  cy={py}
-                                  r={mDist}
+                                  cx={pProj.x}
+                                  cy={pProj.y}
+                                  r={pRad + 3.5}
                                   fill="none"
-                                  stroke="rgba(100,116,139,0.32)"
-                                  strokeDasharray="2,2"
+                                  stroke="#38bdf8"
+                                  strokeWidth={1.8}
                                 />
+                              )}
+
+                              {/* Procedural Planet Globe Texture (from Planet Info View) */}
+                              <g
+                                transform={`translate(${pProj.x.toFixed(1)}, ${pProj.y.toFixed(1)})`}
+                              >
                                 <image
-                                  href={moonIcon2DUrl}
-                                  x={mxPos - moon2DImgSize / 2}
-                                  y={myPos - moon2DImgSize / 2}
-                                  width={moon2DImgSize}
-                                  height={moon2DImgSize}
+                                  href={planetIconUrl}
+                                  x={-planetImgSize / 2}
+                                  y={-planetImgSize / 2}
+                                  width={planetImgSize}
+                                  height={planetImgSize}
+                                  preserveAspectRatio="xMidYMid meet"
                                 />
                               </g>
-                            );
-                          })}
 
-                        {/* Clickable Planet Marker & Minimal Label (#num + 2-decimal AU) */}
-                        <g
-                          className="cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedEntity({
-                              kind: 'planet',
-                              zoneIdx: zIdx,
-                              bodyIdx: bIdx,
-                            });
-                          }}
-                        >
-                          {isPlanetSel && (
-                            <circle
-                              cx={px}
-                              cy={py}
-                              r={pRad + 3}
-                              fill="none"
-                              stroke="#ffffff"
-                              strokeWidth={1.6}
-                            />
-                          )}
-                          <image
-                            href={planetIcon2DUrl}
-                            x={px - planet2DImgSize / 2}
-                            y={py - planet2DImgSize / 2}
-                            width={planet2DImgSize}
-                            height={planet2DImgSize}
+                              {/* Planet Label (#num and AU) */}
+                              {rOrbitPx > 24 && (
+                                <text
+                                  x={pProj.x}
+                                  y={pProj.y - pRad - 4}
+                                  fill="#f8fafc"
+                                  fontSize={clamp(8 + pRad * 0.08, 8, 13)}
+                                  fontWeight="bold"
+                                  fontFamily="monospace"
+                                  textAnchor="middle"
+                                >
+                                  #{bIdx + 1} ({b.a.toFixed(2)} AU)
+                                </text>
+                              )}
+                            </g>
+                          </g>
+                        ),
+                      });
+
+                      if (!orbitPath3D) return null;
+                      return (
+                        <g key={`orbit-bg-${zIdx}-${bIdx}`}>
+                          {/* 3D Keplerian Inclined Orbit Path */}
+                          <path
+                            d={orbitPath3D}
+                            fill="none"
+                            stroke={
+                              isPlanetSel
+                                ? '#38bdf8'
+                                : isCircumbinary
+                                ? 'rgba(251, 191, 36, 0.32)'
+                                : 'rgba(51, 65, 85, 0.88)'
+                            }
+                            strokeWidth={isPlanetSel ? 1.8 : 1.15}
                           />
-                          {rOrbitPx > 14 && (
-                            <text
-                              x={px}
-                              y={py - pRad - 5}
-                              fill="#f8fafc"
-                              fontSize={9.5}
-                              fontWeight="bold"
-                              fontFamily="monospace"
-                              textAnchor="middle"
-                            >
-                              #{bIdx + 1} ({b.a.toFixed(2)} AU)
-                            </text>
-                          )}
                         </g>
-                      </g>
-                    );
-                  })}
+                      );
+                    });
+                  })()}
                 </g>
               );
             })}
 
-            {/* 3. All Stars Rendered on Top at Their Exact 2D Coordinates */}
-            {res.hierarchy.stars.map((st, sIdx) => {
-              const pos = layout.starPos[st.label] || { x: 0, y: 0 };
-              const sx = toScreenX(pos.x);
-              const sy = toScreenY(pos.y);
-              const sRad = clamp(8 + 2.5 * log10(Math.max(0.08, st.mass)), 6.5, 14);
+            {/* 3. Push All Stars into 3D Depth-Sorted Render Queue (Scaled Below Closest Planet Orbit, No Max Cap) */}
+            {(() => {
+              res.hierarchy.stars.forEach((st, sIdx) => {
+                const pos = layout.starPos[st.label] || { x: 0, y: 0 };
+                const sProj = project3D(pos.x, pos.y, 0);
 
-              return (
-                <g
-                  key={`star-2d-${st.label}`}
-                  className="cursor-pointer"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedEntity({ kind: 'star', starIdx: sIdx });
-                  }}
-                >
-                  <circle
-                    cx={sx}
-                    cy={sy}
-                    r={sRad * 1.9}
-                    fill={st.colorHex}
-                    fillOpacity={0.22}
-                  />
-                  <circle
-                    cx={sx}
-                    cy={sy}
-                    r={sRad}
-                    fill={st.colorHex}
-                    stroke="#ffffff"
-                    strokeWidth={1.5}
-                  />
-                  <text
-                    x={sx}
-                    y={sy + sRad + 12}
-                    fill="#ffffff"
-                    fontSize={10}
-                    fontWeight="bold"
-                    fontFamily="monospace"
-                    textAnchor="middle"
-                  >
-                    Star {st.label} ({st.spectralType})
-                  </text>
-                </g>
-              );
-            })}
+                // Find innermost orbit around this star so the star never overlaps its closest planet
+                const starZone = res.zones.find((z) =>
+                  z.title.startsWith(`Star ${st.label} `)
+                );
+                const firstBody = starZone?.bodies[0];
+                const minOrbitAU = firstBody
+                  ? firstBody.a *
+                    (1 - (firstBody.kind === 'planet' ? firstBody.e : 0))
+                  : res.hierarchy.splits[0]
+                  ? res.hierarchy.splits[0].a_AU * 0.35
+                  : 0.25;
+                // Star visual radius in AU: expands with zoom and scales with physical star radius
+                const starBaseRadAU = Math.max(
+                  0.012,
+                  Math.min(0.35, 0.035 * Math.sqrt(Math.max(0.08, st.radius || 1.0)))
+                );
+                const maxStarAU = Math.max(0.008, minOrbitAU * 0.42);
+                const starRadAU = Math.min(starBaseRadAU, maxStarAU);
 
-            {/* 4. Dynamic Physical Scale Bar & Controls Hint Overlay */}
-            <g transform={`translate(20, ${viewH - 36})`}>
+                // Star expands dynamically as you zoom in:
+                const sRad = Math.max(
+                  5.0,
+                  starRadAU * orreryPxPerAU * sProj.scale
+                );
+                const starGradId = `star-3d-sphere-${sIdx}`;
+
+                depthNodes.push({
+                  zCam: sProj.zCam,
+                  key: `star-3d-${st.label}`,
+                  node: (
+                    <g
+                      key={`star-3d-${st.label}`}
+                      className="cursor-pointer"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectBody({ kind: 'star', starIdx: sIdx }, e);
+                      }}
+                    >
+                      <title>{`Star ${st.label} (${st.spectralType})\n• Click: View Star Dossier\n• Shift+Click: Center Camera`}</title>
+                      <defs>
+                        <radialGradient
+                          id={starGradId}
+                          cx="35%"
+                          cy="35%"
+                          r="65%"
+                        >
+                          <stop offset="0%" stopColor="#ffffff" />
+                          <stop offset="45%" stopColor={st.colorHex} />
+                          <stop
+                            offset="100%"
+                            stopColor={st.colorHex}
+                            stopOpacity="0.88"
+                          />
+                        </radialGradient>
+                      </defs>
+                      {/* Corona halo glow */}
+                      <circle
+                        cx={sProj.x}
+                        cy={sProj.y}
+                        r={sRad * 2.2}
+                        fill={st.colorHex}
+                        fillOpacity={0.16}
+                      />
+                      <circle
+                        cx={sProj.x}
+                        cy={sProj.y}
+                        r={sRad * 1.4}
+                        fill={st.colorHex}
+                        fillOpacity={0.3}
+                      />
+                      <circle
+                        cx={sProj.x}
+                        cy={sProj.y}
+                        r={sRad}
+                        fill={`url(#${starGradId})`}
+                        stroke="#ffffff"
+                        strokeWidth={clamp(sRad * 0.08, 0.7, 2.2)}
+                      />
+                      <text
+                        x={sProj.x}
+                        y={sProj.y + sRad + 10}
+                        fill="#ffffff"
+                        fontSize={clamp(8 + sRad * 0.1, 8, 10.5)}
+                        fontWeight="bold"
+                        fontFamily="monospace"
+                        textAnchor="middle"
+                      >
+                        Star {st.label} ({st.spectralType})
+                      </text>
+                    </g>
+                  ),
+                });
+              });
+
+              // Sort back-to-front (largest zCam is furthest away, smallest zCam is closest to camera)
+              depthNodes.sort((a, b) => b.zCam - a.zCam);
+              return depthNodes.map((d) => d.node);
+            })()}
+
+            {/* 4. Dynamic Physical Scale Bar & 3D Camera Telemetry Overlay */}
+            <g transform={`translate(20, ${viewH - 42})`}>
               <rect
                 x={-8}
                 y={-18}
-                width={Math.max(150, barPx + 24)}
-                height={42}
+                width={Math.max(255, barPx + 28)}
+                height={50}
                 rx={6}
-                fill="rgba(10, 15, 26, 0.85)"
+                fill="rgba(10, 15, 26, 0.88)"
                 stroke="#1e293b"
               />
               <line
@@ -2113,11 +2490,12 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               <text
                 x={4}
                 y={19}
-                fill="#64748b"
+                fill="#94a3b8"
                 fontSize={8.5}
                 fontFamily="monospace"
               >
-                Scroll to zoom · Drag to pan
+                3D Pitch {Math.round((orreryPitch * 180) / Math.PI)}° · Yaw{' '}
+                {Math.round(((orreryYaw * 180) / Math.PI) % 360)}° · Click: Dossier · Shift+Click: Track Body · Drag: Rotate · Shift+Drag: Pan
               </text>
             </g>
           </svg>
@@ -2134,156 +2512,32 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
     // 1. Star Dossier Blow-Up
     if (selectedEntity.kind === 'star') {
-      const st: RealisticStarNode | undefined =
-        systemResult.hierarchy.stars[selectedEntity.starIdx];
+      const st = systemResult.hierarchy.stars[selectedEntity.starIdx];
       if (!st) return null;
       return (
-        <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
-          onClick={() => setSelectedEntity(null)}
-        >
-          <div
-            className="bg-[#0e131d] border border-sky-500/60 rounded-2xl max-w-xl w-full p-5 flex flex-col gap-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-3">
-                <div
-                  className="w-10 h-10 rounded-full"
-                  style={{
-                    backgroundColor: st.colorHex,
-                    boxShadow: `0 0 20px ${st.colorHex}`,
-                  }}
-                />
-                <div>
-                  <h2 className="text-base font-bold text-white">
-                    Star {st.label} &bull; {st.spectralType}
-                  </h2>
-                  <p className="text-xs text-sky-400 font-mono">{st.category}</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedEntity(null)}
-                className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3 bg-[#151d2c] p-3.5 rounded-xl border border-slate-800 font-mono text-xs">
-              <div>
-                <span className="text-slate-400 block text-[10px]">Stellar Mass</span>
-                <b className="text-white text-sm">{st.mass} M☉</b>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">Bolometric Lum</span>
-                <b className="text-amber-300 text-sm">{st.lum} L☉</b>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">Photosphere Radius</span>
-                <b className="text-sky-300 text-sm">{st.radius} R☉</b>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">Effective Temp</span>
-                <b className="text-white text-sm">{st.Teff} K</b>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">Surface Gravity</span>
-                <b className="text-white text-sm">log g = {st.logg}</b>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">MS Fractional Age</span>
-                <b className="text-emerald-300 text-sm">τ = {st.tau}</b>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center text-xs font-mono text-slate-400">
-              <span>
-                System Age: <b className="text-slate-200">{systemResult.step1.age} Gyr</b> &bull;
-                Metallicity:{' '}
-                <b className="text-slate-200">
-                  {systemResult.step1.feh >= 0 ? '+' : ''}
-                  {systemResult.step1.feh} dex
-                </b>
-              </span>
-              <div className="flex gap-1.5">
-                {systemResult.hierarchy.stars.map((s, idx) => (
-                  <button
-                    key={s.label}
-                    type="button"
-                    onClick={() => setSelectedEntity({ kind: 'star', starIdx: idx })}
-                    className={`px-2.5 py-1 rounded border cursor-pointer ${
-                      idx === selectedEntity.starIdx
-                        ? 'bg-sky-600 text-white border-sky-400 font-bold'
-                        : 'bg-slate-900 text-slate-300 border-slate-700'
-                    }`}
-                  >
-                    Star {s.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+        <StarDossierModal
+          star={st}
+          starIdx={selectedEntity.starIdx}
+          systemResult={systemResult}
+          onSelectStar={(idx) => setSelectedEntity({ kind: 'star', starIdx: idx })}
+          onTrackInOrrery={(idx) => {
+            handleTrackBody({ kind: 'star', starIdx: idx });
+            setMapMode('orrery2d');
+          }}
+          onClose={() => setSelectedEntity(null)}
+        />
       );
     }
 
     // 2. Binary Split Dossier Blow-Up
     if (selectedEntity.kind === 'split') {
-      const sp: RealisticBinarySplit | undefined =
-        systemResult.hierarchy.splits[selectedEntity.splitIdx];
+      const sp = systemResult.hierarchy.splits[selectedEntity.splitIdx];
       if (!sp) return null;
       return (
-        <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
-          onClick={() => setSelectedEntity(null)}
-        >
-          <div
-            className="bg-[#0e131d] border border-amber-500/60 rounded-2xl max-w-lg w-full p-5 flex flex-col gap-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <div>
-                <h2 className="text-base font-bold text-white">
-                  Binary / Hierarchical Split [{sp.pair}]
-                </h2>
-                <p className="text-xs text-amber-400 font-mono">{sp.regime}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedEntity(null)}
-                className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-3 bg-[#151d2c] p-3.5 rounded-xl border border-slate-800 font-mono text-xs">
-              <div>
-                <span className="text-slate-400 block text-[10px]">Binary Separation (a)</span>
-                <b className="text-white text-sm">{sp.a_AU} AU</b>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">Binary Eccentricity (e)</span>
-                <b className="text-white text-sm">{sp.e}</b>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">
-                  Holman-Wiegert S-Type Max (A / B)
-                </span>
-                <b className="text-sky-300 text-sm">
-                  {sp.sMaxA} AU / {sp.sMaxB} AU
-                </b>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">
-                  Holman-Wiegert P-Type Inner Min
-                </span>
-                <b className="text-emerald-300 text-sm">{sp.pMin} AU</b>
-              </div>
-            </div>
-          </div>
-        </div>
+        <BinarySplitModal
+          split={sp}
+          onClose={() => setSelectedEntity(null)}
+        />
       );
     }
 
@@ -2292,693 +2546,33 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       const zone = systemResult.zones[selectedEntity.zoneIdx];
       const belt = zone?.bodies[selectedEntity.bodyIdx] as RealisticBeltBody | undefined;
       if (!zone || !belt || belt.kind !== 'belt') return null;
-
       return (
-        <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
-          onClick={() => setSelectedEntity(null)}
-        >
-          <div
-            className="bg-[#0e131d] border border-slate-500/60 rounded-2xl max-w-lg w-full p-5 flex flex-col gap-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <div>
-                <h2 className="text-base font-bold text-white">
-                  Belt #{selectedEntity.bodyIdx + 1}: {belt.role}
-                </h2>
-                <p className="text-xs text-sky-400 font-mono">{zone.title}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedEntity(null)}
-                className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="grid grid-cols-3 gap-3 bg-[#151d2c] p-3.5 rounded-xl border border-slate-800 font-mono text-xs">
-              <div>
-                <span className="text-slate-400 block text-[10px]">Central Orbit</span>
-                <b className="text-white text-sm">{belt.a} AU</b>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">Radial Half-Width</span>
-                <b className="text-sky-300 text-sm">±{belt.beltWidth} AU</b>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">Surviving Mass</span>
-                <b className="text-emerald-300 text-sm">{belt.massEarth} M⊕</b>
-              </div>
-            </div>
-            <div className="text-xs text-slate-400 font-mono">
-              Initial 1–2% Protoplanetary Disk Slot Share:{' '}
-              <b className="text-slate-200">{belt.rawSlotMassEarth} M⊕</b> (99%+ dynamically
-              scattered/ground by resonances)
-            </div>
-          </div>
-        </div>
+        <BeltDossierModal
+          belt={belt}
+          bodyIdx={selectedEntity.bodyIdx}
+          zone={zone}
+          onClose={() => setSelectedEntity(null)}
+        />
       );
     }
 
-    // 4. Unified Planet OR Moon Full Dossier Blow-Up (Same Comprehensive Data for Both!)
-    const zone = systemResult.zones[selectedEntity.zoneIdx];
-    const hostPlanet = zone?.bodies[selectedEntity.bodyIdx] as
-      | RealisticPlanetBody
-      | undefined;
-    if (!zone || !hostPlanet || hostPlanet.kind !== 'planet') return null;
+    // 4. Planet & Moon Dossier Modal
+    if (selectedEntity.kind === 'planet' || selectedEntity.kind === 'moon') {
+      return (
+        <PlanetDossierModal
+          selectedEntity={selectedEntity}
+          systemResult={systemResult}
+          onSelectEntity={setSelectedEntity}
+          onTrackInOrrery={(ent) => {
+            handleTrackBody(ent);
+            setMapMode('orrery2d');
+          }}
+          onClose={() => setSelectedEntity(null)}
+        />
+      );
+    }
 
-    const isMoon = selectedEntity.kind === 'moon';
-    const activeMoon: RealisticMoon | null =
-      isMoon && hostPlanet.moons[selectedEntity.moonIdx]
-        ? hostPlanet.moons[selectedEntity.moonIdx]
-        : null;
-
-    // Unified Planet/Moon Telemetry Adapter so Moons display the EXACT same data fields as Planets
-    const title = isMoon && activeMoon
-      ? `Planet #${selectedEntity.bodyIdx + 1} ${activeMoon.name}: ${activeMoon.moonClass}`
-      : `Planet #${selectedEntity.bodyIdx + 1}: ${hostPlanet.planetClass}`;
-
-    const subtitle = isMoon && activeMoon
-      ? `a = ${activeMoon.a_Rp} Rp (${activeMoon.a_km.toLocaleString()} km) · e = ${activeMoon.e} · inc = ${activeMoon.incDeg}°${
-          activeMoon.retrograde ? ' [Retrograde]' : ''
-        } · ${activeMoon.origin}`
-      : `a = ${hostPlanet.a} AU (e = ${hostPlanet.e})${
-          hostPlanet.a_birth !== hostPlanet.a
-            ? ` [Migrated from ${hostPlanet.a_birth} AU]`
-            : ''
-        } · ${hostPlanet.migrationHistory}`;
-
-    const badgeText = isMoon && activeMoon
-      ? `${activeMoon.massLunar} M☾ (${activeMoon.massEarth} M⊕)`
-      : hostPlanet.massEarth >= 30
-      ? `${hostPlanet.massJup} MJ (${hostPlanet.massEarth} M⊕)`
-      : `${hostPlanet.massEarth} M⊕`;
-
-    const radDisplay = isMoon && activeMoon
-      ? `${activeMoon.radiusEarth} R⊕ (${activeMoon.radiusKm.toLocaleString()} km)`
-      : `${hostPlanet.radiusEarth} R⊕ (${Math.round(hostPlanet.radiusEarth * 6371).toLocaleString()} km)`;
-
-    const gravDisplay = isMoon && activeMoon ? `${activeMoon.gravityG} g` : `${hostPlanet.gravityG} g`;
-    const densDisplay = isMoon && activeMoon
-      ? `${activeMoon.densityGcm3} g/cm³`
-      : `${hostPlanet.densityGcm3} g/cm³`;
-    const periodDisplay = isMoon && activeMoon
-      ? `${activeMoon.periodDays} d (around Planet #${selectedEntity.bodyIdx + 1})`
-      : `${hostPlanet.orbitalPeriodDays} d (${(hostPlanet.orbitalPeriodDays / 365.25).toFixed(2)} yr)`;
-    const spinDisplay = isMoon && activeMoon
-      ? `${activeMoon.rotationHours} h (${activeMoon.spinState})`
-      : `${hostPlanet.rotationHours} h (${hostPlanet.spinState})`;
-    const tiltDisplay = isMoon && activeMoon
-      ? `${activeMoon.axialTiltDeg}°`
-      : `${hostPlanet.axialTiltDeg}°`;
-
-    const rockF = isMoon && activeMoon ? activeMoon.rockFrac : hostPlanet.rockFrac;
-    const iceF = isMoon && activeMoon ? activeMoon.iceFrac : hostPlanet.iceFrac;
-    const gasF = isMoon && activeMoon ? activeMoon.gasFrac : hostPlanet.gasFrac;
-    const rPct = (rockF * 100).toFixed(1);
-    const iPct = (iceF * 100).toFixed(1);
-    const gPct = (gasF * 100).toFixed(1);
-
-    const Teq = isMoon && activeMoon ? activeMoon.T_eq : hostPlanet.T_eq;
-    const Tatm = isMoon && activeMoon ? activeMoon.T_atm : hostPlanet.T_atm;
-    const Tsurf = isMoon && activeMoon ? activeMoon.surfaceTempK : hostPlanet.surfaceTempK;
-    const ghK = isMoon && activeMoon ? activeMoon.greenhouseK : hostPlanet.greenhouseK;
-    const muMin = isMoon && activeMoon ? activeMoon.muMin : hostPlanet.muMin;
-    const albedo = isMoon && activeMoon ? activeMoon.albedo : hostPlanet.albedo;
-    const pBar = isMoon && activeMoon ? activeMoon.pressureBar : hostPlanet.pressureBar;
-    const atmoType = isMoon && activeMoon ? activeMoon.atmosphereType : hostPlanet.atmosphereType;
-    const gases = isMoon && activeMoon ? activeMoon.gases : hostPlanet.gases;
-    const hydro = isMoon && activeMoon ? activeMoon.hydrosphere : hostPlanet.hydrosphere;
-    const visualColor =
-      isMoon && activeMoon
-        ? getMoonVisualColor(activeMoon)
-        : getPlanetVisualColor(hostPlanet);
-
-    // Step between planets in this zone
-    const planetIndices = zone.bodies
-      .map((b, idx) => (b.kind === 'planet' ? idx : -1))
-      .filter((idx) => idx !== -1);
-    const curPosInPlanets = planetIndices.indexOf(selectedEntity.bodyIdx);
-    const prevPlanetBodyIdx =
-      curPosInPlanets > 0 ? planetIndices[curPosInPlanets - 1] : null;
-    const nextPlanetBodyIdx =
-      curPosInPlanets >= 0 && curPosInPlanets < planetIndices.length - 1
-        ? planetIndices[curPosInPlanets + 1]
-        : null;
-
-    return (
-      <div
-        className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 md:p-6 overflow-y-auto"
-        onClick={() => setSelectedEntity(null)}
-      >
-        <div
-          className="bg-[#0e131d] border border-sky-500/60 rounded-2xl max-w-4xl w-full p-4 md:p-6 flex flex-col gap-4 shadow-2xl my-auto"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Top Switcher Bar: Host Planet + All Moons of This Planet + Prev/Next Planet */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
-            <div className="flex flex-wrap items-center gap-1.5">
-              {(() => {
-                const inspectorStar =
-                  systemResult.hierarchy.stars.find((s) =>
-                    zone.title.includes(`Star ${s.label}`)
-                  ) || systemResult.hierarchy.stars[0];
-                const hostIconUrl = getProceduralPlanetIconDataUrl(
-                  hostPlanet,
-                  null,
-                  inspectorStar?.colorHex || '#fff4e6',
-                  inspectorStar?.Teff || 5778,
-                  0,
-                  56
-                );
-                return (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSelectedEntity({
-                          kind: 'planet',
-                          zoneIdx: selectedEntity.zoneIdx,
-                          bodyIdx: selectedEntity.bodyIdx,
-                        })
-                      }
-                      className={`px-3 py-1 rounded-lg text-xs font-mono flex items-center gap-1.5 cursor-pointer transition ${
-                        !isMoon
-                          ? 'bg-sky-600 text-white font-bold shadow-md shadow-sky-500/20'
-                          : 'bg-slate-900 text-slate-300 border border-slate-700 hover:bg-slate-800'
-                      }`}
-                    >
-                      <img
-                        src={hostIconUrl}
-                        alt=""
-                        className="w-5 h-5 object-contain -my-1"
-                      />
-                      <span>
-                        Planet #{selectedEntity.bodyIdx + 1} (
-                        {shortClassLabel(hostPlanet.planetClass)})
-                      </span>
-                    </button>
-
-                    {hostPlanet.moons.map((m, mIdx) => {
-                      const isThisMoon =
-                        isMoon &&
-                        selectedEntity.kind === 'moon' &&
-                        selectedEntity.moonIdx === mIdx;
-                      const mIconUrl = getProceduralPlanetIconDataUrl(
-                        hostPlanet,
-                        m,
-                        inspectorStar?.colorHex || '#fff4e6',
-                        inspectorStar?.Teff || 5778,
-                        mIdx,
-                        36
-                      );
-                      return (
-                        <button
-                          key={m.id || mIdx}
-                          type="button"
-                          onClick={() =>
-                            setSelectedEntity({
-                              kind: 'moon',
-                              zoneIdx: selectedEntity.zoneIdx,
-                              bodyIdx: selectedEntity.bodyIdx,
-                              moonIdx: mIdx,
-                            })
-                          }
-                          className={`px-2.5 py-1 rounded-lg text-xs font-mono flex items-center gap-1.5 cursor-pointer transition ${
-                            isThisMoon
-                              ? 'bg-indigo-600 text-white font-bold shadow-md shadow-indigo-500/20'
-                              : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800'
-                          }`}
-                        >
-                          <img
-                            src={mIconUrl}
-                            alt=""
-                            className="w-4 h-4 object-contain -my-0.5"
-                          />
-                          <span>
-                            {m.name} ({shortMoonLabel(m.moonClass)})
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </>
-                );
-              })()}
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                disabled={prevPlanetBodyIdx === null}
-                onClick={() =>
-                  prevPlanetBodyIdx !== null &&
-                  setSelectedEntity({
-                    kind: 'planet',
-                    zoneIdx: selectedEntity.zoneIdx,
-                    bodyIdx: prevPlanetBodyIdx,
-                  })
-                }
-                className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-35 text-slate-300 border border-slate-700 text-xs font-mono flex items-center gap-1 cursor-pointer"
-                title="Previous Planet in Zone"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-                Prev
-              </button>
-              <button
-                type="button"
-                disabled={nextPlanetBodyIdx === null}
-                onClick={() =>
-                  nextPlanetBodyIdx !== null &&
-                  setSelectedEntity({
-                    kind: 'planet',
-                    zoneIdx: selectedEntity.zoneIdx,
-                    bodyIdx: nextPlanetBodyIdx,
-                  })
-                }
-                className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-35 text-slate-300 border border-slate-700 text-xs font-mono flex items-center gap-1 cursor-pointer"
-                title="Next Planet in Zone"
-              >
-                Next
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  openZoneIn3DTheater(
-                    selectedEntity.zoneIdx,
-                    Math.max(0, curPosInPlanets)
-                  )
-                }
-                className="px-2.5 py-1 rounded-lg bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-700 text-xs font-mono flex items-center gap-1 cursor-pointer"
-              >
-                <Rocket className="w-3.5 h-3.5" />
-                3D View
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedEntity(null)}
-                className="p-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Main World Title & Visual Cross-Section Banner */}
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[#151d2c] p-4 rounded-xl border border-[#2a3852]">
-            <div className="flex items-center gap-4">
-              {/* 2D Concentric Interior Cross-Section SVG */}
-              <svg width="76" height="76" viewBox="0 0 76 76" className="flex-shrink-0">
-                {/* Outer Gas / Atmosphere Halo */}
-                <circle
-                  cx={38}
-                  cy={38}
-                  r={34}
-                  fill={visualColor}
-                  fillOpacity={0.22}
-                  stroke={visualColor}
-                  strokeWidth={1.2}
-                />
-                {/* Envelope / Hydrosphere Layer */}
-                <circle
-                  cx={38}
-                  cy={38}
-                  r={27}
-                  fill={
-                    gasF > 0.05
-                      ? '#a78bfa'
-                      : hydro
-                      ? hydro.solvent === 'H2SO4'
-                        ? '#a3e635'
-                        : hydro.solvent === 'SO2'
-                        ? '#facc15'
-                        : hydro.solvent === 'CO2'
-                        ? '#2dd4bf'
-                        : hydro.solvent === 'NH3-H2O'
-                        ? '#818cf8'
-                        : hydro.solvent === 'CH4-C2H6'
-                        ? '#fbbf24'
-                        : hydro.solvent === 'Silicate Magma'
-                        ? '#f97316'
-                        : '#0ea5e9'
-                      : visualColor
-                  }
-                  fillOpacity={0.75}
-                />
-                {/* Ice Mantle Layer */}
-                {iceF > 0.03 && (
-                  <circle
-                    cx={38}
-                    cy={38}
-                    r={Math.max(12, 25 * Math.pow(rockF + iceF, 0.33))}
-                    fill="#67e8f9"
-                  />
-                )}
-                {/* Silicate / Iron Core */}
-                <circle
-                  cx={38}
-                  cy={38}
-                  r={Math.max(7, 24 * Math.pow(Math.max(0.05, rockF), 0.33))}
-                  fill="#d97706"
-                />
-              </svg>
-
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-lg font-extrabold text-white">{title}</h2>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-emerald-500/15 border border-emerald-400 text-emerald-300">
-                    {badgeText}
-                  </span>
-                </div>
-                <p className="text-xs text-sky-400 font-mono mt-1">{subtitle}</p>
-                <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                  Zone: {zone.title} (Type {zone.archetype} · Snow Line {zone.a_snow} AU)
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Procedural World Portrait & Surface Vista */}
-          <ProceduralPlanetPortrait
-            planet={hostPlanet}
-            moon={activeMoon}
-            zone={zone}
-            stars={systemResult.hierarchy.stars}
-            bodyIndex={selectedEntity.bodyIdx}
-            moonIndex={selectedEntity.kind === 'moon' ? selectedEntity.moonIdx : 0}
-          />
-
-          {/* Core Physical & Orbital Telemetry Grid (Identical for Planets & Moons) */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 bg-[#151d2c] p-3.5 rounded-xl border border-[#2a3852] font-mono text-xs">
-            <div>
-              <span className="text-slate-400 block text-[10px] uppercase">Radius</span>
-              <b className="text-white">{radDisplay}</b>
-            </div>
-            <div>
-              <span className="text-slate-400 block text-[10px] uppercase">Surface Gravity</span>
-              <b className="text-sky-300">{gravDisplay}</b>
-            </div>
-            <div>
-              <span className="text-slate-400 block text-[10px] uppercase">Bulk Density</span>
-              <b className="text-white">{densDisplay}</b>
-            </div>
-            <div>
-              <span className="text-slate-400 block text-[10px] uppercase">Orbital Period</span>
-              <b className="text-white">{periodDisplay}</b>
-            </div>
-            <div>
-              <span className="text-slate-400 block text-[10px] uppercase">Rotation &amp; Spin</span>
-              <b className="text-amber-300">{spinDisplay}</b>
-            </div>
-            <div>
-              <span className="text-slate-400 block text-[10px] uppercase">Obliquity / Albedo</span>
-              <b className="text-white">
-                {tiltDisplay} · A={albedo}
-              </b>
-            </div>
-          </div>
-
-          {/* 3-Snow-Line Bulk Composition Bar */}
-          <div className="bg-[#151d2c] p-3.5 rounded-xl border border-[#2a3852] flex flex-col gap-2">
-            <div className="flex justify-between items-center text-xs font-mono">
-              <span className="text-slate-300 font-bold uppercase">
-                Bulk Interior Mass Fractions (Rock / H2O-CH4-NH3 Ice / H2-He Gas)
-              </span>
-              <div className="flex gap-4">
-                <span className="text-amber-400 font-bold">Rock: {rPct}%</span>
-                <span className="text-cyan-300 font-bold">Ice: {iPct}%</span>
-                <span className="text-purple-300 font-bold">Gas: {gPct}%</span>
-              </div>
-            </div>
-            <div className="h-3 w-full bg-slate-950 rounded-full overflow-hidden flex border border-slate-800">
-              <div className="bg-amber-600 h-full" style={{ width: `${rPct}%` }} />
-              <div className="bg-cyan-300 h-full" style={{ width: `${iPct}%` }} />
-              <div className="bg-purple-400 h-full" style={{ width: `${gPct}%` }} />
-            </div>
-          </div>
-
-          {/* Two-Column: Atmosphere & Thermodynamics + Hydrosphere & Satellite System */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-            {/* Left Box: Atmosphere, Greenhouse & Tidal Heating */}
-            <div className="bg-[#151d2c] p-3.5 rounded-xl border-l-4 border-indigo-400 border border-[#2a3852] flex flex-col gap-2">
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-white uppercase font-mono">
-                  Atmosphere &amp; Thermal Balance
-                </span>
-                <span className="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-700 font-mono text-xs font-bold">
-                  {pBar !== null
-                    ? `${pBar} bar`
-                    : !isMoon && hostPlanet.planetClass.includes('Supercritical')
-                    ? 'Supercritical Fluid Envelope'
-                    : 'Deep Gas Envelope'}
-                </span>
-              </div>
-              <div className="text-xs text-indigo-200 font-semibold">{atmoType}</div>
-
-              <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-slate-950/70 p-2.5 rounded-lg border border-slate-800">
-                <div>
-                  <span className="text-slate-400 block text-[10px]">Equil / Eff Temp</span>
-                  <b className="text-slate-100">
-                    {Teq} K{Tatm !== Teq ? ` (T_eff ${Tatm} K)` : ''}
-                  </b>
-                </div>
-                {pBar !== null ? (
-                  <>
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">Greenhouse ΔT</span>
-                      <b className="text-amber-300">+{ghK} K</b>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">
-                        Surface Temp (T_surf)
-                      </span>
-                      <b className="text-emerald-300">
-                        {Tsurf} K ({Math.round(Tsurf - 273.15)}°C)
-                      </b>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">Phase Boundary</span>
-                      <b className="text-amber-300">No Distinct Surface</b>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">
-                        1-Bar Effective Temp (T_atm)
-                      </span>
-                      <b className="text-emerald-300">
-                        {Tatm} K ({Math.round(Tatm - 273.15)}°C)
-                      </b>
-                    </div>
-                  </>
-                )}
-                <div>
-                  <span className="text-slate-400 block text-[10px]">
-                    XUV Escape Cutoff (μ_min)
-                  </span>
-                  <b className="text-slate-200">{muMin} g/mol</b>
-                </div>
-                {isMoon && activeMoon && (
-                  <>
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">
-                        Tidal Dissipation Power
-                      </span>
-                      <b className="text-orange-300">{activeMoon.tidalW} TW</b>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">
-                        Tidal Surface Flux
-                      </span>
-                      <b className="text-orange-300">{activeMoon.tidalFluxWm2} W/m²</b>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Gas Partial Composition Bars */}
-              <div className="flex flex-col gap-1 mt-1">
-                <span className="text-[10px] font-mono uppercase text-slate-400">
-                  Atmospheric Gas Mole Fractions
-                </span>
-                {Object.keys(gases).length === 0 ? (
-                  <div className="text-xs font-mono text-slate-500">
-                    Airless Barren Exosphere (0 bar)
-                  </div>
-                ) : (
-                  Object.entries(gases).map(([gasName, frac]) => {
-                    const pct = (frac * 100).toFixed(1);
-                    return (
-                      <div key={gasName} className="flex items-center gap-2 text-xs font-mono">
-                        <span className="w-24 text-sky-300 font-semibold">{gasName}</span>
-                        <div className="flex-1 h-2 bg-slate-950 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-sky-400"
-                            style={{ width: `${Math.min(100, frac * 100)}%` }}
-                          />
-                        </div>
-                        <span className="w-12 text-right text-slate-200">{pct}%</span>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            {/* Right Box: Hydrosphere Interior & Moons / Host Context */}
-            <div className="flex flex-col gap-3">
-              {/* Hydrosphere / Surface Liquid / Subsurface Ocean Card */}
-              <div className="bg-[#151d2c] p-3.5 rounded-xl border-l-4 border-sky-400 border border-[#2a3852] flex flex-col gap-1.5">
-                <div className="flex justify-between items-center gap-2">
-                  <span className="text-xs font-bold text-sky-300 uppercase font-mono">
-                    🌊 Hydrosphere &amp; Liquid Phase Structure
-                  </span>
-                  {hydro?.solvent && (
-                    <span className="px-2 py-0.5 rounded bg-sky-950 text-sky-200 border border-sky-700/70 font-mono text-[11px] font-bold">
-                      Solvent: {hydro.solvent}
-                    </span>
-                  )}
-                </div>
-                {hydro ? (
-                  <>
-                    <div className="text-xs text-white font-semibold">{hydro.state}</div>
-                    {hydro.biosphere && (
-                      <div className="px-2.5 py-1 rounded-lg bg-emerald-950/70 border border-emerald-500/60 text-emerald-300 text-xs font-mono font-bold flex items-center gap-1.5">
-                        <span>🧬 {hydro.biosphere}</span>
-                      </div>
-                    )}
-                    {hydro.coveragePct !== undefined && hydro.coveragePct > 0 && (
-                      <div className="flex flex-col gap-1 mt-0.5">
-                        <div className="flex justify-between text-[10px] font-mono text-slate-300">
-                          <span>Surface Liquid: {hydro.coveragePct}%</span>
-                          <span>Exposed Solid Land: {100 - hydro.coveragePct}%</span>
-                        </div>
-                        <div className="h-2 w-full bg-amber-800/70 rounded-full overflow-hidden flex border border-slate-800">
-                          <div
-                            className="h-full bg-sky-400"
-                            style={{ width: `${hydro.coveragePct}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                    <div className="grid grid-cols-3 gap-2 mt-1 text-xs font-mono bg-slate-950/70 p-2.5 rounded-lg border border-slate-800">
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">
-                          {hydro.liqKm > 0
-                            ? hydro.crustKm
-                              ? 'Liquid / Ocean Layer'
-                              : 'Surface Liquid Depth'
-                            : 'Supercritical Fluid'}
-                        </span>
-                        <b className="text-sky-300">
-                          {hydro.liqKm > 0 ? `${hydro.liqKm} km` : `${hydro.scKm} km`}
-                        </b>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">
-                          {hydro.crustKm
-                            ? `Ice Shell (${hydro.crustKm} km) / VI–VII`
-                            : 'Ice Shell / VI–VII'}
-                        </span>
-                        <b className="text-cyan-200">{hydro.iceKm} km</b>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">
-                          Superionic XVIII
-                        </span>
-                        <b className="text-indigo-300">{hydro.siKm} km</b>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="text-xs text-slate-400 font-mono">
-                    {iceF >= 0.15
-                      ? 'Solid Cryogenic Ice Mantle (No Liquid Layer)'
-                      : 'Dry Silicate-Iron Crust & Mantle (No Surface Liquid)'}
-                  </div>
-                )}
-              </div>
-
-              {/* Rings & Interactive Moon Fleet (or Host Planet Link) */}
-              <div className="bg-[#151d2c] p-3.5 rounded-xl border border-[#2a3852] flex-1 flex flex-col gap-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-amber-300 uppercase font-mono">
-                    🪐 Rings &amp; Satellite System ({hostPlanet.moons.length} Moons)
-                  </span>
-                  <span className="text-[11px] font-mono text-slate-400">
-                    Roche Limit: {hostPlanet.rocheLimitRp} Rp
-                  </span>
-                </div>
-
-                {hostPlanet.rings && (
-                  <div className="text-xs font-mono text-amber-200 bg-amber-950/30 border border-amber-700/50 rounded-lg px-2.5 py-1.5">
-                    Ring System: <b>{hostPlanet.rings}</b>
-                  </div>
-                )}
-
-                {hostPlanet.moons.length === 0 ? (
-                  <div className="text-xs font-mono text-slate-500">
-                    No major moons retained inside Hill sphere.
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto pr-1">
-                    {hostPlanet.moons.map((m, mIdx) => {
-                      const isCurrMoon =
-                        isMoon &&
-                        selectedEntity.kind === 'moon' &&
-                        selectedEntity.moonIdx === mIdx;
-                      return (
-                        <button
-                          key={m.id || mIdx}
-                          type="button"
-                          onClick={() =>
-                            setSelectedEntity({
-                              kind: 'moon',
-                              zoneIdx: selectedEntity.zoneIdx,
-                              bodyIdx: selectedEntity.bodyIdx,
-                              moonIdx: mIdx,
-                            })
-                          }
-                          className={`w-full text-left px-3 py-2 rounded-lg border font-mono text-xs flex items-center justify-between transition cursor-pointer ${
-                            isCurrMoon
-                              ? 'bg-indigo-950/90 border-indigo-400 text-white'
-                              : 'bg-slate-950/70 border-slate-800 hover:bg-slate-900 text-slate-200'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span
-                              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: getMoonVisualColor(m) }}
-                            />
-                            <div className="truncate">
-                              <b>{m.name}:</b> {m.moonClass}
-                              <div className="text-[10px] text-slate-400">
-                                {m.a_Rp} Rp ({m.periodDays}d) · {m.surfaceTempK}K ·{' '}
-                                {m.atmosphereType.split('(')[0].trim()}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="text-right flex-shrink-0 ml-2">
-                            <span className="text-sky-300 font-bold block">
-                              {m.radiusKm} km
-                            </span>
-                            <span className="text-[10px] text-slate-400">
-                              {m.massLunar} M☾ · {m.gravityG}g
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return null;
   };
 
   return (
@@ -2988,15 +2582,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-800 pb-2.5">
           <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-sm md:text-base font-bold text-white flex items-center gap-2">
-              <span>2D Astrophysical System Map (Steps 1–6)</span>
+              <span>2D Astrophysical System Map</span>
             </h1>
-            {systemResult && (
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-emerald-500/15 border border-emerald-400 text-emerald-300 font-semibold">
-                Roll #{systemResult.roll}: {systemResult.hierarchy.archName} &bull;{' '}
-                {systemResult.hierarchy.stars.length} Star(s) &bull; {totalPlanets} Planets &bull;{' '}
-                {totalMoons} Moons
-              </span>
-            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5">
@@ -3006,7 +2593,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 border border-sky-400 shadow flex items-center gap-1.5 cursor-pointer transition"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              Roll Pure IMF
+              Roll New
             </button>
             <button
               type="button"
@@ -3018,14 +2605,6 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             </button>
             {systemResult && systemResult.zones.length > 0 && (
               <>
-                <button
-                  type="button"
-                  onClick={() => openZoneIn3DTheater(0)}
-                  className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-cyan-950/80 hover:bg-cyan-900 text-cyan-200 border border-cyan-700 flex items-center gap-1.5 cursor-pointer transition"
-                >
-                  <Eye className="w-3.5 h-3.5 text-cyan-400" />
-                  3D Theater
-                </button>
                 {onInspectInSector3D && (
                   <button
                     type="button"
@@ -3052,11 +2631,14 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             )}
             <button
               type="button"
-              onClick={() => setShowJsonModal(true)}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#151d2c] hover:bg-[#1e293b] text-slate-100 border border-[#2a3852] flex items-center gap-1 cursor-pointer transition"
+              onClick={() => {
+                setShowJsonModal(true);
+              }}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#151d2c] hover:bg-[#1e293b] text-slate-100 border border-[#2a3852] flex items-center gap-1.5 cursor-pointer transition"
+              title="Import or Export System JSON"
             >
               <Code className="w-3.5 h-3.5 text-emerald-400" />
-              JSON
+              Import / Export
             </button>
           </div>
         </div>
@@ -3065,7 +2647,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
           <div className="flex flex-col gap-1">
             <div className="flex justify-between text-[11px] font-semibold text-slate-300 uppercase">
-              <span>Step 1: System Mass</span>
+              <span>System Mass</span>
               <span className="text-sky-400 font-mono">{sysMass} M☉</span>
             </div>
             <input
@@ -3083,7 +2665,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
           <div className="flex flex-col gap-1">
             <div className="flex justify-between text-[11px] font-semibold text-slate-300 uppercase">
-              <span>Step 1: System Age</span>
+              <span>System Age</span>
               <span className="text-sky-400 font-mono">{age.toFixed(2)} Gyr</span>
             </div>
             <input
@@ -3101,7 +2683,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
           <div className="flex flex-col gap-1">
             <div className="flex justify-between text-[11px] font-semibold text-slate-300 uppercase">
-              <span>Step 1: Metallicity [Fe/H]</span>
+              <span>Metallicity [Fe/H]</span>
               <span className="text-sky-400 font-mono">
                 {feh >= 0 ? `+${feh.toFixed(2)}` : feh.toFixed(2)} dex
               </span>
@@ -3121,7 +2703,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
           <div className="flex flex-col gap-1">
             <div className="text-[11px] font-semibold text-slate-300 uppercase">
-              Step 2: Multiplicity
+              Number of Stars
             </div>
             <select
               value={forcedMult}
@@ -3136,11 +2718,11 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               }
               className="bg-[#151d2c] text-slate-100 border border-[#2a3852] rounded-lg px-2.5 py-1.5 text-xs font-semibold cursor-pointer hover:border-sky-400 focus:outline-none"
             >
-              <option value="auto">Auto (Mass-Weighted 1-4)</option>
-              <option value="1">Force 1 Star (Unary)</option>
-              <option value="2">Force 2 Stars (Binary)</option>
-              <option value="3">Force 3 Stars (Trinary)</option>
-              <option value="4">Force 4 Stars (Quadruple)</option>
+              <option value="auto">Auto</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
             </select>
           </div>
 
@@ -3170,7 +2752,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
           <div className="flex flex-wrap justify-between items-center gap-2">
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold uppercase text-sky-400 tracking-wider font-mono">
-                Interactive 2D System Map — Click Any Planet, Moon, Belt, or Star to Blow Up Full Details
+                Interactive Map — Click Object for Details
               </span>
             </div>
 
@@ -3187,7 +2769,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                   }`}
                 >
                   <Layers className="w-3.5 h-3.5" />
-                  Unified System Schematic
+                  Schematic
                 </button>
                 <button
                   type="button"
@@ -3199,7 +2781,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                   }`}
                 >
                   <Compass className="w-3.5 h-3.5" />
-                  2D Top-Down Orbits
+                  Orrery
                 </button>
               </div>
 
@@ -3247,7 +2829,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                     key={`${zIdx}-${bIdx}`}
                     type="button"
                     onClick={() =>
-                      setSelectedEntity({
+                      handleSelectBody({
                         kind: 'planet',
                         zoneIdx: zIdx,
                         bodyIdx: bIdx,
@@ -3279,58 +2861,18 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       {/* Click-to-Blow-Up Full Details Modal */}
       {renderBlowUpModal()}
 
-      {/* JSON Export Modal */}
-      {showJsonModal && systemResult && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0e131d] border border-[#2a3852] rounded-xl max-w-3xl w-full p-4 flex flex-col gap-3 shadow-2xl">
-            <div className="flex justify-between items-center pb-2 border-b border-[#2a3852]">
-              <span className="text-sm font-bold uppercase text-sky-400 font-mono">
-                System JSON Export (Steps 1–6)
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopyJson}
-                  className="px-3 py-1.5 rounded-lg text-xs font-mono font-semibold bg-[#151d2c] hover:bg-[#1e293b] border border-[#2a3852] text-emerald-300 flex items-center gap-1.5 cursor-pointer"
-                >
-                  {copiedJson ? (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      Copied!
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      Copy JSON
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowJsonModal(false)}
-                  className="px-2.5 py-1.5 rounded-lg text-xs bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-200 flex items-center gap-1 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  Close
-                </button>
-              </div>
-            </div>
-            <textarea
-              readOnly
-              value={JSON.stringify(systemResult, null, 2)}
-              className="w-full h-[55vh] bg-[#07090e] text-emerald-400 border border-[#2a3852] rounded-lg p-3 font-mono text-xs focus:outline-none"
-            />
-          </div>
-        </div>
-      )}
-
-      {/* 3D Circumstellar Theater Modal */}
-      {theaterStar && (
-        <ExpandedSolarSystemTheater
-          selectedStar={theaterStar}
-          selectedPlanetIndex={theaterPlanetIdx}
-          onSelectPlanet={setTheaterPlanetIdx}
-          onClose={() => setTheaterStar(null)}
+      {/* JSON Import/Export Modal */}
+      {showJsonModal && (
+        <SystemJsonManagerModal
+          systemResult={systemResult}
+          onImportSystem={(imported) => {
+            setSystemResult(imported);
+            setSelectedEntity(null);
+            setTrackedTarget(null);
+            fitOrreryToFullSystem(imported);
+            setShowJsonModal(false);
+          }}
+          onClose={() => setShowJsonModal(false)}
         />
       )}
     </div>

@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Sparkles, Eye, Globe } from 'lucide-react';
+import { Eye, Globe, RotateCcw, Play, Pause, Layers } from 'lucide-react';
 import {
   RealisticPlanetBody,
   RealisticPlanetaryZone,
 } from '../../core/generation/realisticStarGen';
-import { RealisticMoon, RealisticStarNode } from '../../types/astrophysics';
+import { RealisticMoon, RealisticStarNode, RealisticHydrosphere } from '../../types/astrophysics';
+import { formatSolventName } from '../../core/astrophysics/classifier';
 
 interface ProceduralPlanetPortraitProps {
   planet: RealisticPlanetBody;
@@ -124,7 +125,10 @@ function renderPlanetGlobeToCanvas(
   starColorHex: string,
   starTeff: number,
   moonIndex = 0,
-  transparentBg = false
+  transparentBg = false,
+  rotYaw = 0,
+  rotPitch = 0,
+  interactiveFast = false
 ): void {
   const ctx = gCanvas.getContext('2d');
   if (!ctx) return;
@@ -181,18 +185,40 @@ function renderPlanetGlobeToCanvas(
   const cy = H * 0.5;
   const R = Math.min(W, H) * (rings ? 0.33 : transparentBg ? 0.44 : 0.41);
 
-  // Starlight direction vector: on tidally-locked worlds, position substellar point slightly left of center
-  // so both the substellar bullseye ("eyeball" / dayside magma) AND the terminator + nightside glacier/crust are clearly visible!
+  // World-space starlight direction vector: on tidally-locked worlds, position substellar point slightly left of center
+  // so at default angle (0,0) both the substellar bullseye ("eyeball" / dayside magma) AND the terminator + nightside are visible!
   const lx = isTidallyLockedPlanet ? -0.52 : -0.62;
   const ly = isTidallyLockedPlanet ? -0.18 : -0.34;
   const lz = isTidallyLockedPlanet ? 0.835 : 0.71;
 
-  // Ring geometry (tilted plane)
+  // 3D Camera Rotation (rotYaw around world Y, rotPitch around camera X)
+  const cosYaw = Math.cos(rotYaw);
+  const sinYaw = Math.sin(rotYaw);
+  const cosPitch = Math.cos(rotPitch);
+  const sinPitch = Math.sin(rotPitch);
+
+  // Transform world-space starlight vector into camera space for rim/halo and specular half-vector
+  const laX = lx * cosYaw - lz * sinYaw;
+  const laZ = lx * sinYaw + lz * cosYaw;
+  const lCamX = laX;
+  const lCamY = ly * cosPitch + laZ * sinPitch;
+  const lCamZ = -ly * sinPitch + laZ * cosPitch;
+
+  // Ring geometry in 3D (tilted plane in world space transformed to camera space)
   const ringTiltRad = ((22 + (worldSeed % 18)) * Math.PI) / 180;
   const sinT = Math.sin(ringTiltRad);
   const cosT = Math.cos(ringTiltRad);
   const rInner = R * 1.24;
   const rOuter = R * (rings?.includes('Major') ? 2.12 : 1.76);
+
+  // World ring normal is (0, -cosT, sinT); transform into camera space (rNormX, rNormY, rNormZ)
+  const rNormX = -sinT * sinYaw;
+  const rNormZTemp = sinT * cosYaw;
+  const rNormY = -cosT * cosPitch + rNormZTemp * sinPitch;
+  const rNormZ = cosT * sinPitch + rNormZTemp * cosPitch;
+
+  const octMain = interactiveFast ? 3 : 5;
+  const octSub = interactiveFast ? 3 : 4;
 
   // Determine ocean / land / flora / cloud palettes
   let deepOceanRgb: RGB = [9, 52, 118];
@@ -291,6 +317,10 @@ function renderPlanetGlobeToCanvas(
       ? 2.0
       : 0.24 + 0.52 * Math.pow(covPct / 100, 0.88);
 
+  const tiltRad = (clamp(tilt, 0, 90) * Math.PI) / 180;
+  const cTilt = Math.cos(tiltRad * 0.45);
+  const sTilt = Math.sin(tiltRad * 0.45);
+
   for (let py = 0; py < H; py++) {
     for (let px = 0; px < W; px++) {
       const idx = (py * W + px) * 4;
@@ -313,16 +343,17 @@ function renderPlanetGlobeToCanvas(
         }
       }
 
-      // Check ring intersection in tilted plane
+      // Check 3D ring intersection in rotated camera space
       let ringAlpha = 0;
       let ringR = 0;
       let ringG = 0;
       let ringB = 0;
       let ringZ = 0;
       if (rings) {
-        const ry = dy / Math.max(0.18, sinT);
-        const rRad = Math.sqrt(dx * dx + ry * ry);
-        ringZ = ry * cosT;
+        const denom =
+          Math.abs(rNormZ) < 0.08 ? (rNormZ >= 0 ? 0.08 : -0.08) : rNormZ;
+        ringZ = -(dx * rNormX + dy * rNormY) / denom;
+        const rRad = Math.sqrt(dx * dx + dy * dy + ringZ * ringZ);
         if (rRad >= rInner && rRad <= rOuter) {
           const u = (rRad - rInner) / (rOuter - rInner);
           const bandNoise = fbm3D(u * 24, 0, 0, worldSeed + 555, 3);
@@ -338,9 +369,10 @@ function renderPlanetGlobeToCanvas(
           const baseRing: RGB = rings.includes('Icy')
             ? [205, 232, 248]
             : [178, 152, 122];
-          const shadowDot = dx * lx + dy * ly;
-          const inPlanetShadow =
-            ringZ < 0 && shadowDot > 0 && Math.abs(dx * ly - dy * lx) < R * 0.88;
+          // 3D cylinder shadow test along starlight vector in camera space
+          const dotL = dx * lCamX + dy * lCamY + ringZ * lCamZ;
+          const perpSq = Math.max(0, rRad * rRad - dotL * dotL);
+          const inPlanetShadow = dotL < 0 && perpSq < R * R * 0.84;
           const shade = inPlanetShadow ? 0.16 : 0.92;
           ringR = baseRing[0] * shade;
           ringG = baseRing[1] * shade;
@@ -353,7 +385,11 @@ function renderPlanetGlobeToCanvas(
         const haloDist = (dist - R) / (R * 0.16);
         let haloAlpha = 0;
         if (haloDist < 1.0 && (pBar === null || pBar > 0.005)) {
-          const sunSide = clamp(((dx / dist) * lx + (dy / dist) * ly + 0.35) * 0.85, 0.15, 1);
+          const sunSide = clamp(
+            ((dx / dist) * lCamX + (dy / dist) * lCamY + 0.35) * 0.85,
+            0.15,
+            1
+          );
           haloAlpha = Math.pow(1 - haloDist, 2.4) * sunSide * 0.68;
         }
         if (transparentBg) {
@@ -362,9 +398,15 @@ function renderPlanetGlobeToCanvas(
             data[idx + 3] = 0;
             continue;
           }
-          const outR = (atmoRgb[0] * haloAlpha + ringR * ringAlpha) / Math.max(0.01, haloAlpha + ringAlpha);
-          const outG = (atmoRgb[1] * haloAlpha + ringG * ringAlpha) / Math.max(0.01, haloAlpha + ringAlpha);
-          const outB = (atmoRgb[2] * haloAlpha + ringB * ringAlpha) / Math.max(0.01, haloAlpha + ringAlpha);
+          const outR =
+            (atmoRgb[0] * haloAlpha + ringR * ringAlpha) /
+            Math.max(0.01, haloAlpha + ringAlpha);
+          const outG =
+            (atmoRgb[1] * haloAlpha + ringG * ringAlpha) /
+            Math.max(0.01, haloAlpha + ringAlpha);
+          const outB =
+            (atmoRgb[2] * haloAlpha + ringB * ringAlpha) /
+            Math.max(0.01, haloAlpha + ringAlpha);
           data[idx] = Math.round(outR);
           data[idx + 1] = Math.round(outG);
           data[idx + 2] = Math.round(outB);
@@ -389,21 +431,25 @@ function renderPlanetGlobeToCanvas(
         }
       }
 
-      // Point on unit sphere (nx, ny, nz)
+      // Point on unit sphere in camera space (nx, ny, nz)
       const nx = dx / R;
       const ny = dy / R;
       const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
 
-      // Rotate coordinates by axial tilt
-      const tiltRad = (clamp(tilt, 0, 90) * Math.PI) / 180;
-      const cTilt = Math.cos(tiltRad * 0.45);
-      const sTilt = Math.sin(tiltRad * 0.45);
-      const sx = nx * cTilt - ny * sTilt;
-      const sy = nx * sTilt + ny * cTilt;
-      const sz = nz;
+      // Rotate camera-space normal (nx, ny, nz) into 3D world space (wx, wy, wz)
+      const y1 = ny * cosPitch - nz * sinPitch;
+      const z1 = ny * sinPitch + nz * cosPitch;
+      const wx = nx * cosYaw + z1 * sinYaw;
+      const wy = y1;
+      const wz = -nx * sinYaw + z1 * cosYaw;
 
-      // Angular cosine to substellar point: ndotl = +1 at substellar center, 0 at terminator, < 0 on nightside
-      const ndotl = nx * lx + ny * ly + nz * lz;
+      // Rotate world coordinates by planet's axial tilt into planet-surface coordinates (sx, sy, sz)
+      const sx = wx * cTilt - wy * sTilt;
+      const sy = wx * sTilt + wy * cTilt;
+      const sz = wz;
+
+      // Angular cosine to substellar point in 3D world space: ndotl = +1 at substellar center, 0 at terminator, < 0 on nightside
+      const ndotl = wx * lx + wy * ly + wz * lz;
       const atmoScatter = pBar === null || pBar > 0.05 ? 0.14 : 0.03;
       const diff = clamp((ndotl + atmoScatter) / (1 + atmoScatter), 0.04, 1.0);
 
@@ -413,11 +459,11 @@ function renderPlanetGlobeToCanvas(
 
       if (isGasOrFluidEnvelope) {
         // Zonal jet bands + equatorial super-rotating chevron waves for tidally-locked Hot Jupiters!
-        const warp = fbm3D(sx * 2.6, sy * 2.6, sz * 2.6, worldSeed + 17, 4) * 0.22;
+        const warp = fbm3D(sx * 2.6, sy * 2.6, sz * 2.6, worldSeed + 17, octSub) * 0.22;
         const chevron = isTidallyLockedPlanet ? Math.pow(Math.abs(sy), 1.35) * 0.55 * sx : 0;
         const lat = sy + warp + chevron;
         const bands = Math.sin(lat * (isTidallyLockedPlanet ? 13.0 : 18.0)) * 0.5 + 0.5;
-        const fineBands = fbm3D(sx * 1.8, lat * 9.5, sz * 1.8, worldSeed + 73, 4);
+        const fineBands = fbm3D(sx * 1.8, lat * 9.5, sz * 1.8, worldSeed + 73, octSub);
 
         let bandA: RGB = [215, 165, 95];
         let bandB: RGB = [245, 228, 195];
@@ -450,7 +496,7 @@ function renderPlanetGlobeToCanvas(
 
         // Substellar / Eastward-Advected Thermal Hotspot on Tidally-Locked Hot Jupiters!
         if (isTidallyLockedPlanet) {
-          const eastSubDot = (nx - 0.16) * lx + ny * ly + nz * lz;
+          const eastSubDot = (wx - 0.16) * lx + wy * ly + wz * lz;
           if (eastSubDot > 0.45) {
             const hotSpot = Math.pow((eastSubDot - 0.45) / 0.55, 1.6);
             const hotCol: RGB =
@@ -465,8 +511,8 @@ function renderPlanetGlobeToCanvas(
         // 1:1 TIDALLY-LOCKED SOLID/LIQUID PLANET:
         // Substellar-concentric "Eyeball" Ocean / Nightside Glacier OR Dayside Magma Ocean!
         // =====================================================================
-        const elev = fbm3D(sx * 2.5, sy * 2.5, sz * 2.5, worldSeed, 5);
-        const ridge = ridgedFbm3D(sx * 3.8, sy * 3.8, sz * 3.8, worldSeed + 31, 4);
+        const elev = fbm3D(sx * 2.5, sy * 2.5, sz * 2.5, worldSeed, octMain);
+        const ridge = ridgedFbm3D(sx * 3.8, sy * 3.8, sz * 3.8, worldSeed + 31, octSub);
         const subMetric = ndotl + (elev - 0.5) * 0.34;
 
         if (solvent === 'Silicate Magma' || Tsurf >= 800) {
@@ -534,8 +580,8 @@ function renderPlanetGlobeToCanvas(
         // =====================================================================
         // FREE-ROTATING PLANET OR MOON: Latitudinal climate zones & exact coveragePct
         // =====================================================================
-        const elev = fbm3D(sx * 2.5, sy * 2.5, sz * 2.5, worldSeed, 5);
-        const ridge = ridgedFbm3D(sx * 3.8, sy * 3.8, sz * 3.8, worldSeed + 31, 4);
+        const elev = fbm3D(sx * 2.5, sy * 2.5, sz * 2.5, worldSeed, octMain);
+        const ridge = ridgedFbm3D(sx * 3.8, sy * 3.8, sz * 3.8, worldSeed + 31, octSub);
 
         if (elev < seaLevel) {
           isLiquidPixel = true;
@@ -612,7 +658,7 @@ function renderPlanetGlobeToCanvas(
         if (isTidallyLockedPlanet) {
           // Concentric substellar convective bullseye + radial spiral outflow arms
           const subDist = Math.acos(clamp(ndotl, -1, 1));
-          const angleAroundSub = Math.atan2(ny - ly * ndotl, nx - lx * ndotl);
+          const angleAroundSub = Math.atan2(wy - ly * ndotl, wx - lx * ndotl);
           const spiralWave =
             Math.sin(subDist * 14.0 - angleAroundSub * 2.0) * 0.5 + 0.5;
           const nCloud = fbm3D(sx * 3.5, sy * 3.5, sz * 3.5, worldSeed + 409, 3);
@@ -633,7 +679,7 @@ function renderPlanetGlobeToCanvas(
             sy * 4.2,
             (sz - cWarp) * 3.1,
             worldSeed + 409,
-            4
+            octSub
           );
           const cThreshold = 0.68 - cloudCov * 0.34;
           if (cVal > cThreshold) {
@@ -649,13 +695,13 @@ function renderPlanetGlobeToCanvas(
       let litG = surfRgb[1] * diff * (0.78 + 0.22 * (starRgb[1] / 255));
       let litB = surfRgb[2] * diff * (0.78 + 0.22 * (starRgb[2] / 255));
 
-      // Specular ocean glint on liquid pixels!
+      // Specular ocean glint on liquid pixels in 3D camera space!
       if (isLiquidPixel && ndotl > 0) {
-        const hx = lx;
-        const hy = ly;
-        const hz = lz + 1.0;
+        const hx = lCamX;
+        const hy = lCamY;
+        const hz = lCamZ + 1.0;
         const hLen = Math.sqrt(hx * hx + hy * hy + hz * hz);
-        const ndoth = Math.max(0, (nx * hx + ny * hy + nz * hz) / hLen);
+        const ndoth = Math.max(0, (nx * hx + ny * hy + nz * hz) / Math.max(1e-4, hLen));
         const spec = Math.pow(ndoth, 24) * 0.74;
         litR += specColor[0] * spec;
         litG += specColor[1] * spec;
@@ -715,7 +761,7 @@ function renderPlanetGlobeToCanvas(
 
 /**
  * Generates and caches a low-res procedural 3D planet/moon icon data URL (with transparent background)
- * for use on the 2D Proportional Orbital Map, Linear System Overview, and Inspector tabs.
+ * for use on the 3D/2D Orbital Map, Linear System Overview, and Inspector tabs.
  */
 export function getProceduralPlanetIconDataUrl(
   planet: RealisticPlanetBody,
@@ -723,9 +769,14 @@ export function getProceduralPlanetIconDataUrl(
   starColorHex = '#fff4e6',
   starTeff = 5778,
   moonIndex = 0,
-  size = 56
+  size = 56,
+  rotYaw = 0,
+  rotPitch = 0
 ): string {
   const isMoon = Boolean(moon);
+  // Quantize yaw/pitch to ~0.22 rad (~12.5°) steps so 3D camera drags remain fast & cached
+  const qYaw = Math.round(rotYaw / 0.22) * 0.22;
+  const qPitch = Math.round(rotPitch / 0.22) * 0.22;
   const key = [
     isMoon ? `m_${moon?.id}_${moon?.moonClass}_${moon?.surfaceTempK}` : `p_${planet.a}_${planet.massEarth}_${planet.planetClass}_${planet.surfaceTempK}`,
     isMoon ? moon?.hydrosphere?.coveragePct : planet.hydrosphere?.coveragePct,
@@ -733,6 +784,8 @@ export function getProceduralPlanetIconDataUrl(
     planet.rings || 'norings',
     starColorHex,
     size,
+    qYaw.toFixed(2),
+    qPitch.toFixed(2),
   ].join('|');
 
   const cached = iconDataUrlCache.get(key);
@@ -749,14 +802,234 @@ export function getProceduralPlanetIconDataUrl(
     starColorHex,
     starTeff,
     moonIndex,
-    true
+    true,
+    qYaw,
+    qPitch,
+    false
   );
   const url = canvas.toDataURL('image/png');
-  if (iconDataUrlCache.size > 400) {
+  if (iconDataUrlCache.size > 600) {
     iconDataUrlCache.clear();
   }
   iconDataUrlCache.set(key, url);
   return url;
+}
+
+function renderInteriorComposition(
+  canvas: HTMLCanvasElement,
+  rockF: number,
+  iceF: number,
+  gasF: number,
+  hydro: RealisticHydrosphere | null | undefined,
+  isGasGiant: boolean,
+  isSupercritical: boolean
+) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  // Deep space backdrop
+  ctx.fillStyle = '#050810';
+  ctx.fillRect(0, 0, w, h);
+
+  // Subtle coordinate grid lines
+  ctx.strokeStyle = 'rgba(51, 65, 85, 0.2)';
+  ctx.lineWidth = 0.5;
+  for (let x = 16; x < w; x += 26) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+  }
+  for (let y = 16; y < h; y += 26) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+
+  // Cross section center & radius
+  const cx = Math.round(w * 0.3);
+  const cy = Math.round(h * 0.5);
+  const R = Math.round(Math.min(w, h) * 0.4);
+
+  // Calculate layer fractions
+  const coreFraction = isGasGiant ? 0.22 : clamp(Math.sqrt(Math.max(0.08, rockF)) * 0.44, 0.2, 0.58);
+  const rCore = Math.max(12, Math.round(R * coreFraction));
+
+  const totalSolid = Math.max(0.01, rockF + iceF);
+  const rockRatio = rockF / totalSolid;
+  const mantleFraction = isGasGiant
+    ? 0.46
+    : clamp(coreFraction + (1 - coreFraction) * rockRatio * 0.88, coreFraction + 0.14, 0.94);
+  const rMantle = Math.max(rCore + 8, Math.round(R * mantleFraction));
+
+  const hasIce = iceF >= 0.04;
+  const rIce = hasIce ? Math.max(rMantle + 5, Math.round(R * 0.94)) : rMantle;
+
+  const hasOcean = Boolean(
+    hydro &&
+    hydro.solvent &&
+    (hydro.coveragePct === undefined || hydro.coveragePct > 0 || hydro.liqKm > 0 || hydro.scKm > 0)
+  );
+  const rOcean = hasOcean ? Math.round(R * 0.98) : rIce;
+  const rGas = R;
+
+  // Layer 5: Atmosphere / Gas Envelope
+  if (gasF > 0.02 || isGasGiant) {
+    const gasGrad = ctx.createRadialGradient(cx, cy, rOcean, cx, cy, rGas + 5);
+    gasGrad.addColorStop(0, 'rgba(56, 189, 248, 0.55)');
+    gasGrad.addColorStop(0.65, 'rgba(99, 102, 241, 0.25)');
+    gasGrad.addColorStop(1, 'rgba(99, 102, 241, 0)');
+    ctx.fillStyle = gasGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rGas + 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Layer 4: Hydrosphere / Ocean
+  if (hasOcean || isSupercritical) {
+    const s = (hydro?.solvent || '').toLowerCase();
+    let col1 = '#0284c7';
+    let col2 = '#0369a1';
+    if (s.includes('magma') || s.includes('silicate') || s.includes('volcanic')) {
+      col1 = '#f97316';
+      col2 = '#c2410c';
+    } else if (s.includes('methane') || s.includes('ch4')) {
+      col1 = '#eab308';
+      col2 = '#ca8a04';
+    } else if (s.includes('ammonia') || s.includes('nh3')) {
+      col1 = '#14b8a6';
+      col2 = '#0f766e';
+    } else if (isSupercritical || s.includes('supercritical')) {
+      col1 = '#818cf8';
+      col2 = '#4f46e5';
+    }
+    const oceanGrad = ctx.createRadialGradient(cx, cy, rIce, cx, cy, rOcean);
+    oceanGrad.addColorStop(0, col2);
+    oceanGrad.addColorStop(1, col1);
+    ctx.fillStyle = oceanGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rOcean, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Layer 3: Ice Shell / High-Pressure Ice Mantle
+  if (hasIce) {
+    const iceGrad = ctx.createRadialGradient(cx, cy, rMantle, cx, cy, rIce);
+    iceGrad.addColorStop(0, '#0369a1');
+    iceGrad.addColorStop(0.5, '#38bdf8');
+    iceGrad.addColorStop(1, '#bae6fd');
+    ctx.fillStyle = iceGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rIce, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Layer 2: Silicate Rock Mantle
+  const mantleGrad = ctx.createRadialGradient(cx, cy, rCore, cx, cy, rMantle);
+  mantleGrad.addColorStop(0, '#581c87');
+  mantleGrad.addColorStop(0.2, '#78350f');
+  mantleGrad.addColorStop(0.7, '#92400e');
+  mantleGrad.addColorStop(1, '#b45309');
+  ctx.fillStyle = mantleGrad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, rMantle, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Layer 1: Metallic Iron-Nickel Core
+  const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rCore);
+  coreGrad.addColorStop(0, '#fef08a');
+  coreGrad.addColorStop(0.45, '#f97316');
+  coreGrad.addColorStop(1, '#991b1b');
+  ctx.fillStyle = coreGrad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, rCore, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 3D Spherical Relief Overlay
+  const sphereShade = ctx.createRadialGradient(cx - R * 0.35, cy - R * 0.35, R * 0.05, cx, cy, R);
+  sphereShade.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
+  sphereShade.addColorStop(0.5, 'rgba(0, 0, 0, 0)');
+  sphereShade.addColorStop(1, 'rgba(0, 0, 0, 0.6)');
+  ctx.fillStyle = sphereShade;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Concentric Shell Boundary Rings
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, rCore, 0, Math.PI * 2);
+  ctx.stroke();
+
+  if (hasIce) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, rMantle, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Callout Legend on the right side
+  const lx = Math.round(w * 0.58);
+  const layers: { label: string; sub: string; color: string }[] = [];
+
+  if (gasF > 0.02 || isGasGiant) {
+    layers.push({
+      label: 'Gas Envelope',
+      sub: `${(gasF * 100).toFixed(1)}% Vol`,
+      color: '#818cf8',
+    });
+  }
+  if (hasOcean || isSupercritical) {
+    layers.push({
+      label: formatSolventName(hydro?.solvent) || 'Hydrosphere',
+      sub: hydro?.liqKm ? `${hydro.liqKm} km depth` : `${hydro?.coveragePct ?? 100}% cov`,
+      color: '#38bdf8',
+    });
+  }
+  if (hasIce) {
+    layers.push({
+      label: 'Ice Shell',
+      sub: `${(iceF * 100).toFixed(1)}% Ice`,
+      color: '#7dd3fc',
+    });
+  }
+  layers.push({
+    label: 'Silicate Mantle',
+    sub: `${(rockF * 100).toFixed(1)}% Rock`,
+    color: '#d97706',
+  });
+  layers.push({
+    label: 'Metallic Core',
+    sub: 'Fe-Ni Alloy',
+    color: '#ef4444',
+  });
+
+  const startY = Math.max(18, Math.round(cy - (layers.length * 24) / 2 + 10));
+  layers.forEach((l, i) => {
+    const ly = startY + i * 26;
+    ctx.fillStyle = l.color;
+    ctx.beginPath();
+    ctx.arc(lx, ly - 3, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#f1f5f9';
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(l.label, lx + 7, ly - 2);
+
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '8px monospace';
+    ctx.fillText(l.sub, lx + 7, ly + 8);
+  });
 }
 
 export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> = ({
@@ -764,12 +1037,25 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
   moon,
   zone,
   stars,
-  bodyIndex,
+  bodyIndex: _bodyIndex,
   moonIndex = 0,
 }) => {
   const globeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const interiorCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const vistaCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [expandedMode, setExpandedMode] = useState<'split' | 'globe' | 'vista'>('split');
+  const [expandedMode, setExpandedMode] = useState<'split' | 'globe' | 'interior' | 'vista'>('split');
+
+  // Interactive 3D Globe Rotation State (Yaw & Pitch in radians)
+  const [rotYaw, setRotYaw] = useState<number>(0);
+  const [rotPitch, setRotPitch] = useState<number>(0);
+  const [isDraggingGlobe, setIsDraggingGlobe] = useState<boolean>(false);
+  const [autoSpin, setAutoSpin] = useState<boolean>(false);
+  const dragGlobeRef = useRef<{
+    startX: number;
+    startY: number;
+    startYaw: number;
+    startPitch: number;
+  } | null>(null);
 
   const isMoon = Boolean(moon);
   const pClass = isMoon && moon ? moon.moonClass : planet.planetClass;
@@ -818,12 +1104,28 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
       ? 100
       : 0;
 
+  // Reset 3D rotation when switching between planets/moons
   useEffect(() => {
-    // =========================================================================
-    // 1. RENDER ORBITAL GLOBE PORTRAIT
-    // =========================================================================
+    setRotYaw(0);
+    setRotPitch(0);
+  }, [worldSeed]);
+
+  // Auto-spin animation loop
+  useEffect(() => {
+    if (!autoSpin || isDraggingGlobe) return;
+    let rafId = 0;
+    const step = () => {
+      setRotYaw((prev) => (prev + 0.025) % (Math.PI * 2));
+      rafId = requestAnimationFrame(step);
+    };
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
+  }, [autoSpin, isDraggingGlobe]);
+
+  // 1. Render Interactive 3D Orbital Globe whenever 3D rotation or world changes
+  useEffect(() => {
     const gCanvas = globeCanvasRef.current;
-    if (gCanvas) {
+    if (gCanvas && expandedMode !== 'vista') {
       renderPlanetGlobeToCanvas(
         gCanvas,
         planet,
@@ -831,9 +1133,26 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
         primaryStar?.colorHex || '#fff4e6',
         primaryStar?.Teff || 5778,
         moonIndex,
-        false
+        false,
+        rotYaw,
+        rotPitch,
+        isDraggingGlobe || autoSpin
       );
     }
+  }, [
+    planet,
+    moon,
+    primaryStar,
+    moonIndex,
+    expandedMode,
+    rotYaw,
+    rotPitch,
+    isDraggingGlobe,
+    autoSpin,
+  ]);
+
+  // 2. Render Surface Horizon Vista only when world or expandedMode changes
+  useEffect(() => {
 
     // =========================================================================
     // 2. RENDER SURFACE HORIZON VISTA (OR CLOUD-TOP VISTA FOR FLUID GIANTS)
@@ -1182,35 +1501,37 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
     expandedMode,
   ]);
 
+  // 3. Render Interior Composition Cutaway whenever world or expandedMode changes
+  useEffect(() => {
+    const iCanvas = interiorCanvasRef.current;
+    if (iCanvas && (expandedMode === 'split' || expandedMode === 'interior')) {
+      const rockF = isMoon && moon ? moon.rockFrac : planet.rockFrac;
+      const isGG =
+        !isMoon &&
+        (planet.planetClass.includes('Gas Giant') ||
+          planet.planetClass.includes('Hot Jupiter') ||
+          planet.planetClass.includes('Ice Giant') ||
+          planet.planetClass.includes('Neptune') ||
+          planet.planetClass.includes('Gas Dwarf'));
+      const isSC =
+        pClass.includes('Supercritical') ||
+        (hydro?.solvent?.toLowerCase().includes('supercritical') ?? false);
+      renderInteriorComposition(iCanvas, rockF, iceF, gasF, hydro, isGG, isSC);
+    }
+  }, [planet, moon, isMoon, pClass, hydro, iceF, gasF, expandedMode]);
+
   return (
     <div className="bg-[#111826] border border-[#2a3852] rounded-xl p-3 flex flex-col gap-2.5">
       {/* Header & View Mode Switcher */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <Sparkles className="w-4 h-4 text-sky-400" />
-          <span className="text-xs font-bold font-mono uppercase text-white">
-            Astrophysical World Portrait &amp; Surface Vista
-          </span>
-          {isTidallyLockedPlanet && (
-            <span className="px-2 py-0.5 rounded bg-amber-950/90 border border-amber-600/70 text-[10px] font-mono text-amber-300 font-bold">
-              🔒 1:1 Tidally Locked (
-              {isGasOrFluidEnvelope
-                ? 'Super-Rotating Chevron Jet'
-                : solvent === 'Silicate Magma' || Tsurf >= 800
-                ? 'Dayside Magma Hemisphere'
-                : covPct > 0
-                ? 'Substellar Eyeball Ocean'
-                : 'Substellar Desert / Nightside Frost'}
-              )
-            </span>
-          )}
           {solvent && (
             <span className="px-2 py-0.5 rounded bg-sky-950/90 border border-sky-700/70 text-[10px] font-mono text-sky-300">
               {covPct > 0 && covPct < 100
-                ? `${covPct}% ${solvent} Seas / ${100 - covPct}% Solid`
+                ? `${covPct}% ${formatSolventName(solvent)} Seas / ${100 - covPct}% Solid`
                 : covPct === 100
-                ? `100% Global ${solvent} Ocean`
-                : solvent}
+                ? `100% Global ${formatSolventName(solvent)} Ocean`
+                : formatSolventName(solvent)}
             </span>
           )}
           {hasBio && (
@@ -1242,7 +1563,19 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
             }`}
           >
             <Globe className="w-3 h-3" />
-            Orbital Globe
+            Globe
+          </button>
+          <button
+            type="button"
+            onClick={() => setExpandedMode('interior')}
+            className={`px-2 py-0.5 rounded flex items-center gap-1 cursor-pointer transition ${
+              expandedMode === 'interior'
+                ? 'bg-sky-600 text-white font-bold'
+                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+            }`}
+          >
+            <Layers className="w-3 h-3" />
+            Interior
           </button>
           <button
             type="button"
@@ -1254,7 +1587,7 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
             }`}
           >
             <Eye className="w-3 h-3" />
-            {isGasOrFluidEnvelope ? 'Cloud-Top Vista' : 'Surface Horizon'}
+            Surface
           </button>
         </div>
       </div>
@@ -1265,35 +1598,184 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
           expandedMode === 'split' ? 'grid-cols-1 md:grid-cols-12' : 'grid-cols-1'
         }`}
       >
-        {/* Left: 3D-Shaded Procedural Orbital Globe */}
-        {expandedMode !== 'vista' && (
+        {/* Left: Interactive 3D-Rotatable Procedural Orbital Globe */}
+        {(expandedMode === 'split' || expandedMode === 'globe') && (
           <div
             className={`${
-              expandedMode === 'split' ? 'md:col-span-5' : 'w-full'
-            } relative bg-[#050810] rounded-lg border border-slate-800/90 overflow-hidden flex items-center justify-center p-2`}
+              expandedMode === 'split' ? 'md:col-span-4' : 'w-full'
+            } relative bg-[#050810] rounded-lg border border-slate-800/90 overflow-hidden flex items-center justify-center p-2 select-none ${
+              isDraggingGlobe ? 'cursor-grabbing' : 'cursor-grab'
+            }`}
+            onMouseDown={(e) => {
+              if (e.button !== 0) return;
+              setIsDraggingGlobe(true);
+              dragGlobeRef.current = {
+                startX: e.clientX,
+                startY: e.clientY,
+                startYaw: rotYaw,
+                startPitch: rotPitch,
+              };
+            }}
+            onMouseMove={(e) => {
+              if (!isDraggingGlobe || !dragGlobeRef.current) return;
+              const dx = e.clientX - dragGlobeRef.current.startX;
+              const dy = e.clientY - dragGlobeRef.current.startY;
+              setRotYaw(dragGlobeRef.current.startYaw - dx * 0.015);
+              setRotPitch(
+                clamp(dragGlobeRef.current.startPitch + dy * 0.014, -1.42, 1.42)
+              );
+            }}
+            onMouseUp={() => {
+              setIsDraggingGlobe(false);
+              dragGlobeRef.current = null;
+            }}
+            onMouseLeave={() => {
+              if (isDraggingGlobe) {
+                setIsDraggingGlobe(false);
+                dragGlobeRef.current = null;
+              }
+            }}
+            onTouchStart={(e) => {
+              if (e.touches.length !== 1) return;
+              const t = e.touches[0];
+              setIsDraggingGlobe(true);
+              dragGlobeRef.current = {
+                startX: t.clientX,
+                startY: t.clientY,
+                startYaw: rotYaw,
+                startPitch: rotPitch,
+              };
+            }}
+            onTouchMove={(e) => {
+              if (!isDraggingGlobe || !dragGlobeRef.current || e.touches.length !== 1)
+                return;
+              const t = e.touches[0];
+              const dx = t.clientX - dragGlobeRef.current.startX;
+              const dy = t.clientY - dragGlobeRef.current.startY;
+              setRotYaw(dragGlobeRef.current.startYaw - dx * 0.015);
+              setRotPitch(
+                clamp(dragGlobeRef.current.startPitch + dy * 0.014, -1.42, 1.42)
+              );
+            }}
+            onTouchEnd={() => {
+              setIsDraggingGlobe(false);
+              dragGlobeRef.current = null;
+            }}
           >
+            {/* Top 3D Globe Controls Bar */}
+            <div
+              className="absolute top-2 left-2 right-2 z-10 flex flex-wrap items-center justify-between gap-1 text-[10px] font-mono"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-1 bg-black/70 backdrop-blur-xs px-1.5 py-0.5 rounded border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setAutoSpin((s) => !s)}
+                  className={`px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer transition ${
+                    autoSpin
+                      ? 'bg-sky-600 text-white font-bold'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                  title="Toggle 3D Auto-Spin"
+                >
+                  {autoSpin ? (
+                    <Pause className="w-2.5 h-2.5" />
+                  ) : (
+                    <Play className="w-2.5 h-2.5" />
+                  )}
+                  Spin
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAutoSpin(false);
+                    setRotYaw(-0.52);
+                    setRotPitch(-0.18);
+                  }}
+                  className="px-1.5 py-0.5 rounded text-amber-300 hover:bg-slate-800 cursor-pointer"
+                  title="Face Substellar / Dayside Center"
+                >
+                  ☀ Dayside
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAutoSpin(false);
+                    setRotYaw(0);
+                    setRotPitch(0);
+                  }}
+                  className="px-1.5 py-0.5 rounded text-sky-300 hover:bg-slate-800 cursor-pointer"
+                  title="Face Terminator / Default Angle"
+                >
+                  ◐ Term
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAutoSpin(false);
+                    setRotYaw(2.55);
+                    setRotPitch(0.18);
+                  }}
+                  className="px-1.5 py-0.5 rounded text-indigo-300 hover:bg-slate-800 cursor-pointer"
+                  title="Face Anti-Stellar / Nightside"
+                >
+                  ☾ Night
+                </button>
+                {(Math.abs(rotYaw) > 0.01 || Math.abs(rotPitch) > 0.01) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAutoSpin(false);
+                      setRotYaw(0);
+                      setRotPitch(0);
+                    }}
+                    className="p-0.5 rounded text-slate-400 hover:text-white cursor-pointer"
+                    title="Reset 3D Orientation"
+                  >
+                    <RotateCcw className="w-2.5 h-2.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
             <canvas
               ref={globeCanvasRef}
               width={240}
               height={180}
               className={`${
                 expandedMode === 'globe' ? 'h-64' : 'h-40'
+              } w-auto object-contain rounded pointer-events-none`}
+            />
+          </div>
+        )}
+
+        {/* Middle: Internal Composition Cutaway (To the left of the surface vista) */}
+        {(expandedMode === 'split' || expandedMode === 'interior') && (
+          <div
+            className={`${
+              expandedMode === 'split' ? 'md:col-span-3' : 'w-full'
+            } relative bg-[#050810] rounded-lg border border-slate-800/90 overflow-hidden flex flex-col items-center justify-center p-2 select-none`}
+          >
+            <div className="absolute top-2 left-2 z-10 flex items-center gap-1 text-[10px] font-mono bg-black/70 backdrop-blur-xs px-1.5 py-0.5 rounded border border-slate-800 text-slate-300">
+              <Layers className="w-2.5 h-2.5 text-amber-400" />
+              <span>Interior Cutaway</span>
+            </div>
+            <canvas
+              ref={interiorCanvasRef}
+              width={280}
+              height={180}
+              className={`${
+                expandedMode === 'interior' ? 'h-64' : 'h-40'
               } w-auto object-contain rounded`}
             />
-            <div className="absolute bottom-2 left-2.5 right-2.5 flex justify-between items-center text-[10px] font-mono text-slate-400 bg-black/60 backdrop-blur-xs px-2 py-0.5 rounded">
-              <span>Orbital Telemetry Render</span>
-              <span className="text-sky-300">
-                {isMoon ? `Moon #${moonIndex + 1}` : `Planet #${bodyIndex + 1}`}
-              </span>
-            </div>
           </div>
         )}
 
         {/* Right: Panoramic Surface Horizon / Atmospheric Cloud-Top Vista */}
-        {expandedMode !== 'globe' && (
+        {(expandedMode === 'split' || expandedMode === 'vista') && (
           <div
             className={`${
-              expandedMode === 'split' ? 'md:col-span-7' : 'w-full'
+              expandedMode === 'split' ? 'md:col-span-5' : 'w-full'
             } relative bg-[#050810] rounded-lg border border-slate-800/90 overflow-hidden flex items-center justify-center`}
           >
             <canvas
@@ -1301,23 +1783,9 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
               width={380}
               height={180}
               className={`${
-                expandedMode === 'vista' ? 'h-64' : 'h-44'
+                expandedMode === 'vista' ? 'h-64' : 'h-40'
               } w-full object-cover`}
             />
-            <div className="absolute bottom-2 left-2.5 right-2.5 flex justify-between items-center text-[10px] font-mono text-slate-300 bg-black/60 backdrop-blur-xs px-2.5 py-0.5 rounded">
-              <span>
-                {isGasOrFluidEnvelope
-                  ? '1-Bar Upper Cloud Deck Panorama'
-                  : covPct > 0 && covPct < 100
-                  ? `Coastal Shoreline (${solvent} Sea & Continents)`
-                  : covPct === 100
-                  ? `Global Pelagic ${solvent} Horizon`
-                  : 'Surface Horizon Panorama'}
-              </span>
-              <span className="text-amber-300">
-                Star {primaryStar?.label} ({primaryStar?.spectralType.split(' ')[0]})
-              </span>
-            </div>
           </div>
         )}
       </div>

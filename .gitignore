@@ -6,7 +6,9 @@ node_modules/
 # Production build artifacts
 dist/
 dist-ssr/
+release/
 *.local
+.firebase/
 
 # Environment variables
 .env

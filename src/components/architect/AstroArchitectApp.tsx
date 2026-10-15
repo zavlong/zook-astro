@@ -868,7 +868,7 @@ export const AstroArchitectApp: React.FC<Props> = ({
                                   className="w-full bg-slate-900 border border-slate-700/50 rounded px-1 py-0.5 text-slate-300"
                                 >
                                   <option value="pc_barren_cold">Cold Barren</option>
-                                  <option value="pc_frozen">Frozen Ice</option>
+                                  <option value="pc_frozen">Frozen</option>
                                   <option value="pc_molten">Molten</option>
                                   <option value="pc_continental">Continental</option>
                                   <option value="pc_toxic">Toxic</option>

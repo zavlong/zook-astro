@@ -19,6 +19,11 @@ import {
   calculateStellarEvolution,
 } from '../astrophysics/evolution';
 import { getStarColorRGB } from '../astrophysics/colors';
+import {
+  resolvePlanetClass,
+  resolveMoonClass,
+  deriveAtmosphereClassification,
+} from '../astrophysics/classifier';
 
 const M_SUN_EARTH = 332946.0;
 const M_JUP_EARTH = 317.83;
@@ -51,6 +56,8 @@ export interface RealisticBeltBody {
   beltWidth: number;
   rawSlotMassEarth: number;
   massEarth: number;
+  incDeg: number;
+  omegaNodeDeg: number;
 }
 
 export interface RealisticPlanetBody {
@@ -59,6 +66,9 @@ export interface RealisticPlanetBody {
   a: number;
   a_birth: number;
   e: number;
+  incDeg: number;
+  omegaNodeDeg: number;
+  argPeriDeg: number;
   migrationHistory: string;
   massEarth: number;
   massJup: number;
@@ -416,12 +426,12 @@ export function buildHierarchy(
   if (nStars === 1) {
     const sA = getStarStats(sysMass, age, feh, 'A');
     return {
-      archName: 'Unary Single Star',
+      archName: 'Single Star',
       stars: [sA],
       splits: [],
       zones: [
         {
-          title: `Star A (${sA.spectralType}) — Unary System`,
+          title: `Star A (${sA.spectralType})`,
           mass: sA.mass,
           lum: sA.lumNum,
           age,
@@ -563,7 +573,7 @@ export function buildHierarchy(
     const pZone: RealisticZoneInput | null =
       pOut / pIn >= 2.2
         ? {
-            title: `Circumbinary ${name} (P-Type)`,
+            title: `Circumbinary ${name}`,
             mass: +mTot.toFixed(3),
             lum: lTot,
             age,
@@ -580,9 +590,8 @@ export function buildHierarchy(
     const nat = 50.0 * Math.pow(st.mass, 0.55);
     const aOut = Math.min(nat, cap);
     if (aOut / aIn >= 2.2) {
-      const tr = aOut < nat * 0.85 ? 'Truncated S-Type' : 'Wide S-Type';
       zones.push({
-        title: `Star ${st.label} (${st.spectralType}) — ${tr}`,
+        title: `Star ${st.label} (${st.spectralType})`,
         mass: st.mass,
         lum: st.lumNum,
         age,
@@ -651,6 +660,72 @@ export function buildHierarchy(
   }
 
   return { archName, stars, splits, zones };
+}
+
+/**
+ * Realistic Orbital Inclination & Nodal Dynamics (Steps 2 & 6 3D Astrodynamics)
+ * - Low-eccentricity regular planets (e < 0.1): tightly coplanar via Rayleigh distribution
+ *   with sigma ~ 0.95 deg (mean ~ 1.2 deg, 90% < 2.5 deg) and ascending nodes clustered near the system invariant plane.
+ * - Dynamically excited / scattered planets (e >= 0.1): inclination excitation scales with eccentricity (e-i coupling).
+ * - Distant dwarf / erratic / scattered disk worlds (a > 30 AU or scattered role): high inclination dispersion (sigma ~ 8-16 deg).
+ * - Belts: gentle dispersion (sigma ~ 1.8 deg).
+ */
+export function computeOrbitalInclination(
+  bodyKind: 'planet' | 'belt',
+  role: string | undefined,
+  a: number,
+  e: number,
+  massEarth: number,
+  systemNodeDeg: number,
+  random: () => number,
+  rand: (min: number, max: number) => number
+): { incDeg: number; omegaNodeDeg: number; argPeriDeg: number } {
+  const sampleRayleigh = (sigma: number) => {
+    const u = Math.max(1e-6, Math.min(1 - 1e-6, random()));
+    return +(sigma * Math.sqrt(-2 * Math.log(1 - u))).toFixed(2);
+  };
+
+  const isDwarfOrErratic =
+    (role != null && /scattered|erratic|dwarf|kuiper|trans-neptunian|oort|isolated/i.test(role)) ||
+    (a > 30 && massEarth < 0.25);
+
+  let sigmaDeg = 0.95;
+  let nodeDispersion = 20;
+
+  if (bodyKind === 'belt') {
+    sigmaDeg = 1.8;
+    nodeDispersion = 35;
+  } else if (isDwarfOrErratic) {
+    sigmaDeg = rand(8.0, 16.0);
+    nodeDispersion = 180;
+  } else if (e > 0.1) {
+    sigmaDeg = +(1.2 + e * 22).toFixed(2);
+    nodeDispersion = Math.min(180, +(25 + e * 180).toFixed(1));
+  } else {
+    sigmaDeg = 0.95;
+    nodeDispersion = 20;
+  }
+
+  let incDeg = sampleRayleigh(sigmaDeg);
+  if (isDwarfOrErratic) {
+    incDeg = Math.min(55, incDeg);
+  } else if (e > 0.1) {
+    incDeg = Math.min(35, incDeg);
+  } else {
+    incDeg = Math.min(4.5, incDeg);
+  }
+
+  let omegaNodeDeg: number;
+  if (nodeDispersion >= 180) {
+    omegaNodeDeg = +rand(0, 360).toFixed(1);
+  } else {
+    const deltaNode = (random() - 0.5) * 2 * nodeDispersion;
+    omegaNodeDeg = +((systemNodeDeg + deltaNode + 360) % 360).toFixed(1);
+  }
+
+  const argPeriDeg = +rand(0, 360).toFixed(1);
+
+  return { incDeg, omegaNodeDeg, argPeriDeg };
 }
 
 export function generateZoneSystem(
@@ -724,7 +799,7 @@ export function generateZoneSystem(
     if (abA < z.a_out && (!prA || abA > prA.a * 1.32)) {
       bodies.push({
         kind: 'belt',
-        role: 'Outer Planetesimal Belt (Stranded Beyond Growth Cliff)',
+        role: abA < a_snow ? 'Rocky Asteroid Belt' : 'Icy Asteroid Belt',
         a: +abA.toFixed(4),
         beltWidth: +(0.3 * abA).toFixed(4),
       });
@@ -751,7 +826,7 @@ export function generateZoneSystem(
     );
     bodies.push({
       kind: 'belt',
-      role: 'Inner Battered Asteroid Belt',
+      role: abB < a_snow ? 'Rocky Asteroid Belt' : 'Icy Asteroid Belt',
       a: +abB.toFixed(4),
       beltWidth: +(0.24 * abB).toFixed(4),
     });
@@ -772,7 +847,7 @@ export function generateZoneSystem(
       const akB = prB.a * rand(1.65, 2.15);
       bodies.push({
         kind: 'belt',
-        role: 'Outer Kuiper Belt',
+        role: akB < a_snow ? 'Rocky Asteroid Belt' : 'Icy Asteroid Belt',
         a: +akB.toFixed(4),
         beltWidth: +(0.3 * akB).toFixed(4),
       });
@@ -795,7 +870,7 @@ export function generateZoneSystem(
     if (abM < 0.85 * z.a_out) {
       bodies.push({
         kind: 'belt',
-        role: 'Main Asteroid Belt',
+        role: abM < a_snow ? 'Rocky Asteroid Belt' : 'Icy Asteroid Belt',
         a: +abM.toFixed(4),
         beltWidth: +(0.22 * abM).toFixed(4),
       });
@@ -817,7 +892,7 @@ export function generateZoneSystem(
       const akC = prC.a * rand(1.5, 1.85);
       bodies.push({
         kind: 'belt',
-        role: 'Outer Kuiper Belt',
+        role: akC < a_snow ? 'Rocky Asteroid Belt' : 'Icy Asteroid Belt',
         a: +akC.toFixed(4),
         beltWidth: +(0.28 * akC).toFixed(4),
       });
@@ -830,7 +905,7 @@ export function generateZoneSystem(
       bRad.push(acD);
       bodies.push({
         kind: 'belt',
-        role: acD < a_snow ? 'Warm Silicate Debris Belt' : 'Cold Planetesimal Belt',
+        role: acD < a_snow ? 'Rocky Asteroid Belt' : 'Icy Asteroid Belt',
         a: +acD.toFixed(4),
         beltWidth: +(0.28 * acD).toFixed(4),
       });
@@ -1157,10 +1232,21 @@ export function generateZoneSystem(
     return +(0.5 * (lo + hi)).toFixed(4);
   }
 
+  const systemInvariantNodeDeg = +rand(0, 360).toFixed(1);
   const finalBodies: RealisticPlanetOrBelt[] = [];
   for (let fI = 0; fI < mBodies.length; fI++) {
     const b = mBodies[fI];
     if (b.kind === 'belt') {
+      const { incDeg, omegaNodeDeg } = computeOrbitalInclination(
+        'belt',
+        b.role,
+        b.a,
+        0.02,
+        b.massEarth,
+        systemInvariantNodeDeg,
+        random,
+        rand
+      );
       finalBodies.push({
         kind: 'belt',
         role: b.role,
@@ -1169,6 +1255,8 @@ export function generateZoneSystem(
         beltWidth: b.beltWidth || +(0.25 * b.a).toFixed(4),
         rawSlotMassEarth: b.rawSlotMassEarth,
         massEarth: b.massEarth,
+        incDeg,
+        omegaNodeDeg,
       });
       continue;
     }
@@ -1222,39 +1310,39 @@ export function generateZoneSystem(
         const Test = Math.pow(Math.pow(T0 * 0.91, 4) + Math.pow(Tint, 4), 0.25);
         if (Test < 150) {
           sud = 'I';
-          pClass = 'Sudarsky Class I Gas Giant (NH3 Clouds)';
+          pClass = 'Class I Gas Giant';
           alb = rand(0.5, 0.57);
         } else if (Test < 350) {
           sud = 'II';
-          pClass = 'Sudarsky Class II Gas Giant (H2O Clouds)';
+          pClass = 'Class II Gas Giant';
           alb = rand(0.74, 0.81);
         } else if (Test < 900) {
           sud = 'III';
           pClass =
             Test >= 620
-              ? 'Sudarsky Class III Hot Jupiter (Cloudless Azure)'
-              : 'Sudarsky Class III Gas Giant (Cloudless Azure)';
+              ? 'Class III Hot Jupiter'
+              : 'Class III Gas Giant';
           alb = rand(0.08, 0.15);
         } else if (Test < 1400) {
           sud = 'IV';
-          pClass = 'Sudarsky Class IV Hot Jupiter (Alkali Metal)';
+          pClass = 'Class IV Hot Jupiter';
           alb = rand(0.02, 0.06);
         } else {
           sud = 'V';
-          pClass = 'Sudarsky Class V Hot Jupiter (Silicate/Iron Clouds)';
+          pClass = 'Class V Hot Jupiter';
           alb = rand(0.45, 0.55);
         }
       } else if (b.iceFrac >= 0.2 || b.massEarth >= 10) {
         alb = T0 < 220 ? rand(0.3, 0.42) : rand(0.15, 0.28);
         pClass =
           T0 < 220
-            ? 'Ice Giant (Methane/Water Mantle)'
+            ? 'Ice Giant'
             : T0 >= 650
-            ? 'Hot Neptune / Ultra-Warm Sub-Saturn'
-            : 'Warm Neptune / Sub-Saturn';
+            ? 'Hot Neptune'
+            : 'Warm Neptune';
       } else {
         alb = rand(0.22, 0.38);
-        pClass = 'Gas Dwarf (Sub-Neptune)';
+        pClass = 'Gas Dwarf';
       }
     } else {
       alb = b.iceFrac >= 0.15 ? rand(0.35, 0.58) : rand(0.12, 0.28);
@@ -1299,11 +1387,11 @@ export function generateZoneSystem(
         : clamp(Math.round(22 + ((Tsurf - 800) / 600) * 60 + rand(-10, 12)), 18, 88);
       pClass = isChth
         ? isGlobalMagma
-          ? 'Molten Chthonian Planet (Global Magma Ocean)'
-          : 'Molten Chthonian Planet (Lava Seas & Crust)'
+          ? 'Molten Chthonian Planet'
+          : 'Molten Chthonian Planet'
         : isGlobalMagma
-        ? 'Molten Planet (Global Magma Ocean)'
-        : 'Molten Planet (Lava Seas & Continents)';
+        ? 'Molten Magma Ocean Planet'
+        : 'Molten Planet';
       if (isRefractoryVapor) {
         gases.SiO = 0.48;
         gases.Na_K = 0.22;
@@ -1335,7 +1423,7 @@ export function generateZoneSystem(
       Tsurf = Teq;
       pClass =
         b.iceFrac >= 0.2
-          ? 'Airless Frozen Ice World'
+          ? 'Frozen World'
           : isChth
           ? 'Airless Chthonian Core'
           : 'Barren Rocky World';
@@ -1389,11 +1477,11 @@ export function generateZoneSystem(
             atmoType = 'Dense CO2-SO2 Sky w/ Surface H2SO4 Acid Rain';
             pClass =
               random() < 0.78
-                ? 'Sulfuric Acid Marine World (H2SO4 Seas & Continents)'
-                : 'Sulfuric Acid Ocean World (Liquid H2SO4)';
+                ? 'Sulfuric Acid Marine World'
+                : 'Sulfuric Acid Ocean World';
           } else {
             atmoType = 'Venusian Desiccated CO2-SO2 Runaway Greenhouse';
-            pClass = 'Toxic / Venusian World';
+            pClass = 'Venusian World';
           }
         } else {
           let Tit = Tdry;
@@ -1416,7 +1504,7 @@ export function generateZoneSystem(
               rH2 >= 1.5
                 ? 'Hycean Greenhouse Water World (Pressure-Cooker Ocean)'
                 : 'Greenhouse Water World (CO2-Pressurized Liquid Ocean)';
-            pClass = 'Greenhouse Water World (Liquid Ocean)';
+            pClass = 'Greenhouse Water World';
           }
         }
       } else if (muMin > 28 && muMin <= 64) {
@@ -1437,11 +1525,11 @@ export function generateZoneSystem(
           atmoType = 'Heavy Volcanic SO2-CO2 Equilibrium Sky';
           pClass =
             random() < 0.78
-              ? 'Volcanic SO2 Marine World (SO2 Seas & Continents)'
-              : 'Volcanic SO2 Ocean World (Liquid SO2)';
+              ? 'Volcanic SO2 Marine World'
+              : 'Volcanic SO2 Ocean World';
         } else {
           atmoType = pC + pS >= 0.05 ? 'Thin Volcanic CO2-SO2 Sky' : 'Tenuous Heavy-Gas Exosphere';
-          pClass = b.iceFrac >= 0.15 ? 'Frozen Icy World' : 'Cold Rocky / Martian World';
+          pClass = b.iceFrac >= 0.15 ? 'Frozen World' : 'Martian World';
         }
       } else if (Tpot >= 274 && muMin <= 28) {
         if (hasCont) {
@@ -1469,16 +1557,16 @@ export function generateZoneSystem(
               pH2SO4 = +rand(0.01, 0.06).toFixed(3);
               atmoType = 'Sulfurous CO2-SO2-H2SO4 Acidic Sky';
               pClass = hasContinents
-                ? 'Sulfuric Acid Marine World (H2SO4 Seas & Continents)'
-                : 'Sulfuric Acid Ocean World (Liquid H2SO4)';
+                ? 'Sulfuric Acid Marine World'
+                : 'Sulfuric Acid Ocean World';
             } else if (Ttest >= 198 && Ttest <= tBoilSO2) {
               atmoType = 'Volcanic N2-CO2-SO2 Sulfurous Sky';
               pClass = hasContinents
-                ? 'Volcanic SO2 Marine World (SO2 Seas & Continents)'
-                : 'Volcanic SO2 Ocean World (Liquid SO2)';
+                ? 'Volcanic SO2 Marine World'
+                : 'Volcanic SO2 Ocean World';
             } else {
               atmoType = 'Venusian Desiccated CO2-SO2 Runaway Greenhouse';
-              pClass = 'Toxic / Venusian World';
+              pClass = 'Venusian World';
             }
           } else if (isHighPressureCO2) {
             // Solve self-consistently for P_CO2 >= 5.2 bar so Tsurf genuinely lands in [220 K, 301.5 K]
@@ -1500,7 +1588,7 @@ export function generateZoneSystem(
             atmoType = 'High-Pressure Super-Dense CO2-N2 Sky (Liquid CO2 Regime)';
             pClass =
               random() < 0.72
-                ? 'Liquid CO2 Marine World (CO2 Seas & Continents)'
+                ? 'Liquid CO2 Marine World'
                 : 'High-Pressure Liquid CO2 Ocean World';
           } else {
             // Carbonate-silicate thermostat buffers P_CO2 so Tsurf lands in the temperate liquid-water window
@@ -1521,7 +1609,10 @@ export function generateZoneSystem(
             );
             const bio = z.age >= 1.5 && pC < 1.5 && random() < 0.65;
             if (bio) {
-              biosphereDesc = 'Active Aerobic O2-N2 Marine & Continental Biosphere';
+              biosphereDesc =
+                z.age >= 3.0
+                  ? 'Active Multicellular Aerobic (O2-N2) Continental & Marine Biosphere'
+                  : 'Active Unicellular Microbial (Archaean/Prokaryotic) Marine Biosphere';
             }
             pO = bio ? pN * rand(0.18, 0.32) : 0;
             pM = bio ? 0.0001 : rand(0.002, 0.02);
@@ -1533,8 +1624,8 @@ export function generateZoneSystem(
                 : 'Prebiotic N2-CO2 Marine Sky';
             pClass =
               b.massEarth > 2.0
-                ? 'Temperate Super-Earth (Habitable)'
-                : 'Temperate Terrestrial (Habitable)';
+                ? 'Temperate Super-Earth'
+                : 'Temperate Terrestrial';
           }
         } else {
           pW = rand(0.012, 0.032);
@@ -1542,12 +1633,15 @@ export function generateZoneSystem(
           const bioPelagic = z.age >= 1.5 && pC < 12 && random() < 0.55;
           if (bioPelagic) {
             pO = pN * rand(0.08, 0.22);
-            biosphereDesc = 'Active Pelagic H2O Marine Biosphere';
+            biosphereDesc =
+              z.age >= 3.0
+                ? 'Active Multicellular Pelagic Marine Biosphere'
+                : 'Active Unicellular Pelagic Microbial Biosphere';
           }
           atmoType = bioPelagic
             ? 'Biogenic N2-CO2-O2 Pelagic Sky (Marine Biosphere)'
             : 'Clathrate-Buffered CO2-N2 Pelagic Sky (Seltzer Ocean)';
-          pClass = 'Temperate Pelagic Water World (Habitable)';
+          pClass = 'Temperate Pelagic Water World';
         }
       } else if (Teq >= 135 || b.iceFrac < 0.15) {
         // Sub-zero / Outer-HZ / Cool Zone: Check for Liquid NH3-H2O, Liquid CO2, or Liquid SO2 seas & oceans
@@ -1572,24 +1666,24 @@ export function generateZoneSystem(
               if (Teq + ghDelta(pC, pN, pH, pM_bio, 0, pNH3, 0, Teq, grav) <= 265) {
                 pM = pM_bio;
               }
+              const bioNH3Complex = z.age >= 3.0 ? 'Multicellular' : 'Unicellular';
               biosphereDesc = isContinentalNH3
-                ? 'Active Ammoniated (NH3-H2O) Marine & Cryo-Continental Biosphere'
-                : 'Active Pelagic Ammoniated (NH3-H2O) Marine Biosphere';
+                ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Cryo-Continental Biosphere`
+                : `Active ${bioNH3Complex} Pelagic Ammoniated (NH3-H2O) Marine Biosphere`;
               atmoType = 'N2-NH3-CH4 Cryo-Biosphere Sky (Ammonia Life)';
               pClass = isContinentalNH3
-                ? 'Cryo-Ammonia Terrestrial (Habitable / NH3 Biosphere)'
-                : 'Cryo-Ammonia Pelagic World (Habitable / NH3 Biosphere)';
+                ? 'Cryo-Ammonia Terrestrial'
+                : 'Cryo-Ammonia Pelagic World';
             } else {
               atmoType = 'Sub-Zero N2-NH3-CH4 Ammonia Greenhouse Sky';
               pClass = isContinentalNH3
-                ? 'Cryo-Ammonia Marine World (NH3-H2O Seas & Continents)'
-                : 'Cryo-Ammonia Ocean World (Liquid NH3-H2O)';
+                ? 'Cryo-Ammonia Marine World'
+                : 'Cryo-Ammonia Ocean World';
             }
-          } else {
             pNH3 = 0;
             pM = 0;
             atmoType = 'Cold Glaciated CO2-N2 Sky';
-            pClass = b.iceFrac >= 0.15 ? 'Frozen Icy World' : 'Cold Rocky / Martian World';
+            pClass = b.iceFrac >= 0.15 ? 'Frozen World' : 'Martian World';
           }
         } else if (b.iceFrac < 0.025 && muMin <= 44) {
           // Cool rocky world: check for High-Pressure Liquid CO2 Seas/Ocean (216.6-304.1 K, P_CO2 >= 5.18 bar) or Liquid SO2 Seas
@@ -1601,7 +1695,7 @@ export function generateZoneSystem(
             atmoType = 'High-Pressure Condensed CO2-N2 Sky';
             pClass =
               random() < 0.72
-                ? 'Liquid CO2 Marine World (CO2 Seas & Continents)'
+                ? 'Liquid CO2 Marine World'
                 : 'High-Pressure Liquid CO2 Ocean World';
           } else if (Teq >= 155 && pN >= 0.08 && random() < 0.38) {
             pS = +(rand(0.15, 1.8) * grav * mSc2).toFixed(3);
@@ -1610,28 +1704,28 @@ export function generateZoneSystem(
               atmoType = 'Cryo-Volcanic N2-SO2-CO2 Sky';
               pClass =
                 random() < 0.78
-                  ? 'Volcanic SO2 Marine World (SO2 Seas & Continents)'
-                  : 'Volcanic SO2 Ocean World (Liquid SO2)';
+                  ? 'Volcanic SO2 Marine World'
+                  : 'Volcanic SO2 Ocean World';
             } else {
               pS = 0;
               atmoType =
                 pC + pN + pH < 0.05 ? 'Mars-Class Thin CO2 Sky' : 'Cold Glaciated CO2-N2 Sky';
-              pClass = 'Cold Rocky / Martian World';
+              pClass = 'Martian World';
             }
           } else {
             atmoType =
               pC + pN + pH < 0.05 ? 'Mars-Class Thin CO2 Sky' : 'Cold Glaciated CO2-N2 Sky';
-            pClass = b.iceFrac >= 0.15 ? 'Frozen Icy World' : 'Cold Rocky / Martian World';
+            pClass = b.iceFrac >= 0.15 ? 'Frozen World' : 'Martian World';
           }
         } else {
           atmoType =
             pC + pN + pH < 0.05 ? 'Mars-Class Thin CO2 Sky' : 'Cold Glaciated CO2-N2 Sky';
-          pClass = b.iceFrac >= 0.15 ? 'Frozen Icy World' : 'Cold Rocky / Martian World';
+          pClass = b.iceFrac >= 0.15 ? 'Frozen World' : 'Martian World';
         }
       } else {
         if (muMin > 28 || Teq < 62) {
           atmoType = 'Frozen Cryogenic Vacuum';
-          pClass = 'Frozen Ice World';
+          pClass = 'Frozen World';
         } else {
           pN = clamp(Math.pow(b.massEarth / 0.022, 0.65) * rand(0.8, 2.5), 0.08, 12);
           pM = muMin <= 16.5 ? pN * rand(0.03, 0.12) : 0;
@@ -1645,23 +1739,24 @@ export function generateZoneSystem(
             const isContinentalNH3 = b.iceFrac < 0.04 || random() < 0.5;
             const bioNH3 = z.age >= 1.5 && random() < 0.55;
             if (bioNH3) {
+              const bioNH3Complex = z.age >= 3.0 ? 'Multicellular' : 'Unicellular';
               biosphereDesc = isContinentalNH3
-                ? 'Active Ammoniated (NH3-H2O) Marine & Cryo-Continental Biosphere'
-                : 'Active Pelagic Ammoniated (NH3-H2O) Marine Biosphere';
+                ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Cryo-Continental Biosphere`
+                : `Active ${bioNH3Complex} Pelagic Ammoniated (NH3-H2O) Marine Biosphere`;
               atmoType = 'H2-N2-NH3 Cryo-Biosphere Sky (Ammonia Life)';
               pClass = isContinentalNH3
-                ? 'Cryo-Ammonia Terrestrial (Habitable / NH3 Biosphere)'
-                : 'Cryo-Ammonia Pelagic World (Habitable / NH3 Biosphere)';
+                ? 'Cryo-Ammonia Terrestrial'
+                : 'Cryo-Ammonia Pelagic World';
             } else {
               atmoType = 'H2-N2-NH3 Collision-Induced Ammonia Greenhouse';
               pClass = isContinentalNH3
-                ? 'Cryo-Ammonia Marine World (NH3-H2O Seas & Continents)'
-                : 'Cryo-Ammonia Ocean World (Liquid NH3-H2O)';
+                ? 'Cryo-Ammonia Marine World'
+                : 'Cryo-Ammonia Ocean World';
             }
           } else {
             pNH3 = 0;
-            atmoType = 'Cryogenic N2-CH4 Smog (Titan-Class)';
-            pClass = 'Titan-Class N2-CH4 World';
+            atmoType = 'Dense Cryogenic N2-CH4 Smog';
+            pClass = 'Methane World';
           }
         }
       }
@@ -1724,11 +1819,11 @@ export function generateZoneSystem(
               : 'Volcanic SO2-Alkali Vapor Sky over Molten Lava';
           pClass = isChth
             ? isGlobalMagma
-              ? 'Molten Chthonian Planet (Global Magma Ocean)'
-              : 'Molten Chthonian Planet (Lava Seas & Crust)'
+              ? 'Molten Chthonian Planet'
+              : 'Molten Chthonian Planet'
             : isGlobalMagma
-            ? 'Molten Planet (Global Magma Ocean)'
-            : 'Molten Planet (Lava Seas & Continents)';
+            ? 'Molten Magma Ocean Planet'
+            : 'Molten Planet';
           hydro = {
             state: isGlobalMagma
               ? 'Global Surface Liquid Silicate Magma Ocean (100% Coverage)'
@@ -1744,7 +1839,7 @@ export function generateZoneSystem(
             siKm: 0,
           };
         } else if (pClass.includes('Sulfuric Acid')) {
-          const isMarine = pClass.includes('Seas & Continents');
+          const isMarine = pClass.includes('Marine');
           const covPct = isMarine ? randInt(12, 74) : 100;
           const acidDepthKm = isMarine
             ? clamp(Math.round(rE * 1.8 * rand(0.4, 1.4)), 1, 4)
@@ -1762,7 +1857,7 @@ export function generateZoneSystem(
             siKm: 0,
           };
         } else if (pClass.includes('SO2')) {
-          const isMarine = pClass.includes('Seas & Continents');
+          const isMarine = pClass.includes('Marine');
           const covPct = isMarine ? randInt(14, 78) : 100;
           const so2DepthKm = isMarine
             ? clamp(Math.round(rE * 2.2 * rand(0.4, 1.5)), 1, 5)
@@ -1780,7 +1875,7 @@ export function generateZoneSystem(
             siKm: 0,
           };
         } else if (pClass.includes('CO2')) {
-          const isMarine = pClass.includes('Seas & Continents');
+          const isMarine = pClass.includes('Marine');
           const covPct = isMarine ? randInt(18, 82) : 100;
           const co2DepthKm = isMarine
             ? clamp(Math.round(rE * 3.0 * rand(0.4, 1.5)), 1, 7)
@@ -1802,7 +1897,7 @@ export function generateZoneSystem(
           };
         } else if (pClass.includes('Cryo-Ammonia')) {
           const isMarine =
-            pClass.includes('Terrestrial') || pClass.includes('Seas & Continents');
+            pClass.includes('Terrestrial') || pClass.includes('Marine');
           if (isMarine) {
             const covPct = randInt(18, 84);
             const nh3DepthKm = clamp(Math.round(rE * 3.5 * rand(0.4, 1.6)), 1, 9);
@@ -1904,7 +1999,7 @@ export function generateZoneSystem(
             iceKm: 0,
             siKm: 0,
           };
-        } else if (pClass.includes('Titan-Class')) {
+        } else if (pClass.includes('Titan-Class') || pClass.includes('Methane World')) {
           // Surface liquid methane/ethane lakes & seas + solid cryo-bedrock continents + subsurface water-ammonia ocean
           const covPct = randInt(8, 62);
           const totIceKm = Math.max(25, Math.round(rE * 6371 * 0.3 * Math.max(0.15, b.iceFrac)));
@@ -1925,6 +2020,27 @@ export function generateZoneSystem(
       }
     }
 
+    const effT = Tsurf ?? Tatm ?? Teq;
+    const hasEnv = b.gasFrac >= 0.015 || b.massEarth >= 12;
+    pClass = resolvePlanetClass(
+      pClass,
+      effT,
+      hydro,
+      b.massEarth,
+      b.iceFrac,
+      isChth,
+      hasEnv,
+      pBar,
+      gases
+    );
+    const isSupercritical =
+      hydro?.solvent === 'Supercritical H2O' ||
+      Boolean(hydro?.state?.includes('Supercritical')) ||
+      pClass.includes('Supercritical') ||
+      pClass.includes('Steam') ||
+      pClass.includes('Water Giant');
+    atmoType = deriveAtmosphereClassification(pBar, gases, hasEnv, isSupercritical);
+
     // Moons (1-2% Sub-Disk Split)
     const rH_Rp =
       (b.a *
@@ -1936,7 +2052,6 @@ export function generateZoneSystem(
     const maxRet = 0.65 * rH_Rp;
     const isCold = Teq < 175;
     const roche = 2.44 * Math.pow(dens / (isCold ? 1.85 : 3.1), 0.333);
-    const hasEnv = b.gasFrac >= 0.015 || b.massEarth >= 12;
     let rings: string | null = null;
     const moons: RealisticMoon[] = [];
 
@@ -2024,9 +2139,9 @@ export function generateZoneSystem(
           : mE >= 0.06 && Teq >= 195 && Teq <= 330
           ? 'Temperate Habitable Exomoon'
           : mE >= 0.012 && Teq >= 135 && Teq < 215
-          ? 'Cryo-Ammonia Marine Moon (Liquid NH3-H2O)'
+          ? 'Cryo-Ammonia Marine Moon'
           : mE >= 0.012 && Teq >= 65 && Teq <= 170
-          ? 'Hazy N2-CH4 Moon (Titan-Class)'
+          ? 'Methane Moon'
           : isCold && tW >= 0.03 && mE >= 0.001
           ? 'Subsurface-Ocean Moon (Europa-Class)'
           : mE >= 0.001
@@ -2040,7 +2155,7 @@ export function generateZoneSystem(
           ? +rand(0.45, 0.68).toFixed(2)
           : mc.includes('Io')
           ? +rand(0.52, 0.63).toFixed(2)
-          : mc.includes('Titan') || mc.includes('Ammonia') || mc.includes('Habitable')
+          : mc.includes('Titan') || mc.includes('Methane') || mc.includes('Ammonia') || mc.includes('Habitable')
           ? +rand(0.22, 0.34).toFixed(2)
           : +rand(0.11, 0.24).toFixed(2);
 
@@ -2080,7 +2195,7 @@ export function generateZoneSystem(
             mGhK = ghTest;
             mTsurf = tTest;
             mAtmoType = 'Dense Tidal-Volcanic SO2-CO2 Sky';
-            mc = 'Volcanic SO2-Sea Moon (Liquid SO2)';
+            mc = 'Volcanic SO2-Sea Moon';
             mGases.SO2 = +(pS_m / mPBar).toFixed(3);
             mGases.CO2 = +(pC_m / mPBar).toFixed(3);
           } else {
@@ -2116,12 +2231,15 @@ export function generateZoneSystem(
           mTsurf = tTest;
           const mBioNH3 = z.age >= 1.5 && random() < 0.52;
           if (mBioNH3) {
-            mBioDesc = 'Active Exomoon Ammoniated (NH3-H2O) Cryo-Biosphere';
+            mBioDesc =
+              z.age >= 3.0
+                ? 'Active Multicellular Exomoon Ammoniated (NH3-H2O) Cryo-Biosphere'
+                : 'Active Unicellular Exomoon Ammoniated Cryo-Microbial Biosphere';
             mAtmoType = 'N2-NH3-CH4 Exomoon Cryo-Biosphere Sky (Ammonia Life)';
-            mc = 'Cryo-Ammonia Habitable Exomoon (NH3 Biosphere)';
+            mc = 'Cryo-Ammonia Habitable Exomoon';
           } else {
             mAtmoType = 'Sub-Zero N2-NH3-CH4 Ammonia Sky';
-            mc = 'Cryo-Ammonia Marine Moon (Liquid NH3-H2O)';
+            mc = 'Cryo-Ammonia Marine Moon';
           }
           mGases.N2 = +(pN / mPBar).toFixed(3);
           mGases.NH3 = +(pNH3_m / mPBar).toFixed(3);
@@ -2130,18 +2248,19 @@ export function generateZoneSystem(
           mPBar = +(pN + pM).toFixed(3);
           mGhK = +ghDelta(0, pN, 0, pM, 0, 0, 0, mTatm, mGrav).toFixed(1);
           mTsurf = +(mTatm + mGhK).toFixed(1);
-          mAtmoType = 'Dense Cryogenic N2-CH4 Smog (Titan-Class)';
-          mc = 'Hazy N2-CH4 Moon (Titan-Class)';
+          mAtmoType = 'Dense Cryogenic N2-CH4 Smog';
+          mc = 'Methane Moon';
           mGases.N2 = +(pN / mPBar).toFixed(3);
           mGases.CH4 = +(pM / mPBar).toFixed(3);
         }
-      } else if (mc.includes('Titan') || (mE >= 0.01 && mTeq >= 65 && mTeq <= 175 && mMuMin <= 28)) {
+      } else if (mc.includes('Titan') || mc.includes('Methane') || (mE >= 0.01 && mTeq >= 65 && mTeq <= 175 && mMuMin <= 28)) {
         const pN = +clamp(Math.pow(mE / 0.022, 0.65) * rand(0.9, 2.4), 0.12, 6.5).toFixed(3);
         const pM = +(pN * rand(0.03, 0.08)).toFixed(3);
         mPBar = +(pN + pM).toFixed(3);
         mGhK = +ghDelta(0, pN, 0, pM, 0, 0, 0, mTatm, mGrav).toFixed(1);
         mTsurf = +(mTatm + mGhK).toFixed(1);
-        mAtmoType = 'Dense Cryogenic N2-CH4 Smog (Titan-Class)';
+        mAtmoType = 'Dense Cryogenic N2-CH4 Smog';
+        mc = 'Methane Moon';
         mGases.N2 = +(pN / mPBar).toFixed(3);
         mGases.CH4 = +(pM / mPBar).toFixed(3);
       } else if (mc.includes('Habitable') || (mE >= 0.06 && mTeq >= 195 && mTeq <= 325 && mMuMin <= 28)) {
@@ -2156,7 +2275,7 @@ export function generateZoneSystem(
           mGhK = +ghDelta(pC_m, pN_m, 0, 0, 0, 0, 0, mTatm, mGrav).toFixed(1);
           mTsurf = +(mTatm + mGhK).toFixed(1);
           mAtmoType = 'High-Pressure Condensed CO2-N2 Exomoon Sky';
-          mc = 'High-Pressure CO2-Sea Moon (Liquid CO2)';
+          mc = 'High-Pressure CO2-Sea Moon';
           mGases.CO2 = +(pC_m / mPBar).toFixed(3);
           mGases.N2 = +(pN_m / mPBar).toFixed(3);
         } else {
@@ -2166,7 +2285,10 @@ export function generateZoneSystem(
           const pC = solveCO2ForTargetTemp(targetT, mTatm, pN, 0, 0, pW, 0, 0, mGrav, 0.0005, 2.5);
           const pO = z.age >= 1.5 && pC < 1.2 && random() < 0.65 ? +(pN * rand(0.15, 0.28)).toFixed(3) : 0;
           if (pO > 0) {
-            mBioDesc = 'Active Exomoon Aerobic O2-N2 Biosphere';
+            mBioDesc =
+              z.age >= 3.0
+                ? 'Active Multicellular Exomoon Aerobic O2-N2 Biosphere'
+                : 'Active Unicellular Exomoon Microbial Biosphere';
           }
           mPBar = +(pN + pC + pO + pW).toFixed(3);
           mGhK = +ghDelta(pC, pN, 0, 0, pW, 0, 0, mTatm, mGrav).toFixed(1);
@@ -2188,7 +2310,7 @@ export function generateZoneSystem(
         const tBoilH2SO4 = 610 + 18 * Math.log(1 + mPBar);
         if (mTsurf >= 275 && mTsurf <= tBoilH2SO4) {
           mAtmoType = 'Dense CO2-SO2-H2SO4 Acidic Exomoon Sky';
-          mc = 'Sulfuric Acid Sea Moon (Liquid H2SO4)';
+          mc = 'Sulfuric Acid Sea Moon';
         } else {
           mAtmoType = 'Venusian Desiccated CO2-SO2 Exomoon Sky';
           mc = 'Major Rocky Moon (Luna-Class)';
@@ -2294,7 +2416,7 @@ export function generateZoneSystem(
             siKm: 0,
           };
         }
-      } else if (mc.includes('Titan') || mAtmoType.includes('Titan-Class')) {
+      } else if (mc.includes('Titan') || mc.includes('Methane') || mAtmoType.includes('Titan-Class')) {
         const covPct = randInt(6, 54);
         const totW = Math.max(20, Math.round(rKm * 0.32 * Math.max(0.15, iceF)));
         const shellKm = clamp(Math.round(totW * 0.25), 6, 45);
@@ -2363,6 +2485,10 @@ export function generateZoneSystem(
           : isRetro
           ? '1:1 Tidally Locked (Retrograde Orbit)'
           : '1:1 Tidally Locked to Host Planet';
+
+      const effMoonT = mTsurf ?? mTatm ?? mTeq;
+      mc = resolveMoonClass(mc, effMoonT, mHydro, iceF, mE, mPBar, mGases);
+      mAtmoType = deriveAtmosphereClassification(mPBar, mGases, false);
 
       return {
         id: `m_${fI + 1}_${moonIdxCounter}`,
@@ -2497,12 +2623,26 @@ export function generateZoneSystem(
       rotH = +Math.exp(rand(Math.log(8.5), Math.log(50))).toFixed(1);
     }
 
+    const { incDeg, omegaNodeDeg, argPeriDeg } = computeOrbitalInclination(
+      'planet',
+      b.role,
+      b.a,
+      b.e,
+      b.massEarth,
+      systemInvariantNodeDeg,
+      random,
+      rand
+    );
+
     finalBodies.push({
       kind: 'planet',
       role: b.role,
       a: b.a,
       a_birth: b.a_birth,
       e: b.e,
+      incDeg,
+      omegaNodeDeg,
+      argPeriDeg,
       migrationHistory: b.migrationHistory,
       massEarth: +b.massEarth.toFixed(3),
       massJup: +(b.massEarth / M_JUP_EARTH).toFixed(4),
@@ -2648,14 +2788,13 @@ export function convertZoneBodiesToPlanetArchetypes(
   );
 
   return planetBodies.map((b, idx) => {
-    const incDeg = (random() - 0.5) * 4.5;
     return {
       id: idx + 1,
       name: `Planet ${String.fromCharCode(98 + idx).toUpperCase()}`,
       a0: b.a,
       currentA: b.a,
       ecc: b.e,
-      incDeg,
+      incDeg: b.incDeg ?? 0,
       massEarth: b.massEarth,
       radiusEarth: b.radiusEarth,
       albedo: b.albedo,
@@ -2687,6 +2826,8 @@ export function convertZoneBodiesToPlanetArchetypes(
       rotationHours: b.rotationHours,
       spinState: b.spinState,
       axialTiltDeg: b.axialTiltDeg,
+      omegaNodeDeg: b.omegaNodeDeg,
+      argPeriDeg: b.argPeriDeg,
     };
   });
 }
@@ -2717,29 +2858,35 @@ export function mapRealisticPlanetToArchitectClass(b: RealisticPlanetBody): stri
     return 'pc_ice_giant';
   }
   if (pc.includes('Molten') || pc.includes('Lava') || b.surfaceTempK >= 800) return 'pc_molten';
-  // Uninhabitable dense/hostile atmospheres & exotic non-water oceans: Venusian, Supercritical Water, Greenhouse Water, Sulfuric Acid, SO2, Liquid CO2, Cryo-Ammonia, and Titan-Class Smog
+  // Uninhabitable dense/hostile atmospheres & exotic non-water oceans
   if (
     pc.includes('Toxic') ||
     pc.includes('Venusian') ||
     pc.includes('Supercritical') ||
-    pc.includes('Greenhouse Water World') ||
-    pc.includes('Sulfuric Acid') ||
-    pc.includes('SO2 Ocean') ||
-    pc.includes('CO2 Ocean') ||
-    pc.includes('Cryo-Ammonia') ||
+    pc.includes('Sulfuric') ||
+    pc.includes('Sulfurous') ||
+    pc.includes('Carbonic') ||
+    pc.includes('Ammonia') ||
+    pc.includes('Methane') ||
     pc.includes('Titan')
   ) {
     return 'pc_toxic';
   }
-  // Only genuinely habitable worlds map to Stellaris colonizable classes
-  if (pc.includes('Habitable')) {
-    if (pc.includes('Pelagic') || pc.includes('Water World')) return 'pc_ocean';
+  // Genuinely habitable worlds map to Stellaris colonizable classes
+  if (pc.includes('Aquatic Ocean') || pc.includes('Water Ocean') || pc.includes('Pelagic') || pc.includes('Water World')) {
+    return 'pc_ocean';
+  }
+  if (
+    (pc.includes('Aquatic') && (pc.includes('Temperate') || pc.includes('Warm'))) ||
+    pc.includes('Habitable') ||
+    pc.includes('Terrestrial')
+  ) {
     if (b.surfaceTempK > 302) return 'pc_tropical';
     if (b.surfaceTempK < 278) return 'pc_arctic';
     return 'pc_continental';
   }
   if (pc.includes('Frozen') || pc.includes('Icy')) return 'pc_frozen';
-  if (pc.includes('Martian') || b.T_eq < 180) return 'pc_barren_cold';
+  if (pc.includes('Airless') || pc.includes('Martian') || b.T_eq < 180) return 'pc_barren_cold';
   return 'pc_barren';
 }
 

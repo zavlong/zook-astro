@@ -165,6 +165,8 @@ export interface PlanetArchetype {
   rotationHours?: number;
   spinState?: string;
   axialTiltDeg?: number;
+  omegaNodeDeg?: number;
+  argPeriDeg?: number;
 }
 
 export interface PlanetPhysicsComputed {
