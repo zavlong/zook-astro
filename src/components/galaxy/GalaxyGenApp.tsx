@@ -20,6 +20,7 @@ import {
   Tag,
   Layers,
   FolderOpen,
+  Save,
 } from 'lucide-react';
 import {
   GalaxyConfig,
@@ -83,6 +84,8 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
 
   // Saved Galaxies Catalog Modal state
   const [showSavedGalaxiesModal, setShowSavedGalaxiesModal] = useState<boolean>(false);
+  const [saveBanner, setSaveBanner] = useState<string | null>(null);
+  const [saveCatalogVersion, setSaveCatalogVersion] = useState<number>(0);
 
   // Image Quantizer & Backdrop state
   const [showImageModal, setShowImageModal] = useState<boolean>(false);
@@ -389,10 +392,31 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     [isEnteringSector, getHexCenter, onSelectSector]
   );
 
-  // Keyboard navigation: Page Down for lower view level (zooms into Sector), Page Up prevents scroll
+  // Save current galaxy with all seeds, explored sectors, and generated star systems
+  const handleSaveCurrentGalaxy = useCallback(() => {
+    const secCount = universeCache.getLoadedSectorCount();
+    const sysCount = universeCache.getLoadedSystemCount();
+    const finalName = config.name || `Galaxy Seed #${config.seed}`;
+    const saved = universeCache.saveCurrentUniverse(
+      { ...config, name: finalName },
+      finalName,
+      `Saved with ${secCount} cached sectors and ${sysCount} star systems.`,
+      galaxyData.stats
+    );
+    setSaveCatalogVersion((v) => v + 1);
+    setSaveBanner(
+      `💾 Saved "${saved.name}" (Seed #${saved.seed}) with ${secCount} cached sectors & ${sysCount} systems!`
+    );
+    setTimeout(() => setSaveBanner(null), 4500);
+  }, [config, galaxyData]);
+
+  // Keyboard navigation & Shortcuts: Page Down (Sector), Page Up, Ctrl+S / Cmd+S (Save Galaxy)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'PageDown' && e.code !== 'PageDown' && e.key !== 'PageUp' && e.code !== 'PageUp') return;
+      const isSave = (e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S');
+      const isNav = e.key === 'PageDown' || e.code === 'PageDown' || e.key === 'PageUp' || e.code === 'PageUp';
+
+      if (!isSave && !isNav) return;
 
       const target = e.target as HTMLElement | null;
       if (
@@ -402,6 +426,13 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
           target.tagName === 'SELECT' ||
           target.isContentEditable)
       ) {
+        return;
+      }
+
+      if (isSave) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleSaveCurrentGalaxy();
         return;
       }
 
@@ -433,6 +464,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     selectedSector,
     galaxyData.sectors,
     handleTriggerEnterSector,
+    handleSaveCurrentGalaxy,
   ]);
 
   // Pan handlers
@@ -634,12 +666,23 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     setTimeout(() => setCopiedId(false), 1800);
   };
 
-  // Load saved galaxy from catalog
+  // Load saved galaxy from catalog and rehydrate cached sectors & systems
   const handleLoadSavedGalaxy = (saved: SavedGalaxy) => {
+    universeCache.loadGalaxy(saved);
     setConfig(saved.config);
     setCustomGalaxyData(null);
     setBgImageUrl(null);
     setShowSavedGalaxiesModal(false);
+    const secCount =
+      saved.cachedSectorCount ??
+      (saved.cachedSectors ? Object.keys(saved.cachedSectors).length : 0);
+    const sysCount =
+      saved.cachedSystemCount ??
+      (saved.cachedSystems ? Object.keys(saved.cachedSystems).length : 0);
+    setSaveBanner(
+      `Loaded "${saved.name}" (Seed #${saved.seed}) with ${secCount} cached sectors & ${sysCount} systems.`
+    );
+    setTimeout(() => setSaveBanner(null), 4000);
   };
 
   // Apply custom sliders
@@ -650,6 +693,14 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
 
   return (
     <div className="w-full h-full flex flex-col bg-[#030611] text-slate-100 overflow-hidden font-sans select-none relative">
+      {/* Toast Save Confirmation Notification */}
+      {saveBanner && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-slate-950/95 border border-emerald-500/80 text-emerald-200 text-xs font-mono font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 duration-200 backdrop-blur-md">
+          <Check className="w-4 h-4 text-emerald-400" />
+          <span>{saveBanner}</span>
+        </div>
+      )}
+
       {/* ============================================================================ */}
       {/* TOP COMMAND BAR                                                              */}
       {/* ============================================================================ */}
@@ -727,6 +778,21 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
 
         {/* Right: Customization, Search, Roll */}
         <div className="flex items-center gap-2">
+          {/* Primary Save Galaxy Button */}
+          <button
+            onClick={handleSaveCurrentGalaxy}
+            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition cursor-pointer active:scale-95 border border-emerald-400/40"
+            title="Save Galaxy: persists current galaxy parameters, seeds, and all cached sectors & star systems (Hotkey: Ctrl+S)"
+          >
+            <Save className="w-3.5 h-3.5 text-white" />
+            <span>Save Galaxy</span>
+            {(universeCache.getLoadedSectorCount() > 0 || universeCache.getLoadedSystemCount() > 0) && (
+              <span className="px-1.5 py-0.2 rounded-full bg-slate-950/80 text-emerald-300 text-[10px] border border-emerald-500/40 font-mono">
+                {universeCache.getLoadedSectorCount()}s / {universeCache.getLoadedSystemCount()}sys
+              </span>
+            )}
+          </button>
+
           {/* Saved Galaxies Catalog Button */}
           <button
             onClick={() => setShowSavedGalaxiesModal(true)}
@@ -1861,6 +1927,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
       {/* Saved Galaxies Catalog Modal */}
       {showSavedGalaxiesModal && (
         <SavedGalaxiesModal
+          key={saveCatalogVersion}
           isOpen={showSavedGalaxiesModal}
           onClose={() => setShowSavedGalaxiesModal(false)}
           currentConfig={config}

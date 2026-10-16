@@ -57,20 +57,16 @@ export const SavedGalaxiesModal: React.FC<SavedGalaxiesModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Save current galaxy
+  // Save current galaxy with all seeds and cached sectors/systems
   const handleSaveCurrent = (e: React.FormEvent) => {
     e.preventDefault();
     const finalName = draftName.trim() || `Galaxy Seed #${currentConfig.seed}`;
-    const newEntry: SavedGalaxy = {
-      id: `gal_${currentConfig.seed}_${Date.now()}`,
-      name: finalName,
-      seed: currentConfig.seed,
-      savedAt: Date.now(),
-      config: { ...currentConfig, name: finalName },
-      notes: draftNotes.trim() || undefined,
-      stats: currentStats,
-    };
-    universeCache.saveGalaxy(newEntry);
+    universeCache.saveCurrentUniverse(
+      currentConfig,
+      finalName,
+      draftNotes.trim() || undefined,
+      currentStats
+    );
     setSavedList(universeCache.getSavedGalaxies());
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 2400);
@@ -102,6 +98,7 @@ export const SavedGalaxiesModal: React.FC<SavedGalaxiesModalProps> = ({
         const parsed = universeCache.parseGalaxyJson(content);
         if (parsed) {
           universeCache.saveGalaxy(parsed);
+          universeCache.loadGalaxy(parsed);
           setSavedList(universeCache.getSavedGalaxies());
           onLoadGalaxy(parsed);
         } else {
@@ -168,9 +165,14 @@ export const SavedGalaxiesModal: React.FC<SavedGalaxiesModalProps> = ({
                 <Save className="w-3.5 h-3.5 text-blue-400" />
                 <span>Save Active Galaxy</span>
               </span>
-              <span className="text-[10.5px] px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800 font-bold">
-                Seed #{currentConfig.seed} &bull; {currentConfig.morphology}
-              </span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10.5px] px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800 font-bold">
+                  Seed #{currentConfig.seed} &bull; {currentConfig.morphology}
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800 font-mono">
+                  💾 {universeCache.getLoadedSectorCount()} sectors &bull; ⭐ {universeCache.getLoadedSystemCount()} systems cached
+                </span>
+              </div>
             </div>
 
             <form onSubmit={handleSaveCurrent} className="space-y-3">
@@ -271,11 +273,14 @@ export const SavedGalaxiesModal: React.FC<SavedGalaxiesModalProps> = ({
                 {filteredGalaxies.map((item) => (
                   <div
                     key={item.id}
-                    onClick={() => onLoadGalaxy(item)}
+                    onClick={() => {
+                      universeCache.loadGalaxy(item);
+                      onLoadGalaxy(item);
+                    }}
                     className="p-3 rounded-xl bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800/80 hover:border-blue-500/60 transition cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
+                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                         <span className="font-bold text-white group-hover:text-cyan-300 transition-colors text-sm truncate">
                           {item.name}
                         </span>
@@ -290,6 +295,18 @@ export const SavedGalaxiesModal: React.FC<SavedGalaxiesModalProps> = ({
                             {copiedId === item.id ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
                           </button>
                         </span>
+                        {item.cachedSectorCount !== undefined && item.cachedSectorCount > 0 && (
+                          <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 flex items-center gap-1 shadow-sm">
+                            <span>💾</span>
+                            <span>{item.cachedSectorCount} sectors</span>
+                          </span>
+                        )}
+                        {item.cachedSystemCount !== undefined && item.cachedSystemCount > 0 && (
+                          <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-teal-950/80 text-teal-300 border border-teal-800/80 flex items-center gap-1 shadow-sm">
+                            <span>⭐</span>
+                            <span>{item.cachedSystemCount} systems</span>
+                          </span>
+                        )}
                       </div>
 
                       <div className="text-[10px] text-slate-400 flex items-center gap-2 flex-wrap">
@@ -324,7 +341,7 @@ export const SavedGalaxiesModal: React.FC<SavedGalaxiesModalProps> = ({
                         type="button"
                         onClick={(e) => handleExport(item, e)}
                         className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 transition"
-                        title="Export JSON"
+                        title="Export JSON with All Seeds & Cached Systems"
                       >
                         <Download className="w-3.5 h-3.5" />
                       </button>
@@ -338,8 +355,11 @@ export const SavedGalaxiesModal: React.FC<SavedGalaxiesModalProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => onLoadGalaxy(item)}
-                        className="px-3 py-1.5 rounded-lg bg-blue-600 group-hover:bg-blue-500 text-white font-bold text-[10.5px] transition shadow"
+                        onClick={() => {
+                          universeCache.loadGalaxy(item);
+                          onLoadGalaxy(item);
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-blue-600 group-hover:bg-blue-500 text-white font-bold text-[10.5px] transition shadow cursor-pointer"
                       >
                         Load
                       </button>

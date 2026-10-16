@@ -25,6 +25,7 @@ import {
   Tag,
   ChevronDown,
   Cloud,
+  Save,
 } from 'lucide-react';
 import {
   SectorHexConfig,
@@ -1231,6 +1232,25 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Roll New Sector</span>
+          </button>
+
+          <button
+            onClick={() => {
+              const galConfig = universeCache.getActiveGalaxyConfig();
+              const secCount = universeCache.getLoadedSectorCount();
+              const sysCount = universeCache.getLoadedSystemCount();
+              const saved = universeCache.saveCurrentUniverse(
+                galConfig,
+                galConfig.name || `Galaxy Seed #${galConfig.seed}`,
+                `Saved from Sector ${config.name || config.coord || ''} with ${secCount} sectors and ${sysCount} systems.`
+              );
+              setBannerNotice(`💾 Saved Universe & Galaxy (Seed #${saved.seed}) with ${secCount} sectors & ${sysCount} systems!`);
+            }}
+            className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition cursor-pointer"
+            title="Save Galaxy & Universe: persists galaxy parameters, seeds, and all cached sectors & star systems"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Save Galaxy</span>
           </button>
         </div>
       </div>
