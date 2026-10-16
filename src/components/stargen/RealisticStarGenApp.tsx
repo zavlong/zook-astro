@@ -101,7 +101,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
   // Proportional 3D Orrery Camera State (pxPerAU, center in AU, 3D Yaw & Pitch, Orbit Animation)
   const [orreryPxPerAU, setOrreryPxPerAU] = useState<number>(35);
-  const [orreryCamAU, setOrreryCamAU] = useState<Vec2AU>({ x: 0, y: 0 });
+  const [orreryCamAU, setOrreryCamAU] = useState<Vec2AU>({ x: 0, y: 0, z: 0 });
   const [orreryYaw, setOrreryYaw] = useState<number>(-0.42);
   const [orreryPitch, setOrreryPitch] = useState<number>(0.94); // ~54° 3D perspective tilt
   const [orreryDragMode, setOrreryDragMode] = useState<'rotate' | 'pan'>('rotate');
@@ -116,6 +116,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     clientY: number;
     camX: number;
     camY: number;
+    camZ: number;
     yaw: number;
     pitch: number;
     action: 'rotate' | 'pan';
@@ -272,6 +273,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       setOrreryCamAU((prev) => ({
         x: prev.x + dAU_x * (1 - 1 / k),
         y: prev.y + dAU_y * (1 - 1 / k),
+        z: prev.z ?? 0,
       }));
     }
     setOrreryPxPerAU(newPxPerAU);
@@ -437,7 +439,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     const layout = computeSystem2DLayout(res);
     const fitPxPerAU = clamp(320 / Math.max(0.2, layout.maxExtentAU), 0.15, 4000);
     setOrreryPxPerAU(fitPxPerAU);
-    setOrreryCamAU({ x: 0, y: 0 });
+    setOrreryCamAU({ x: 0, y: 0, z: 0 });
     setTrackedTarget(null);
   };
 
@@ -460,7 +462,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
   const handleZoomToEntity = (entity: SelectedMapEntity) => {
     if (!systemResult) return;
-    setTrackedTarget(null);
+    setTrackedTarget(entity);
     const layout = computeSystem2DLayout(systemResult, orreryTimeYr);
 
     if (entity.kind === 'star') {
@@ -473,7 +475,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       const maxPlanetA = sZone
         ? sZone.bodies.reduce((m, b) => Math.max(m, b.a), sZone.a_in * 4)
         : 2.5;
-      setOrreryCamAU(sPos);
+      setOrreryCamAU({ x: sPos.x, y: sPos.y, z: 0 });
       setOrreryPxPerAU(clamp(260 / Math.max(0.05, maxPlanetA * 1.25), 0.15, 60000));
       return;
     }
@@ -482,7 +484,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       const sp = systemResult.hierarchy.splits[entity.splitIdx];
       if (!sp) return;
       const bPos = layout.baryPos[sp.pair] || { x: 0, y: 0 };
-      setOrreryCamAU(bPos);
+      setOrreryCamAU({ x: bPos.x, y: bPos.y, z: 0 });
       setOrreryPxPerAU(clamp(260 / Math.max(0.5, sp.a_AU * 2.2), 0.15, 60000));
       return;
     }
@@ -1674,9 +1676,10 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     const camDistAU = 720 / Math.max(0.05, orreryPxPerAU);
 
     const project3D = (wx: number, wy: number, wz = 0) => {
+      const camZ = orreryCamAU.z ?? 0;
       const dx = wx - orreryCamAU.x;
       const dy = wy - orreryCamAU.y;
-      const dz = wz;
+      const dz = wz - camZ;
       const x1 = dx * cosYaw - dy * sinYaw;
       const y1 = dx * sinYaw + dy * cosYaw;
       const xCam = x1;
@@ -1771,7 +1774,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     const barPx = barAU * orreryPxPerAU;
 
     const focusCameraOn = (centerAU: Vec2AU, targetOuterAU: number) => {
-      setOrreryCamAU(centerAU);
+      setOrreryCamAU({ x: centerAU.x, y: centerAU.y, z: 0 });
       setOrreryPxPerAU(clamp(260 / Math.max(0.05, targetOuterAU), 0.15, 60000));
     };
 
@@ -2714,6 +2717,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                 clientY: e.clientY,
                 camX: orreryCamAU.x,
                 camY: orreryCamAU.y,
+                camZ: orreryCamAU.z ?? 0,
                 yaw: orreryYaw,
                 pitch: orreryPitch,
                 action,
@@ -2745,6 +2749,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                 setOrreryCamAU({
                   x: dragStartRef.current.camX + dCamX * cY + dCamY * sY,
                   y: dragStartRef.current.camY - dCamX * sY + dCamY * cY,
+                  z: dragStartRef.current.camZ,
                 });
               }
             }}

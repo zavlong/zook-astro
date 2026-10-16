@@ -353,12 +353,14 @@ export function getBodyWorldPosAU(
   if (entity.kind === 'star') {
     const st = res.hierarchy.stars[entity.starIdx];
     if (!st) return null;
-    return layout.starPos[st.label] || { x: 0, y: 0 };
+    const pos = layout.starPos[st.label] || { x: 0, y: 0 };
+    return { x: pos.x, y: pos.y, z: 0 };
   }
   if (entity.kind === 'split') {
     const sp = res.hierarchy.splits[entity.splitIdx];
     if (!sp) return null;
-    return layout.baryPos[sp.pair] || { x: 0, y: 0 };
+    const pos = layout.baryPos[sp.pair] || { x: 0, y: 0 };
+    return { x: pos.x, y: pos.y, z: 0 };
   }
   const z = res.zones[entity.zoneIdx];
   if (!z) return null;
@@ -387,5 +389,5 @@ export function getBodyWorldPosAU(
     theta
   );
 
-  return { x: pos3.wx, y: pos3.wy };
+  return { x: pos3.wx, y: pos3.wy, z: pos3.wz };
 }

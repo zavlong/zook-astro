@@ -63,6 +63,7 @@ export type SelectedMapEntity =
 export interface Vec2AU {
   x: number;
   y: number;
+  z?: number;
 }
 
 export interface Point3D {
