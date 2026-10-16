@@ -4,6 +4,7 @@ import {
   PlanetArchetype,
   RealisticBinarySplit,
   RealisticHydrosphere,
+  RealisticMagneticField,
   RealisticMoon,
   RealisticStarNode,
   StarSystem,
@@ -106,6 +107,7 @@ export interface RealisticPlanetBody {
   rotationHours: number;
   spinState: string;
   axialTiltDeg: number;
+  magneticField: RealisticMagneticField;
 }
 
 export type RealisticPlanetOrBelt = RealisticBeltBody | RealisticPlanetBody;
@@ -748,6 +750,200 @@ export function computeOrbitalInclination(
   return { incDeg, omegaNodeDeg, argPeriDeg };
 }
 
+/**
+ * Planetary Magnetic Field & Core Dynamo Simulation
+ * Models intrinsic dipolar dynamos, multipolar ionic dynamos, tidal dynamos,
+ * and core freezing timescales (geodynamo cessation) with implications for
+ * atmospheric stripping (muMin) and cosmic radiation shielding / biosphere development.
+ */
+export function computePlanetaryMagneticField(params: {
+  massEarth: number;
+  radiusEarth: number;
+  densityGcm3: number;
+  rockFrac: number;
+  iceFrac: number;
+  gasFrac: number;
+  aAU: number;
+  starLum: number;
+  starMass: number;
+  sysAgeGyr: number;
+  rotHours: number;
+  isMoon?: boolean;
+  tidalW?: number;
+  hostPlanetMassEarth?: number;
+  random: () => number;
+  rand: (min: number, max: number) => number;
+}): RealisticMagneticField {
+  const {
+    massEarth,
+    radiusEarth,
+    iceFrac,
+    gasFrac,
+    aAU,
+    starLum,
+    sysAgeGyr,
+    rotHours,
+    isMoon = false,
+    tidalW = 0,
+    rand,
+  } = params;
+
+  let surfaceFieldGauss = 0;
+  let dynamoStatus = '';
+  let hasActiveDynamo = false;
+  let coreState = '';
+  let radiationLevel: 'Minimal' | 'Moderate' | 'High' | 'Extreme' = 'Moderate';
+  let auroraDescription = '';
+  let biosphereImplication = '';
+
+  const hasEnv = gasFrac >= 0.015 || massEarth >= 12;
+  const isGasGiant = gasFrac >= 0.15 || massEarth >= 40;
+  const isIceGiant = (hasEnv && !isGasGiant) || (iceFrac >= 0.35 && massEarth >= 4);
+
+  if (isGasGiant) {
+    // 1. Gas Giants: Deep convective liquid metallic hydrogen dynamo
+    hasActiveDynamo = true;
+    const baseField = massEarth >= 150 ? rand(3.5, 9.5) : rand(1.2, 3.8);
+    const spinFactor = Math.sqrt(14 / Math.max(6, rotHours));
+    surfaceFieldGauss = +(baseField * spinFactor).toFixed(2);
+    dynamoStatus = 'Active Super-Critical Metallic Hydrogen Dynamo';
+    coreState = 'Convective Liquid Metallic Hydrogen Envelope over Molten Heavy Core';
+    radiationLevel = 'Minimal';
+    auroraDescription = 'Persistent Relativistic Polar Auroral Ovals & Flux Tube Footprints';
+    biosphereImplication =
+      'Extreme Jovian magnetosphere shields volatile envelope from stellar wind stripping, but generates intense inner van Allen radiation belts.';
+  } else if (isIceGiant) {
+    // 2. Ice Giants: Superionic water-ammonia electrolytic mantle dynamo
+    hasActiveDynamo = true;
+    surfaceFieldGauss = +rand(0.18, 0.65).toFixed(2);
+    dynamoStatus = 'Active Multipolar Thin-Shell Ionic Mantle Dynamo';
+    coreState = 'Convective Superionic H2O-NH3-CH4 Mantle over Silicate/Metal Nucleus';
+    radiationLevel = 'Minimal';
+    auroraDescription = 'Tilted Off-Axis Asymmetric Auroral Arcs & Variable Cusp Glow';
+    biosphereImplication =
+      'Convective electrolytic mantle generates strong multipolar magnetosphere, deflecting stellar ion erosion.';
+  } else if (isMoon) {
+    // 3. Natural Satellites / Moons:
+    const hasTidalDynamo = tidalW >= 0.35 && massEarth >= 0.003;
+    const hasLiquidCore = massEarth >= 0.02 && sysAgeGyr < 3.5 * Math.pow(massEarth / 0.02, 1.25);
+
+    if (hasTidalDynamo || hasLiquidCore) {
+      hasActiveDynamo = true;
+      surfaceFieldGauss = +(rand(0.004, 0.018) * (1 + tidalW * 0.4)).toFixed(3);
+      dynamoStatus = 'Active Miniature Tidal-Convective Dynamo';
+      coreState = 'Tidally Maintained Partially Molten Fe-S Core';
+      radiationLevel = 'Moderate';
+      auroraDescription = 'Faint Polar Auroral Filaments & Sub-Stellar Interaction Currents';
+      biosphereImplication =
+        'Intrinsic mini-magnetosphere provides localized deflection against host planet plasma sheet & stellar cosmic rays.';
+    } else {
+      hasActiveDynamo = false;
+      surfaceFieldGauss = +rand(0.00005, 0.0006).toFixed(5);
+      dynamoStatus = 'Extinct Dynamo (Frozen Core Remanent Crustal Magnetism)';
+      coreState = 'Completely Solidified Fe-Ni / Silicate Core';
+      radiationLevel = 'High';
+      auroraDescription = 'No Global Aurora; Localized Micro-Cusps over Remanent Crustal Anomalies';
+      biosphereImplication =
+        'Unshielded surface; reliance on host planet magnetosphere or subsurface ocean ice shell for radiation defense.';
+    }
+  } else {
+    // 4. Terrestrial & Super-Earth Rocky Worlds:
+    // Core cooling timescale: tau_freeze = 4.2 * M^1.25 Gyr
+    const coreFreezeTauGyr = 4.2 * Math.pow(massEarth, 1.25) * (1 + tidalW * 0.3);
+    const isCoreLiquid = sysAgeGyr <= coreFreezeTauGyr;
+    const isFastSpin = rotHours <= 96; // Coriolis organizing limit (Earth=24h; Venus=5832h fails)
+
+    if (isCoreLiquid && isFastSpin) {
+      hasActiveDynamo = true;
+      const massScale = Math.pow(massEarth, 0.5);
+      const spinScale = Math.sqrt(24 / Math.max(6, rotHours));
+      surfaceFieldGauss = +clamp(rand(0.28, 0.62) * massScale * spinScale, 0.08, 2.5).toFixed(2);
+      dynamoStatus = 'Active Convective Fe-Ni Liquid Outer Core Geodynamo';
+      coreState = 'Convecting Molten Fe-Ni Outer Core with Crystallizing Solid Inner Core';
+      radiationLevel = 'Minimal';
+      auroraDescription = 'Dynamic Polar Auroral Curtains (O/N2 Molecular Atmospheric Emission)';
+      biosphereImplication =
+        'Coherent dipolar magnetosphere shields atmosphere from stellar wind sputtering and protects surface landmasses from cosmic ray / flare radiation, enabling complex multicellular surface life.';
+    } else if (isCoreLiquid && !isFastSpin) {
+      hasActiveDynamo = false;
+      surfaceFieldGauss = +rand(0.001, 0.025).toFixed(3);
+      dynamoStatus = 'Collapsed Dynamo (Molten Core, Sub-Critical Coriolis Rotation)';
+      coreState = 'Molten Fe-Ni Core (Stagnant Plumes, Non-Organized Convection)';
+      radiationLevel = 'Moderate';
+      auroraDescription = 'Diffuse Low-Latitude Airglow & Induced Ionospheric Tail Glow';
+      biosphereImplication =
+        'Slow rotation inhibits coherent dynamo; atmosphere subject to unshielded solar wind ion pickup unless protected by high surface atmospheric pressure.';
+    } else {
+      hasActiveDynamo = false;
+      surfaceFieldGauss = +rand(0.0001, 0.0015).toFixed(4);
+      dynamoStatus = 'Extinct Dynamo (Core Solidified / Mantle Stagnant)';
+      coreState = 'Completely Solidified Fe-Ni Core (Conductive Inactive Solid)';
+      radiationLevel = 'High';
+      auroraDescription = 'Localized Sputtered Auroral Footprints over Fossilized Crustal Magnetism';
+      biosphereImplication =
+        'Absence of magnetosphere exposes surface to stellar wind stripping and lethal cosmic radiation; surface life restricted to deep oceans, aquifers, or subsurface lithosphere unless atmosphere exceeds 2 bar.';
+    }
+  }
+
+  const surfaceFieldMicroTesla = +(surfaceFieldGauss * 100).toFixed(1);
+  const magneticMomentEarth = +(
+    surfaceFieldGauss * Math.pow(Math.max(0.1, radiusEarth), 3) / 0.5
+  ).toFixed(2);
+
+  let magnetopauseRadiusRp = 1.0;
+  if (hasActiveDynamo && surfaceFieldGauss >= 0.05) {
+    const windPressureFactor = Math.max(0.05, starLum / Math.pow(Math.max(0.05, aAU), 2));
+    magnetopauseRadiusRp = +clamp(
+      1.0 + 8.5 * Math.pow(surfaceFieldGauss / 0.5, 0.33) * Math.pow(1 / windPressureFactor, 0.167),
+      1.2,
+      120
+    ).toFixed(1);
+  } else {
+    magnetopauseRadiusRp = +(1.0 + Math.min(0.25, surfaceFieldGauss * 2.0)).toFixed(2);
+  }
+
+  const bowShockRadiusRp = +(magnetopauseRadiusRp * 1.32).toFixed(1);
+
+  let shieldingEfficiencyPct = 0;
+  if (hasActiveDynamo) {
+    shieldingEfficiencyPct = clamp(
+      Math.round(80 + Math.log10(Math.max(0.1, surfaceFieldGauss / 0.5) * 10) * 12 + rand(-2, 3)),
+      65,
+      99
+    );
+    if (isGasGiant) shieldingEfficiencyPct = 99;
+  } else if (surfaceFieldGauss >= 0.01) {
+    shieldingEfficiencyPct = clamp(Math.round(18 + surfaceFieldGauss * 600), 12, 45);
+  } else {
+    shieldingEfficiencyPct = clamp(Math.round(surfaceFieldGauss * 3000), 1, 8);
+  }
+
+  if (shieldingEfficiencyPct >= 85) {
+    radiationLevel = 'Minimal';
+  } else if (shieldingEfficiencyPct >= 50) {
+    radiationLevel = 'Moderate';
+  } else if (shieldingEfficiencyPct >= 15) {
+    radiationLevel = 'High';
+  } else {
+    radiationLevel = 'Extreme';
+  }
+
+  return {
+    surfaceFieldGauss,
+    surfaceFieldMicroTesla,
+    magneticMomentEarth,
+    dynamoStatus,
+    hasActiveDynamo,
+    coreState,
+    magnetopauseRadiusRp,
+    bowShockRadiusRp,
+    shieldingEfficiencyPct,
+    radiationLevel,
+    auroraDescription,
+    biosphereImplication,
+  };
+}
+
 export function generateZoneSystem(
   z: RealisticZoneInput,
   rng?: PRNG
@@ -1369,12 +1565,64 @@ export function generateZoneSystem(
       if (isChth) pClass = 'Chthonian Stripped Giant Core';
     }
 
+    // Spin & Tidal Locking (Computed early so rotation informs dynamo Coriolis organization)
+    const pDays = 365.25 * Math.sqrt(Math.pow(b.a, 3) / z.mass);
+    const pHrs = pDays * 24;
+    const aLock =
+      0.45 *
+      (b.gasFrac >= 0.1 ? 0.65 : 1.0) *
+      Math.pow(z.mass, 0.333) *
+      Math.pow(Math.max(0.01, z.age) / 4.5, 0.167);
+    let rotH = 24;
+    let spinSt = 'Free Prograde Rotation';
+    let tilt = +rand(2, 38).toFixed(1);
+    if (b.a <= aLock) {
+      const r32 = b.e >= 0.1;
+      rotH = +(r32 ? 0.667 * pHrs : pHrs).toFixed(1);
+      spinSt = r32 ? '3:2 Spin-Orbit Resonance' : '1:1 Tidally Locked';
+      tilt = +rand(0.1, 1.8).toFixed(1);
+    } else if (b.gasFrac >= 0.015 || b.massEarth >= 12) {
+      rotH = +rand(8.5, 18).toFixed(1);
+      spinSt = 'Fast Nebular Spin';
+    } else if (random() < 0.1) {
+      rotH = +rand(150, 3200).toFixed(0);
+      spinSt = 'Slow Retrograde (Impact)';
+      tilt = +rand(92, 175).toFixed(1);
+    } else {
+      rotH = +Math.exp(rand(Math.log(8.5), Math.log(50))).toFixed(1);
+    }
+
+    const magField = computePlanetaryMagneticField({
+      massEarth: b.massEarth,
+      radiusEarth: rE,
+      densityGcm3: dens,
+      rockFrac: b.rockFrac,
+      iceFrac: b.iceFrac,
+      gasFrac: b.gasFrac,
+      aAU: b.a,
+      starLum: z.lum,
+      starMass: z.mass,
+      sysAgeGyr: z.age,
+      rotHours: rotH,
+      random,
+      rand,
+    });
+
     const Teq = +(T0 * Math.pow(1 - alb, 0.25)).toFixed(1);
     const Tatm = +Math.pow(Math.pow(Teq, 4) + Math.pow(Tint, 4), 0.25).toFixed(1);
     const xuv = Seff * Math.pow(Math.max(0.05, z.age) / 4.5, -1.1) * Math.pow(z.mass, -1.2);
+    // Unshielded planetary bodies suffer enhanced solar wind sputtering and ion pickup, raising muMin
+    const windStripPenalty =
+      magField.shieldingEfficiencyPct < 50
+        ? 1.0 +
+          0.35 *
+            (1 - magField.shieldingEfficiencyPct / 100) *
+            Math.min(2.5, 4.5 / Math.max(0.2, z.age))
+        : 1.0;
     const muMin = +(
-      (0.028 * Teq * (1 + 1.6 * Math.pow(Math.max(0.01, xuv), 0.25))) /
-      Math.max(1e-4, b.massEarth / rE)
+      ((0.028 * Teq * (1 + 1.6 * Math.pow(Math.max(0.01, xuv), 0.25))) /
+        Math.max(1e-4, b.massEarth / rE)) *
+      windStripPenalty
     ).toFixed(1);
 
     let atmoType = '';
@@ -1629,10 +1877,18 @@ export function generateZoneSystem(
             );
             const bio = z.age >= 1.5 && pC < 1.5 && random() < 0.65;
             if (bio) {
-              biosphereDesc =
-                z.age >= 3.0
-                  ? 'Active Multicellular Aerobic (O2-N2) Continental & Marine Biosphere'
-                  : 'Active Unicellular Microbial (Archaean/Prokaryotic) Marine Biosphere';
+              const isShielded = magField.shieldingEfficiencyPct >= 50;
+              if (isShielded) {
+                biosphereDesc =
+                  z.age >= 3.0
+                    ? 'Active Multicellular Aerobic (O2-N2) Continental & Marine Biosphere'
+                    : 'Active Unicellular Microbial (Archaean/Prokaryotic) Marine Biosphere';
+              } else {
+                biosphereDesc =
+                  z.age >= 3.0
+                    ? 'Active Multicellular Pelagic & Benthic Marine Biosphere (Unshielded Radiation-Sterilized Landmasses)'
+                    : 'Active Unicellular Radiotolerant Marine Microbial Biosphere (Unshielded Surface)';
+              }
             }
             pO = bio ? pN * rand(0.18, 0.32) : 0;
             pM = bio ? 0.0001 : rand(0.002, 0.02);
@@ -1653,10 +1909,15 @@ export function generateZoneSystem(
           const bioPelagic = z.age >= 1.5 && pC < 12 && random() < 0.55;
           if (bioPelagic) {
             pO = pN * rand(0.08, 0.22);
+            const isShielded = magField.shieldingEfficiencyPct >= 50;
             biosphereDesc =
               z.age >= 3.0
-                ? 'Active Multicellular Pelagic Marine Biosphere'
-                : 'Active Unicellular Pelagic Microbial Biosphere';
+                ? isShielded
+                  ? 'Active Multicellular Pelagic Marine Biosphere'
+                  : 'Active Multicellular Deep-Pelagic Ocean Biosphere (Surface Unshielded / Radiation Filtered Below 30m)'
+                : isShielded
+                ? 'Active Unicellular Pelagic Microbial Biosphere'
+                : 'Active Unicellular Deep-Water Microbial Biosphere (Cosmic Ray Attenuation)';
           }
           atmoType = bioPelagic
             ? 'Biogenic N2-CO2-O2 Pelagic Sky (Marine Biosphere)'
@@ -1687,9 +1948,14 @@ export function generateZoneSystem(
                 pM = pM_bio;
               }
               const bioNH3Complex = z.age >= 3.0 ? 'Multicellular' : 'Unicellular';
+              const isShielded = magField.shieldingEfficiencyPct >= 50;
               biosphereDesc = isContinentalNH3
-                ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Cryo-Continental Biosphere`
-                : `Active ${bioNH3Complex} Pelagic Ammoniated (NH3-H2O) Marine Biosphere`;
+                ? isShielded
+                  ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Cryo-Continental Biosphere`
+                  : `Active ${bioNH3Complex} Subsurface & Pelagic Ammoniated Biosphere (Radiation-Sterilized Cryo-Continents)`
+                : isShielded
+                ? `Active ${bioNH3Complex} Pelagic Ammoniated (NH3-H2O) Marine Biosphere`
+                : `Active ${bioNH3Complex} Deep Pelagic Ammoniated (NH3-H2O) Biosphere (Cosmic Ray Attenuation)`;
               atmoType = 'N2-NH3-CH4 Cryo-Biosphere Sky (Ammonia Life)';
               pClass = isContinentalNH3
                 ? 'Cryo-Ammonia Terrestrial'
@@ -1760,9 +2026,14 @@ export function generateZoneSystem(
             const bioNH3 = z.age >= 1.5 && random() < 0.55;
             if (bioNH3) {
               const bioNH3Complex = z.age >= 3.0 ? 'Multicellular' : 'Unicellular';
+              const isShielded = magField.shieldingEfficiencyPct >= 50;
               biosphereDesc = isContinentalNH3
-                ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Cryo-Continental Biosphere`
-                : `Active ${bioNH3Complex} Pelagic Ammoniated (NH3-H2O) Marine Biosphere`;
+                ? isShielded
+                  ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Cryo-Continental Biosphere`
+                  : `Active ${bioNH3Complex} Subsurface & Pelagic Ammoniated Biosphere (Radiation-Sterilized Cryo-Continents)`
+                : isShielded
+                ? `Active ${bioNH3Complex} Pelagic Ammoniated (NH3-H2O) Marine Biosphere`
+                : `Active ${bioNH3Complex} Deep Pelagic Ammoniated (NH3-H2O) Biosphere (Cosmic Ray Attenuation)`;
               atmoType = 'H2-N2-NH3 Cryo-Biosphere Sky (Ammonia Life)';
               pClass = isContinentalNH3
                 ? 'Cryo-Ammonia Terrestrial'
@@ -2510,6 +2781,25 @@ export function generateZoneSystem(
       mc = resolveMoonClass(mc, effMoonT, mHydro, iceF, mE, mPBar, mGases);
       mAtmoType = deriveAtmosphereClassification(mPBar, mGases, false);
 
+      const moonMagField = computePlanetaryMagneticField({
+        massEarth: mE,
+        radiusEarth: rmE,
+        densityGcm3: mDens,
+        rockFrac: rockF,
+        iceFrac: iceF,
+        gasFrac: 0,
+        aAU: b.a,
+        starLum: z.lum,
+        starMass: z.mass,
+        sysAgeGyr: z.age,
+        rotHours: rotHrs,
+        isMoon: true,
+        tidalW: tW,
+        hostPlanetMassEarth: b.massEarth,
+        random,
+        rand,
+      });
+
       return {
         id: `m_${fI + 1}_${moonIdxCounter}`,
         name: `Moon ${numeral}`,
@@ -2545,6 +2835,7 @@ export function generateZoneSystem(
         rotationHours: rotHrs,
         spinState: mSpinState,
         axialTiltDeg: +(orig === 'Captured' ? rand(12, 65) : rand(0.1, 2.5)).toFixed(1),
+        magneticField: moonMagField,
       };
     }
 
@@ -2616,33 +2907,6 @@ export function generateZoneSystem(
       }
     }
 
-    // Spin & Tidal Locking
-    const pDays = 365.25 * Math.sqrt(Math.pow(b.a, 3) / z.mass);
-    const pHrs = pDays * 24;
-    const aLock =
-      0.45 *
-      (b.gasFrac >= 0.1 ? 0.65 : 1.0) *
-      Math.pow(z.mass, 0.333) *
-      Math.pow(Math.max(0.01, z.age) / 4.5, 0.167);
-    let rotH = 24;
-    let spinSt = 'Free Prograde Rotation';
-    let tilt = +rand(2, 38).toFixed(1);
-    if (b.a <= aLock) {
-      const r32 = b.e >= 0.1;
-      rotH = +(r32 ? 0.667 * pHrs : pHrs).toFixed(1);
-      spinSt = r32 ? '3:2 Spin-Orbit Resonance' : '1:1 Tidally Locked';
-      tilt = +rand(0.1, 1.8).toFixed(1);
-    } else if (hasEnv) {
-      rotH = +rand(8.5, 18).toFixed(1);
-      spinSt = 'Fast Nebular Spin';
-    } else if (random() < 0.1) {
-      rotH = +rand(150, 3200).toFixed(0);
-      spinSt = 'Slow Retrograde (Impact)';
-      tilt = +rand(92, 175).toFixed(1);
-    } else {
-      rotH = +Math.exp(rand(Math.log(8.5), Math.log(50))).toFixed(1);
-    }
-
     const { incDeg, omegaNodeDeg, argPeriDeg } = computeOrbitalInclination(
       'planet',
       b.role,
@@ -2691,6 +2955,7 @@ export function generateZoneSystem(
       rotationHours: rotH,
       spinState: spinSt,
       axialTiltDeg: tilt,
+      magneticField: magField,
     });
   }
 
@@ -2999,6 +3264,7 @@ export function convertZoneBodiesToPlanetArchetypes(
       axialTiltDeg: b.axialTiltDeg,
       omegaNodeDeg: b.omegaNodeDeg,
       argPeriDeg: b.argPeriDeg,
+      magneticField: b.magneticField,
     };
   });
 }

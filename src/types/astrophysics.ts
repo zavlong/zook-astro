@@ -53,6 +53,21 @@ export interface StellarEvolutionState {
   remnantType: 'Black Hole' | 'Neutron Star' | 'White Dwarf' | null;
 }
 
+export interface RealisticMagneticField {
+  surfaceFieldGauss: number;
+  surfaceFieldMicroTesla: number;
+  magneticMomentEarth: number;
+  dynamoStatus: string;
+  hasActiveDynamo: boolean;
+  coreState: string;
+  magnetopauseRadiusRp: number;
+  bowShockRadiusRp: number;
+  shieldingEfficiencyPct: number;
+  radiationLevel: 'Minimal' | 'Moderate' | 'High' | 'Extreme';
+  auroraDescription: string;
+  biosphereImplication: string;
+}
+
 export interface RealisticHydrosphere {
   state: string;
   solvent?: string;
@@ -100,6 +115,7 @@ export interface RealisticMoon {
   rotationHours: number;
   spinState: string;
   axialTiltDeg: number;
+  magneticField?: RealisticMagneticField;
 }
 
 export interface RealisticBinarySplit {
@@ -167,6 +183,7 @@ export interface PlanetArchetype {
   axialTiltDeg?: number;
   omegaNodeDeg?: number;
   argPeriDeg?: number;
+  magneticField?: RealisticMagneticField;
 }
 
 export interface PlanetPhysicsComputed {

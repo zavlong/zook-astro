@@ -10,6 +10,7 @@ import {
   RealisticBinarySplit,
   RealisticMoon,
   RealisticStarNode,
+  RealisticMagneticField,
   StarSystem,
 } from '../../types/astrophysics';
 import { ArchitectSystem } from '../../types/architect';
@@ -23,6 +24,7 @@ export type {
   RealisticBinarySplit,
   RealisticMoon,
   RealisticStarNode,
+  RealisticMagneticField,
   StarSystem,
   ArchitectSystem,
 };
