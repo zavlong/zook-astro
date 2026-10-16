@@ -389,7 +389,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   // Keyboard navigation: Page Up for higher view level (Sector Hex Map), Page Down already at System
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'PageDown' && e.code !== 'PageDown' && e.key !== 'PageUp' && e.code !== 'PageUp') return;
+      const isPageKey =
+        e.key === 'PageDown' ||
+        e.code === 'PageDown' ||
+        e.key === 'PageUp' ||
+        e.code === 'PageUp';
+      const isLabelKey = e.key === 'l' || e.key === 'L';
+      if (!isPageKey && !isLabelKey) return;
 
       const target = e.target as HTMLElement | null;
       if (
@@ -404,7 +410,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
       if (selectedEntity || showJsonModal) return;
 
-      if (e.key === 'l' || e.key === 'L') {
+      if (isLabelKey) {
         e.preventDefault();
         e.stopPropagation();
         setShowLabels((v) => !v);
@@ -1772,15 +1778,20 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             <button
               type="button"
               onClick={() => setShowLabels((v) => !v)}
-              className={`px-2 py-1 rounded border text-[11px] flex items-center gap-1 cursor-pointer transition ${
+              aria-pressed={showLabels}
+              aria-keyshortcuts="l"
+              className={`px-2.5 py-1 rounded border text-[11px] flex items-center gap-1.5 cursor-pointer transition ${
                 showLabels
                   ? 'bg-sky-600 text-white border-sky-400 font-bold shadow-sm'
-                  : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200'
+                  : 'bg-slate-900 text-slate-300 border-slate-700 hover:text-slate-100 hover:border-slate-500'
               }`}
               title="Toggle World, Star & Belt Labels (Hotkey: L)"
             >
               <Tag className="w-3 h-3" />
-              <span>Labels</span>
+              <span>Labels {showLabels ? 'ON' : 'OFF'}</span>
+              <kbd className="px-1 py-0.2 text-[9px] bg-slate-950/80 rounded text-slate-400 border border-slate-700 font-mono ml-0.5">
+                L
+              </kbd>
             </button>
 
             {/* Dynamic Zoom Slider */}
@@ -1827,20 +1838,25 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
         {/* Interactive 3D Proportional SVG Orrery (Drag to Rotate 3D, Shift+Drag/Right-Drag to Pan, Scroll to Zoom) */}
         <div className="relative w-full overflow-hidden rounded-xl border border-slate-800/80 bg-[#03060c]">
-          {/* Floating Quick Toggle Controls Overlay (Always Accessible in Immersion Mode) */}
-          <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 bg-[#0b111e]/85 backdrop-blur-md px-2 py-1 rounded-xl border border-slate-800/90 shadow-xl">
+          {/* Floating Quick Toggle Controls Overlay (Accessible in Immersion Mode and UI Mode) */}
+          <div className="absolute top-3 right-28 z-20 flex items-center gap-1.5 bg-[#0b111e]/90 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-slate-800/90 shadow-2xl">
             <button
               type="button"
               onClick={() => setShowLabels((v) => !v)}
-              className={`px-2 py-1 rounded-lg text-[10.5px] font-mono flex items-center gap-1 cursor-pointer transition ${
+              aria-pressed={showLabels}
+              aria-keyshortcuts="l"
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1.5 cursor-pointer transition ${
                 showLabels
                   ? 'bg-sky-600 text-white font-bold shadow-md shadow-sky-500/25'
-                  : 'bg-slate-900/90 text-slate-400 hover:text-slate-200 border border-slate-700/60'
+                  : 'bg-slate-900/90 text-slate-300 hover:text-white border border-slate-700/80'
               }`}
-              title="Toggle Labels (Hotkey: L)"
+              title="Toggle Planetary, Star & Orbit Labels (Hotkey: L)"
             >
-              <Tag className="w-3 h-3" />
-              <span>Labels</span>
+              <Tag className="w-3.5 h-3.5" />
+              <span>Labels {showLabels ? 'ON' : 'OFF'}</span>
+              <kbd className="px-1 py-0.2 text-[9px] bg-slate-950/80 rounded text-slate-400 border border-slate-700 font-mono ml-0.5">
+                L
+              </kbd>
             </button>
           </div>
 
@@ -3248,6 +3264,27 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                     Orrery
                   </button>
                 </div>
+
+                {mapMode === 'orrery2d' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowLabels((v) => !v)}
+                    aria-pressed={showLabels}
+                    aria-keyshortcuts="l"
+                    className={`px-2.5 py-1 rounded-lg border text-xs font-mono flex items-center gap-1.5 cursor-pointer transition ${
+                      showLabels
+                        ? 'bg-sky-600 text-white border-sky-400 font-bold shadow-md shadow-sky-500/25'
+                        : 'bg-[#151d2c] text-slate-300 border-[#2a3852] hover:text-white hover:border-slate-500'
+                    }`}
+                    title="Toggle Planetary, Star & Orbit Labels (Hotkey: L)"
+                  >
+                    <Tag className="w-3.5 h-3.5" />
+                    <span>Labels {showLabels ? 'ON' : 'OFF'}</span>
+                    <kbd className="px-1 py-0.2 text-[9px] bg-slate-900/90 rounded text-slate-400 border border-slate-700 font-mono ml-0.5">
+                      L
+                    </kbd>
+                  </button>
+                )}
 
                 {mapMode === 'schematic' && (
                   <div className="flex items-center gap-1 bg-[#151d2c] px-2 py-1 rounded-lg border border-[#2a3852] text-xs font-mono">
