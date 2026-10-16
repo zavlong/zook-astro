@@ -887,6 +887,57 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
           </div>
         )}
 
+        {/* Planetary Ring System (Micro-Belt) */}
+        {!isMoon && hostPlanet.ringSystem && (
+          <div className="bg-[#151d2c] p-3.5 rounded-xl border border-slate-800 flex flex-col gap-2.5 font-mono text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                Planetary Ring System (Micro-Belt)
+              </span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950/60 border border-amber-700/60 text-amber-200">
+                {hostPlanet.ringSystem.ringClass}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#0c121d] p-2.5 rounded-lg border border-slate-800">
+              <div>
+                <span className="text-slate-400 block text-[10px]">INNER RADIUS</span>
+                <b className="text-white">{hostPlanet.ringSystem.innerRadiusRp} Rp</b>
+                <span className="text-[9px] text-slate-400 block">
+                  {hostPlanet.ringSystem.innerRadiusKm.toLocaleString()} km
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px]">OUTER RADIUS</span>
+                <b className="text-amber-300">{hostPlanet.ringSystem.outerRadiusRp} Rp</b>
+                <span className="text-[9px] text-slate-400 block">
+                  {hostPlanet.ringSystem.outerRadiusKm.toLocaleString()} km
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px]">RING MASS</span>
+                <b className="text-sky-300">
+                  {hostPlanet.ringSystem.massLunar >= 0.0001
+                    ? `${hostPlanet.ringSystem.massLunar} M☾`
+                    : `${hostPlanet.ringSystem.massTt.toLocaleString()} Tt`}
+                </b>
+                <span className="text-[9px] text-slate-400 block">
+                  {hostPlanet.ringSystem.massLunar >= 0.0001
+                    ? `${hostPlanet.ringSystem.massTt.toLocaleString()} Tt`
+                    : '< 0.0001 M☾'}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px]">COMPOSITION</span>
+                <b className="text-emerald-300">{hostPlanet.ringSystem.compositionLabel}</b>
+                <span className="text-[9px] text-slate-400 block">
+                  τ = {hostPlanet.ringSystem.opticalDepth}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Moons Sub-Inspector List */}
         {!isMoon && hostPlanet.moons.length > 0 && (
           <div className="bg-[#151d2c] p-3.5 rounded-xl border border-slate-800 flex flex-col gap-2 font-mono text-xs">

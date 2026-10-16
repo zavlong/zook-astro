@@ -410,7 +410,10 @@ export function getBodyWorldPosAU(
     const relRad = Math.max(0.0001, physRad / closestPhysRad);
     const rawRadAU = baselineRadAU * Math.sqrt(relRad);
     const pRad = Math.min(130, Math.max(8, rawRadAU * pxPerAU));
-    const mDist = pRad + Math.max(4, pRad * (0.55 + mIdx * 0.38));
+    const ringOffset = b.ringSystem
+      ? pRad * (Math.min(2.3, b.ringSystem.outerRadiusRp) - 1.0)
+      : 0;
+    const mDist = pRad + ringOffset + Math.max(4, pRad * (0.55 + mIdx * 0.38));
 
     const dxScreen = mDist * Math.cos(mAngle);
     const dyScreen =

@@ -70,6 +70,21 @@ export interface RealisticBeltBody {
   omegaNodeDeg: number;
 }
 
+export interface RealisticRingSystem {
+  ringClass: string;
+  innerRadiusRp: number;
+  outerRadiusRp: number;
+  innerRadiusKm: number;
+  outerRadiusKm: number;
+  massLunar: number;
+  massTt: number;
+  rockFrac: number;
+  iceFrac: number;
+  metalFrac: number;
+  compositionLabel: string;
+  opticalDepth: number;
+}
+
 export interface RealisticPlanetBody {
   kind: 'planet';
   role?: string;
@@ -101,6 +116,7 @@ export interface RealisticPlanetBody {
   gases: Record<string, number>;
   hydrosphere: RealisticHydrosphere | null;
   rings: string | null;
+  ringSystem: RealisticRingSystem | null;
   rocheLimitRp: number;
   moons: RealisticMoon[];
   orbitalPeriodDays: number;
@@ -2360,6 +2376,74 @@ export function generateZoneSystem(
       }
     }
 
+    let ringSystem: RealisticRingSystem | null = null;
+    if (rings) {
+      const h1 =
+        (((Math.sin(b.a * 129.7 + b.massEarth * 37.3 + roche * 19.1) * 43758.5453) % 1) + 1) % 1;
+      const h2 =
+        (((Math.sin(b.a * 269.3 + rE * 83.9 + Teq * 11.7) * 43758.5453) % 1) + 1) % 1;
+      const h3 =
+        (((Math.sin(b.massEarth * 193.1 + dens * 53.7 + b.e * 97.3) * 43758.5453) % 1) + 1) % 1;
+      const rPlanetKm = Math.max(500, Math.round(rE * 6371));
+      const innerRp = +(1.16 + h1 * 0.22).toFixed(2);
+      const isMajorIcy = rings.includes('Major');
+      const isDenseRock = rings.includes('Silicate') || rings.includes('Roche-Shredded');
+      const outerRp = +(
+        isMajorIcy
+          ? Math.max(innerRp + 0.65, roche * (0.96 + h2 * 0.22))
+          : isDenseRock
+          ? Math.max(innerRp + 0.45, roche * (0.86 + h2 * 0.18))
+          : Math.max(innerRp + 0.35, roche * (0.78 + h2 * 0.18))
+      ).toFixed(2);
+      const innerRadiusKm = Math.round(innerRp * rPlanetKm);
+      const outerRadiusKm = Math.round(outerRp * rPlanetKm);
+
+      let iceFrac = 0;
+      let metalFrac = 0;
+      if (isMajorIcy) {
+        iceFrac = +(0.82 + h3 * 0.14).toFixed(2);
+        metalFrac = +(0.01 + (1 - h3) * 0.03).toFixed(2);
+      } else if (isDenseRock) {
+        iceFrac = isCold ? +(0.12 + h3 * 0.18).toFixed(2) : +(h3 * 0.05).toFixed(2);
+        metalFrac = +(0.08 + h1 * 0.14).toFixed(2);
+      } else {
+        iceFrac = isCold ? +(0.35 + h3 * 0.3).toFixed(2) : +(0.02 + h3 * 0.1).toFixed(2);
+        metalFrac = +(0.04 + h2 * 0.08).toFixed(2);
+      }
+      const rockFrac = +Math.max(0.01, 1 - iceFrac - metalFrac).toFixed(2);
+      const parts: string[] = [];
+      if (iceFrac >= 0.01) parts.push(`${Math.round(iceFrac * 100)}% Ice`);
+      if (rockFrac >= 0.01) parts.push(`${Math.round(rockFrac * 100)}% Silicate`);
+      if (metalFrac >= 0.01) parts.push(`${Math.round(metalFrac * 100)}% Metal`);
+
+      const massLunar = isMajorIcy
+        ? +(0.0004 + h2 * 0.0065).toFixed(4)
+        : isDenseRock
+        ? +(0.00008 + h2 * 0.0014).toFixed(5)
+        : +(0.00001 + h2 * 0.00008).toFixed(5);
+      const massTt = Math.max(1, Math.round(massLunar * 73420000));
+      const opticalDepth = isMajorIcy
+        ? +(1.1 + h1 * 0.9).toFixed(2)
+        : isDenseRock
+        ? +(0.35 + h1 * 0.45).toFixed(2)
+        : +(0.04 + h1 * 0.12).toFixed(2);
+
+      ringSystem = {
+        ringClass: rings,
+        innerRadiusRp: innerRp,
+        outerRadiusRp: outerRp,
+        innerRadiusKm,
+        outerRadiusKm,
+        massLunar,
+        massTt,
+        rockFrac,
+        iceFrac,
+        metalFrac,
+        compositionLabel: parts.join(' · '),
+        opticalDepth,
+      };
+    }
+
     const romanNumerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
     let moonIdxCounter = 0;
 
@@ -2947,6 +3031,7 @@ export function generateZoneSystem(
       gases,
       hydrosphere: hydro,
       rings,
+      ringSystem,
       rocheLimitRp: +roche.toFixed(2),
       moons,
       orbitalPeriodDays: +pDays.toFixed(2),

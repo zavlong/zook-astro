@@ -143,7 +143,7 @@ function renderPlanetGlobeToCanvas(
   const gasF = isMoon && moon ? moon.gasFrac : planet.gasFrac;
   const tilt = isMoon && moon ? moon.axialTiltDeg : planet.axialTiltDeg;
   const spinState = isMoon && moon ? moon.spinState : planet.spinState;
-  const rings = isMoon ? null : planet.rings;
+  const ringSys = isMoon ? null : planet.ringSystem;
   const sudarsky = isMoon ? null : planet.sudarskyClass;
 
   // Planets with 1:1 tidal locking to their host star have a permanent dayside & permanent nightside!
@@ -183,7 +183,7 @@ function renderPlanetGlobeToCanvas(
 
   const cx = W * 0.5;
   const cy = H * 0.5;
-  const R = Math.min(W, H) * (rings ? 0.33 : transparentBg ? 0.44 : 0.41);
+  const R = Math.min(W, H) * (transparentBg ? 0.44 : ringSys ? 0.31 : 0.41);
 
   // World-space starlight direction vector: on tidally-locked worlds, position substellar point slightly left of center
   // so at default angle (0,0) both the substellar bullseye ("eyeball" / dayside magma) AND the terminator + nightside are visible!
@@ -208,14 +208,8 @@ function renderPlanetGlobeToCanvas(
   const ringTiltRad = ((22 + (worldSeed % 18)) * Math.PI) / 180;
   const sinT = Math.sin(ringTiltRad);
   const cosT = Math.cos(ringTiltRad);
-  const rInner = R * 1.24;
-  const rOuter = R * (rings?.includes('Major') ? 2.12 : 1.76);
-
-  // World ring normal is (0, -cosT, sinT); transform into camera space (rNormX, rNormY, rNormZ)
-  const rNormX = -sinT * sinYaw;
-  const rNormZTemp = sinT * cosYaw;
-  const rNormY = -cosT * cosPitch + rNormZTemp * sinPitch;
-  const rNormZ = cosT * sinPitch + rNormZTemp * cosPitch;
+  const rInner = R * (ringSys ? ringSys.innerRadiusRp : 1.24);
+  const rOuter = R * (ringSys ? Math.min(2.45, ringSys.outerRadiusRp) : 1.85);
 
   const octMain = interactiveFast ? 3 : 5;
   const octSub = interactiveFast ? 3 : 4;
@@ -343,44 +337,7 @@ function renderPlanetGlobeToCanvas(
         }
       }
 
-      // Check 3D ring intersection in rotated camera space
-      let ringAlpha = 0;
-      let ringR = 0;
-      let ringG = 0;
-      let ringB = 0;
-      let ringZ = 0;
-      if (rings) {
-        const denom =
-          Math.abs(rNormZ) < 0.08 ? (rNormZ >= 0 ? 0.08 : -0.08) : rNormZ;
-        ringZ = -(dx * rNormX + dy * rNormY) / denom;
-        const rRad = Math.sqrt(dx * dx + dy * dy + ringZ * ringZ);
-        if (rRad >= rInner && rRad <= rOuter) {
-          const u = (rRad - rInner) / (rOuter - rInner);
-          const bandNoise = fbm3D(u * 24, 0, 0, worldSeed + 555, 3);
-          const cassiniGap = Math.abs(u - 0.62) < 0.035 ? 0.12 : 1.0;
-          ringAlpha = clamp(
-            (rings.includes('Major') ? 0.78 : 0.42) *
-              bandNoise *
-              cassiniGap *
-              Math.sin(u * Math.PI),
-            0,
-            0.85
-          );
-          const baseRing: RGB = rings.includes('Icy')
-            ? [205, 232, 248]
-            : [178, 152, 122];
-          // 3D cylinder shadow test along starlight vector in camera space
-          const dotL = dx * lCamX + dy * lCamY + ringZ * lCamZ;
-          const perpSq = Math.max(0, rRad * rRad - dotL * dotL);
-          const inPlanetShadow = dotL < 0 && perpSq < R * R * 0.84;
-          const shade = inPlanetShadow ? 0.16 : 0.92;
-          ringR = baseRing[0] * shade;
-          ringG = baseRing[1] * shade;
-          ringB = baseRing[2] * shade;
-        }
-      }
-
-      // Outside planet globe: render atmospheric halo + ring
+      // Outside planet globe: render atmospheric halo
       if (dist > R) {
         const haloDist = (dist - R) / (R * 0.16);
         let haloAlpha = 0;
@@ -393,23 +350,14 @@ function renderPlanetGlobeToCanvas(
           haloAlpha = Math.pow(1 - haloDist, 2.4) * sunSide * 0.68;
         }
         if (transparentBg) {
-          const totA = clamp(haloAlpha + ringAlpha * (1 - haloAlpha), 0, 1);
+          const totA = clamp(haloAlpha, 0, 1);
           if (totA <= 0.01) {
             data[idx + 3] = 0;
             continue;
           }
-          const outR =
-            (atmoRgb[0] * haloAlpha + ringR * ringAlpha) /
-            Math.max(0.01, haloAlpha + ringAlpha);
-          const outG =
-            (atmoRgb[1] * haloAlpha + ringG * ringAlpha) /
-            Math.max(0.01, haloAlpha + ringAlpha);
-          const outB =
-            (atmoRgb[2] * haloAlpha + ringB * ringAlpha) /
-            Math.max(0.01, haloAlpha + ringAlpha);
-          data[idx] = Math.round(outR);
-          data[idx + 1] = Math.round(outG);
-          data[idx + 2] = Math.round(outB);
+          data[idx] = Math.round(atmoRgb[0]);
+          data[idx + 1] = Math.round(atmoRgb[1]);
+          data[idx + 2] = Math.round(atmoRgb[2]);
           data[idx + 3] = Math.round(totA * 255);
           continue;
         } else {
@@ -417,11 +365,6 @@ function renderPlanetGlobeToCanvas(
             bgR = Math.round(lerp(bgR, atmoRgb[0], haloAlpha));
             bgG = Math.round(lerp(bgG, atmoRgb[1], haloAlpha));
             bgB = Math.round(lerp(bgB, atmoRgb[2], haloAlpha));
-          }
-          if (ringAlpha > 0) {
-            bgR = Math.round(lerp(bgR, ringR, ringAlpha));
-            bgG = Math.round(lerp(bgG, ringG, ringAlpha));
-            bgB = Math.round(lerp(bgB, ringB, ringAlpha));
           }
           data[idx] = bgR;
           data[idx + 1] = bgG;
@@ -742,13 +685,6 @@ function renderPlanetGlobeToCanvas(
         litB = lerp(litB, atmoRgb[2], limbStrength);
       }
 
-      // Front ring passing in front of the planet (ringZ > 0)
-      if (ringAlpha > 0 && ringZ > 0) {
-        litR = lerp(litR, ringR, ringAlpha);
-        litG = lerp(litG, ringG, ringAlpha);
-        litB = lerp(litB, ringB, ringAlpha);
-      }
-
       data[idx] = clamp(Math.round(litR), 0, 255);
       data[idx + 1] = clamp(Math.round(litG), 0, 255);
       data[idx + 2] = clamp(Math.round(litB), 0, 255);
@@ -757,6 +693,71 @@ function renderPlanetGlobeToCanvas(
   }
 
   ctx.putImageData(img, 0, 0);
+
+  // Render 3D Micro-Asteroid Ring Belt particles around portrait globe (when not generating icon sprite)
+  if (!transparentBg && ringSys) {
+    const count = ringSys.ringClass.includes('Major')
+      ? 240
+      : ringSys.ringClass.includes('Silicate') || ringSys.ringClass.includes('Roche')
+      ? 165
+      : 105;
+    for (let k = 0; k < count; k++) {
+      const u1 = (((Math.sin((k + 1) * 12.9898 + worldSeed) * 43758.5453) % 1) + 1) % 1;
+      const u2 = (((Math.sin((k + 1) * 78.233 + worldSeed * 1.7) * 43758.5453) % 1) + 1) % 1;
+      const u3 = (((Math.sin((k + 1) * 39.425 + worldSeed * 2.3) * 43758.5453) % 1) + 1) % 1;
+
+      // Radial position between rInner and rOuter (skip narrow Cassini-like division at u=0.62)
+      let uRad = u2;
+      if (Math.abs(uRad - 0.62) < 0.03) uRad = uRad < 0.62 ? 0.58 : 0.66;
+      const rOrbit = rInner + uRad * (rOuter - rInner);
+      const angle = u1 * Math.PI * 2;
+
+      // 3D position in ring plane -> tilted world space -> rotated camera space
+      const rx0 = rOrbit * Math.cos(angle);
+      const rz0 = rOrbit * Math.sin(angle);
+      const wyR = rz0 * sinT + (u3 - 0.5) * 2.2;
+      const wzR = rz0 * cosT;
+
+      const x1 = rx0 * cosYaw + wzR * sinYaw;
+      const z1 = -rx0 * sinYaw + wzR * cosYaw;
+      const camX = x1;
+      const camY = wyR * cosPitch - z1 * sinPitch;
+      const camZ = wyR * sinPitch + z1 * cosPitch;
+
+      const dist2D = Math.hypot(camX, camY);
+      // Occlude micro-asteroids behind the planet globe
+      if (camZ < 0 && dist2D < R * 1.02) continue;
+
+      // Check planet shadow cylinder
+      const dotL = camX * lCamX + camY * lCamY + camZ * lCamZ;
+      const perpSq = Math.max(0, rOrbit * rOrbit - dotL * dotL);
+      const inShadow = dotL < 0 && perpSq < R * R * 0.85;
+
+      const isIceSpeck = u3 < ringSys.iceFrac;
+      const isMetalSpeck = !isIceSpeck && u3 < ringSys.iceFrac + ringSys.metalFrac;
+      const col = isIceSpeck
+        ? inShadow
+          ? 'rgba(71, 85, 105, 0.45)'
+          : 'rgba(224, 242, 254, 0.88)'
+        : isMetalSpeck
+        ? inShadow
+          ? 'rgba(63, 63, 70, 0.45)'
+          : 'rgba(212, 212, 216, 0.85)'
+        : inShadow
+        ? 'rgba(68, 64, 60, 0.45)'
+        : 'rgba(180, 158, 132, 0.85)';
+
+      const sz = clamp((0.9 + (k % 3) * 0.55) * (W / 220), 0.7, 2.6);
+      ctx.save();
+      ctx.translate(cx + camX, cy + camY);
+      ctx.rotate(u1 * Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, sz * 1.25, sz * 0.78, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
 }
 
 /**

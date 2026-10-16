@@ -2628,9 +2628,47 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                   </div>
                                 </div>
 
-                                {/* Moons under this planet */}
-                                {b.moons.length > 0 && (
+                                {/* Ring Belt & Moons under this planet */}
+                                {(b.ringSystem || b.moons.length > 0) && (
                                   <div className="ml-4 pl-2 border-l border-slate-800/80 space-y-0.5">
+                                    {b.ringSystem && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (e.shiftKey) {
+                                            handleTrackBody({
+                                              kind: 'planet',
+                                              zoneIdx: sZoneIdx,
+                                              bodyIdx: bIdx,
+                                            });
+                                          } else {
+                                            handleZoomToEntity({
+                                              kind: 'planet',
+                                              zoneIdx: sZoneIdx,
+                                              bodyIdx: bIdx,
+                                            });
+                                          }
+                                        }}
+                                        onDoubleClick={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedEntity({
+                                            kind: 'planet',
+                                            zoneIdx: sZoneIdx,
+                                            bodyIdx: bIdx,
+                                          });
+                                        }}
+                                        className="w-full flex items-center justify-between px-1.5 py-0.5 rounded text-[10px] text-amber-300/85 hover:text-amber-200 hover:bg-amber-950/30 transition cursor-pointer select-none"
+                                        title={`Planetary Ring Belt: ${b.ringSystem.ringClass}\n• Inner–Outer: ${b.ringSystem.innerRadiusRp}–${b.ringSystem.outerRadiusRp} Rp (${b.ringSystem.innerRadiusKm.toLocaleString()}–${b.ringSystem.outerRadiusKm.toLocaleString()} km)\n• Composition: ${b.ringSystem.compositionLabel}\n• Click: Zoom to\n• Double-Click: Open Stats`}
+                                      >
+                                        <span className="truncate">
+                                          └─ 🪐 {b.ringSystem.ringClass.replace(/\s*\([^)]*\)/g, '')}
+                                        </span>
+                                        <span className="text-[9px] text-amber-400/80 font-mono shrink-0 ml-1">
+                                          {b.ringSystem.innerRadiusRp}–{b.ringSystem.outerRadiusRp} Rp
+                                        </span>
+                                      </button>
+                                    )}
                                     {b.moons.map((m, mIdx) => {
                                       const isMoonTracked =
                                         trackedTarget?.kind === 'moon' &&
@@ -3674,9 +3712,100 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                         0,
                         0
                       );
-                      const planetImgSize = b.rings
-                        ? pRad / 0.33
-                        : pRad / 0.44;
+                      const planetImgSize = pRad / 0.44;
+                      const ringOffset = b.ringSystem
+                        ? pRad * (Math.min(2.3, b.ringSystem.outerRadiusRp) - 1.0)
+                        : 0;
+
+                      // Generate 3D Micro-Asteroid Ring Belt particles (split into Back & Front halves for true 3D planet occlusion)
+                      const ringBackNodes: React.ReactNode[] = [];
+                      const ringFrontNodes: React.ReactNode[] = [];
+                      if (b.ringSystem && pRad > 3.2) {
+                        const rSys = b.ringSystem;
+                        const rInnerPx = pRad * rSys.innerRadiusRp;
+                        const rOuterPx = pRad * Math.min(2.35, rSys.outerRadiusRp);
+                        const tiltY = Math.max(0.28, Math.cos(orreryPitch * 0.78));
+                        const ringSeed = zIdx * 997 + bIdx * 313 + Math.round(b.a * 1000);
+                        const speckCount = rSys.ringClass.includes('Major')
+                          ? 96
+                          : rSys.ringClass.includes('Silicate') || rSys.ringClass.includes('Roche')
+                          ? 68
+                          : 44;
+
+                        // Subtle inner/outer boundary & dust track behind globe
+                        const midRx = 0.5 * (rInnerPx + rOuterPx);
+                        const bandW = Math.max(1.2, rOuterPx - rInnerPx);
+                        const dustStroke =
+                          rSys.iceFrac >= 0.5
+                            ? 'rgba(186, 230, 253, 0.14)'
+                            : 'rgba(214, 195, 165, 0.14)';
+                        ringBackNodes.push(
+                          <ellipse
+                            key="ring-dust-band"
+                            cx={pProj.x}
+                            cy={pProj.y}
+                            rx={midRx}
+                            ry={midRx * tiltY}
+                            fill="none"
+                            stroke={dustStroke}
+                            strokeWidth={bandW * 0.65}
+                          />
+                        );
+
+                        for (let k = 0; k < speckCount; k++) {
+                          const u1 =
+                            (((Math.sin((k + 1) * 12.9898 + ringSeed) * 43758.5453) % 1) + 1) % 1;
+                          const u2 =
+                            (((Math.sin((k + 1) * 78.233 + ringSeed * 1.7) * 43758.5453) % 1) +
+                              1) %
+                            1;
+                          const u3 =
+                            (((Math.sin((k + 1) * 39.425 + ringSeed * 2.3) * 43758.5453) % 1) +
+                              1) %
+                            1;
+
+                          let uRad = u2;
+                          if (Math.abs(uRad - 0.62) < 0.035) {
+                            uRad = uRad < 0.62 ? 0.57 : 0.67;
+                          }
+                          const rPx = rInnerPx + uRad * (rOuterPx - rInnerPx);
+                          const keplerRate = 22 / Math.pow(1 + uRad * 0.8, 1.5);
+                          const ang = u1 * Math.PI * 2 + orreryTimeYr * keplerRate;
+                          const sx = pProj.x + rPx * Math.cos(ang);
+                          const sy = pProj.y + rPx * Math.sin(ang) * tiltY;
+
+                          const isIce = u3 < rSys.iceFrac;
+                          const isMetal = !isIce && u3 < rSys.iceFrac + rSys.metalFrac;
+                          const col = isIce
+                            ? '#e0f2fe'
+                            : isMetal
+                            ? '#d4d4d8'
+                            : '#bfa888';
+                          const speckSz = clamp(
+                            (0.45 + (k % 3) * 0.25) * clamp(pRad / 14, 0.65, 1.65),
+                            0.35,
+                            1.45
+                          );
+                          const rotDeg = Math.round(u1 * 360 + orreryTimeYr * 120);
+                          const node = (
+                            <ellipse
+                              key={`ring-speck-${k}`}
+                              cx={sx}
+                              cy={sy}
+                              rx={speckSz * 1.25}
+                              ry={speckSz * 0.78}
+                              transform={`rotate(${rotDeg} ${sx.toFixed(1)} ${sy.toFixed(1)})`}
+                              fill={col}
+                              fillOpacity={0.55 + u3 * 0.38}
+                            />
+                          );
+                          if (Math.sin(ang) < 0) {
+                            ringBackNodes.push(node);
+                          } else {
+                            ringFrontNodes.push(node);
+                          }
+                        }
+                      }
 
                       // Push planet & moon 3D globes into depth-sorted queue
                       depthNodes.push({
@@ -3695,6 +3824,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                   orreryTimeYr * mSpeed;
                                 const mDist =
                                   pRad +
+                                  ringOffset +
                                   Math.max(4, pRad * (0.55 + mIdx * 0.38));
                                 const mxPos = pProj.x + mDist * Math.cos(mAngle);
                                 const myPos =
@@ -3836,7 +3966,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                 );
                               })}
 
-                            {/* Clickable Dynamically-Sized Procedural Planet Globe & Label */}
+                            {/* Clickable Dynamically-Sized Procedural Planet Globe, Micro-Asteroid Ring Belt & Label */}
                             <g
                               className="cursor-pointer"
                               onMouseDown={(e) => e.stopPropagation()}
@@ -3865,12 +3995,12 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                 });
                               }}
                             >
-                              <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}</title>
+                              <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}${b.ringSystem ? `\nRing System: ${b.ringSystem.ringClass} (${b.ringSystem.innerRadiusRp}–${b.ringSystem.outerRadiusRp} Rp, ${b.ringSystem.compositionLabel})` : ''}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}</title>
                               {/* Invisible click target for easy selection */}
                               <circle
                                 cx={pProj.x}
                                 cy={pProj.y}
-                                r={Math.max(8, pRad + 3)}
+                                r={Math.max(8, pRad + ringOffset + 3)}
                                 fill="transparent"
                               />
 
@@ -3900,6 +4030,9 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                 />
                               )}
 
+                              {/* Back-Half of 3D Micro-Asteroid Ring Belt (occluded by planet globe) */}
+                              {ringBackNodes}
+
                               {/* Procedural Planet Globe Texture (from Planet Info View) */}
                               <g
                                 transform={`translate(${pProj.x.toFixed(1)}, ${pProj.y.toFixed(1)})`}
@@ -3913,6 +4046,9 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                   preserveAspectRatio="xMidYMid meet"
                                 />
                               </g>
+
+                              {/* Front-Half of 3D Micro-Asteroid Ring Belt (passing in front of planet globe) */}
+                              {ringFrontNodes}
 
                               {/* Planet Label (#num and AU) */}
                               {showLabels && rOrbitPx > 24 && (
