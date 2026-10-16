@@ -3005,9 +3005,6 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
                     <span>System Stats</span>
                   </div>
-                  <span className="text-[10px] font-mono text-slate-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">
-                    Seeded PRNG
-                  </span>
                 </div>
 
                 {/* 2x2 Grid of the 4 Values */}
@@ -3040,13 +3037,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                         : selectedSystem.metallicity.toFixed(2)}{' '}
                       <span className="text-xs text-slate-400">dex</span>
                     </div>
-                    <div className="text-[9.5px] text-slate-500 mt-0.5">Heavy Element Ratio</div>
                   </div>
 
                   {/* ID / Seed */}
                   <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 relative group">
                     <div className="text-[10px] text-slate-400 uppercase flex items-center justify-between">
-                      <span>Seed ID</span>
+                      <span>ID</span>
                       <button
                         onClick={() => handleCopyId(selectedSystem.id)}
                         className="text-slate-400 hover:text-white transition"
@@ -3269,79 +3265,105 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 );
               })()}
 
-              {/* Astrophysical Telemetry Summary */}
+              {/* Detailed Stats */}
               <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs font-mono space-y-2">
                 <div className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                  <span>System Architecture &amp; Telemetry</span>
+                  <span>Detailed Stats</span>
                   <span className="text-cyan-400 font-semibold">{selectedSystem.archName.replace(/\s*\(.*\)/g, '')}</span>
                 </div>
 
-                <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                  <span className="text-slate-400">Primary Star</span>
-                  <span className="text-slate-200 font-semibold">
-                    {selectedSystem.primaryClass} {selectedSystem.primaryMass.toFixed(3)} M☉
-                  </span>
-                </div>
+                {(() => {
+                  const isMultiple = selectedSystem.nStars > 1;
+                  const totalLuminosity = (() => {
+                    if (selectedSystem.sysResult?.hierarchy?.stars && selectedSystem.sysResult.hierarchy.stars.length > 0) {
+                      const sum = selectedSystem.sysResult.hierarchy.stars.reduce(
+                        (acc, st) => acc + (typeof st.lumNum === 'number' ? st.lumNum : 0),
+                        0
+                      );
+                      return +sum.toFixed(3);
+                    }
+                    return selectedSystem.lumLsun;
+                  })();
 
-                {selectedSystem.companionStars.length > 0 && (
-                  <div className="flex items-start justify-between py-1 border-b border-slate-800/60">
-                    <span className="text-slate-400">Companions</span>
-                    <div className="text-right text-slate-300 font-medium space-y-1">
-                      {selectedSystem.companionStars.map((cs) => {
-                        const isBH = isBlackHoleStar({ spectralType: cs.spectralType });
-                        return (
-                          <div key={cs.label} className="flex items-center justify-end gap-1.5 text-xs">
-                            {isBH ? (
-                              <BlackHoleIcon isSupermassive={cs.mass > 999999} size={15} />
-                            ) : (
-                              <span
-                                className="w-2 h-2 rounded-full shrink-0 shadow-sm"
-                                style={{ backgroundColor: cs.colorHex }}
-                              />
-                            )}
-                            <span>
-                              {cs.label}: {cs.spectralType} {cs.mass.toFixed(3)} M☉
+                  return (
+                    <>
+                      <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                        <span className="text-slate-400">Primary Star</span>
+                        <span className="text-slate-200 font-semibold">
+                          {selectedSystem.primaryClass} {selectedSystem.primaryMass.toFixed(3)} M☉
+                        </span>
+                      </div>
+
+                      {selectedSystem.companionStars.length > 0 && (
+                        <div className="flex items-start justify-between py-1 border-b border-slate-800/60">
+                          <span className="text-slate-400">Companions</span>
+                          <div className="text-right text-slate-300 font-medium space-y-1">
+                            {selectedSystem.companionStars.map((cs) => {
+                              const isBH = isBlackHoleStar({ spectralType: cs.spectralType });
+                              return (
+                                <div key={cs.label} className="flex items-center justify-end gap-1.5 text-xs">
+                                  {isBH ? (
+                                    <BlackHoleIcon isSupermassive={cs.mass > 999999} size={15} />
+                                  ) : (
+                                    <span
+                                      className="w-2 h-2 rounded-full shrink-0 shadow-sm"
+                                      style={{ backgroundColor: cs.colorHex }}
+                                    />
+                                  )}
+                                  <span>
+                                    {cs.label}: {cs.spectralType} {cs.mass.toFixed(3)} M☉
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Luminosity: sum of all star luminosities */}
+                      <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                        <span className="text-slate-400">Luminosity</span>
+                        <span className="text-slate-200 font-semibold">{totalLuminosity} L☉</span>
+                      </div>
+
+                      {/* Effective Temp & Evolutionary State: only for single star systems */}
+                      {!isMultiple && (
+                        <>
+                          <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                            <span className="text-slate-400">Effective Temp</span>
+                            <span className="text-slate-200 font-semibold">{Math.round(selectedSystem.teff)} K</span>
+                          </div>
+
+                          <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                            <span className="text-slate-400">Evolutionary State</span>
+                            <span className={isNonMainSequenceSystem(selectedSystem) ? 'text-purple-300 font-bold' : 'text-cyan-400 font-semibold'}>
+                              {selectedSystem.isRemnant
+                                ? selectedSystem.remnantType || 'Remnant'
+                                : selectedSystem.sysResult?.hierarchy?.stars?.[0]?.category ||
+                                  (isNonMainSequenceSystem(selectedSystem) ? 'Non-Main Sequence' : 'Main Sequence')}
                             </span>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+                        </>
+                      )}
 
-                <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                  <span className="text-slate-400">Generated Bodies</span>
-                  <span className="text-slate-200 font-semibold">
-                    {selectedSystem.planetCount} Planets &bull; {selectedSystem.beltCount} Belts
-                  </span>
-                </div>
+                      {/* Astronomical Bodies: placed between Evolutionary State and Biospheres */}
+                      <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                        <span className="text-slate-400">Astronomical Bodies</span>
+                        <span className="text-slate-200 font-semibold">
+                          {selectedSystem.planetCount} Planets &bull; {selectedSystem.beltCount} Belts
+                        </span>
+                      </div>
 
-                <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                  <span className="text-slate-400">Effective Temp</span>
-                  <span className="text-slate-200 font-semibold">{Math.round(selectedSystem.teff)} K</span>
-                </div>
-
-                <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                  <span className="text-slate-400">Luminosity</span>
-                  <span className="text-slate-200 font-semibold">{selectedSystem.lumLsun} L☉</span>
-                </div>
-
-                <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                  <span className="text-slate-400">Evolutionary State</span>
-                  <span className={isNonMainSequenceSystem(selectedSystem) ? 'text-purple-300 font-bold' : 'text-cyan-400 font-semibold'}>
-                    {selectedSystem.isRemnant
-                      ? selectedSystem.remnantType || 'Remnant'
-                      : selectedSystem.sysResult?.hierarchy?.stars?.[0]?.category ||
-                        (isNonMainSequenceSystem(selectedSystem) ? 'Non-Main Sequence' : 'Main Sequence')}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-slate-400">Planetary Biospheres:</span>
-                  <span className={getBiosphereDisplay(selectedSystem) !== '<none>' ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                    {getBiosphereDisplay(selectedSystem)}
-                  </span>
-                </div>
+                      {/* Planetary Biospheres */}
+                      <div className="flex items-center justify-between py-1">
+                        <span className="text-slate-400">Planetary Biospheres:</span>
+                        <span className={getBiosphereDisplay(selectedSystem) !== '<none>' ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                          {getBiosphereDisplay(selectedSystem)}
+                        </span>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Hyperlane Connectivity Routes */}
