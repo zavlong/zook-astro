@@ -457,11 +457,57 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     }
   };
 
-  const handleSelectBody = (entity: SelectedMapEntity, e?: React.MouseEvent) => {
-    if (e?.shiftKey) {
-      handleTrackBody(entity);
-    } else {
-      setSelectedEntity(entity);
+
+  const handleZoomToEntity = (entity: SelectedMapEntity) => {
+    if (!systemResult) return;
+    setTrackedTarget(null);
+    const layout = computeSystem2DLayout(systemResult, orreryTimeYr);
+
+    if (entity.kind === 'star') {
+      const st = systemResult.hierarchy.stars[entity.starIdx];
+      if (!st) return;
+      const sPos = layout.starPos[st.label] || { x: 0, y: 0 };
+      const sZone = systemResult.zones.find((z) =>
+        z.title.startsWith(`Star ${st.label} `)
+      );
+      const maxPlanetA = sZone
+        ? sZone.bodies.reduce((m, b) => Math.max(m, b.a), sZone.a_in * 4)
+        : 2.5;
+      setOrreryCamAU(sPos);
+      setOrreryPxPerAU(clamp(260 / Math.max(0.05, maxPlanetA * 1.25), 0.15, 60000));
+      return;
+    }
+
+    if (entity.kind === 'split') {
+      const sp = systemResult.hierarchy.splits[entity.splitIdx];
+      if (!sp) return;
+      const bPos = layout.baryPos[sp.pair] || { x: 0, y: 0 };
+      setOrreryCamAU(bPos);
+      setOrreryPxPerAU(clamp(260 / Math.max(0.5, sp.a_AU * 2.2), 0.15, 60000));
+      return;
+    }
+
+    const pos = getBodyWorldPosAU(systemResult, entity, orreryTimeYr, orreryIncScale);
+    if (!pos) return;
+    setOrreryCamAU(pos);
+
+    if (entity.kind === 'planet') {
+      const z = systemResult.zones[entity.zoneIdx];
+      const b = z?.bodies[entity.bodyIdx];
+      if (b && b.kind === 'planet') {
+        const hasMoons = b.moons && b.moons.length > 0;
+        const zoomPx = hasMoons ? 12000 : 22000;
+        setOrreryPxPerAU(zoomPx);
+      } else {
+        setOrreryPxPerAU(1200);
+      }
+    } else if (entity.kind === 'moon') {
+      setOrreryPxPerAU(45000);
+    } else if (entity.kind === 'belt') {
+      const z = systemResult.zones[entity.zoneIdx];
+      const b = z?.bodies[entity.bodyIdx];
+      const beltA = b ? b.a : 3.0;
+      setOrreryPxPerAU(clamp(260 / Math.max(0.5, beltA * 1.5), 0.15, 60000));
     }
   };
 
@@ -2264,26 +2310,31 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
               {/* Scrollable Tree Content */}
               <div className="flex-1 overflow-y-auto p-2 space-y-2 select-none overscroll-contain">
-                {res.hierarchy.stars.map((st) => {
-                  const sPos = layout.starPos[st.label] || { x: 0, y: 0 };
+                {res.hierarchy.stars.map((st, sIdx) => {
                   const sZoneIdx = res.zones.findIndex((z) =>
                     z.title.startsWith(`Star ${st.label} `)
                   );
                   const sZone = sZoneIdx >= 0 ? res.zones[sZoneIdx] : null;
-                  const maxPlanetA = sZone
-                    ? sZone.bodies.reduce((m, b) => Math.max(m, b.a), sZone.a_in * 4)
-                    : 2.5;
 
                   return (
                     <div key={`tree-star-${st.label}`} className="space-y-1">
                       {/* Star Item */}
                       <button
                         type="button"
-                        onClick={() => {
-                          setTrackedTarget(null);
-                          focusCameraOn(sPos, maxPlanetA * 1.25);
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (e.shiftKey) {
+                            handleTrackBody({ kind: 'star', starIdx: sIdx });
+                          } else {
+                            handleZoomToEntity({ kind: 'star', starIdx: sIdx });
+                          }
                         }}
-                        className="w-full text-left px-2 py-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-slate-700 flex items-center justify-between group cursor-pointer transition"
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedEntity({ kind: 'star', starIdx: sIdx });
+                        }}
+                        className="w-full text-left px-2 py-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-slate-700 flex items-center justify-between group cursor-pointer transition select-none"
+                        title={`Star ${st.label} (${st.spectralType})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Double-Click: Open Detailed Stats`}
                       >
                         <div className="flex items-center gap-2 truncate">
                           <span
@@ -2311,9 +2362,35 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                           {sZone.bodies.map((b, bIdx) => {
                             if (b.kind === 'belt') {
                               return (
-                                <div
+                                <button
                                   key={`tree-belt-${sZoneIdx}-${bIdx}`}
-                                  className="px-2 py-1 rounded text-[11px] text-slate-400 flex items-center justify-between bg-slate-950/40"
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (e.shiftKey) {
+                                      handleTrackBody({
+                                        kind: 'belt',
+                                        zoneIdx: sZoneIdx,
+                                        bodyIdx: bIdx,
+                                      });
+                                    } else {
+                                      handleZoomToEntity({
+                                        kind: 'belt',
+                                        zoneIdx: sZoneIdx,
+                                        bodyIdx: bIdx,
+                                      });
+                                    }
+                                  }}
+                                  onDoubleClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedEntity({
+                                      kind: 'belt',
+                                      zoneIdx: sZoneIdx,
+                                      bodyIdx: bIdx,
+                                    });
+                                  }}
+                                  className="w-full text-left px-2 py-1 rounded text-[11px] text-slate-400 hover:text-slate-200 hover:bg-slate-900/60 flex items-center justify-between cursor-pointer transition select-none"
+                                  title={`${b.role || 'Asteroid Belt'} (${b.a.toFixed(2)} AU)\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Double-Click: Open Detailed Stats`}
                                 >
                                   <div className="flex items-center gap-1.5 truncate">
                                     <span className="text-slate-600 text-[10px]">├─</span>
@@ -2324,7 +2401,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                   <span className="text-[10px] text-slate-500 shrink-0">
                                     {b.a.toFixed(2)} AU
                                   </span>
-                                </div>
+                                </button>
                               );
                             }
 
@@ -2350,15 +2427,32 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                 >
                                   <button
                                     type="button"
-                                    onClick={() =>
-                                      handleTrackBody({
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (e.shiftKey) {
+                                        handleTrackBody({
+                                          kind: 'planet',
+                                          zoneIdx: sZoneIdx,
+                                          bodyIdx: bIdx,
+                                        });
+                                      } else {
+                                        handleZoomToEntity({
+                                          kind: 'planet',
+                                          zoneIdx: sZoneIdx,
+                                          bodyIdx: bIdx,
+                                        });
+                                      }
+                                    }}
+                                    onDoubleClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedEntity({
                                         kind: 'planet',
                                         zoneIdx: sZoneIdx,
                                         bodyIdx: bIdx,
-                                      })
-                                    }
-                                    className="flex items-center gap-1.5 truncate flex-1 text-left cursor-pointer mr-1"
-                                    title={`Click to Track Orbit of Planet #${bIdx + 1}`}
+                                      });
+                                    }}
+                                    className="flex items-center gap-1.5 truncate flex-1 text-left cursor-pointer mr-1 select-none"
+                                    title={`Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}
                                   >
                                     <span className="text-slate-600 text-[10px]">├─</span>
                                     <span
@@ -2390,15 +2484,16 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                     </span>
                                     <button
                                       type="button"
-                                      onClick={() =>
-                                        handleSelectBody({
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedEntity({
                                           kind: 'planet',
                                           zoneIdx: sZoneIdx,
                                           bodyIdx: bIdx,
-                                        })
-                                      }
+                                        });
+                                      }}
                                       className="p-1 rounded text-slate-500 hover:text-sky-300 hover:bg-slate-800 cursor-pointer"
-                                      title="Open Planet Details Dossier"
+                                      title="Open Detailed Stats Dossier"
                                     >
                                       <Maximize2 className="w-2.5 h-2.5" />
                                     </button>
@@ -2426,16 +2521,35 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                         >
                                           <button
                                             type="button"
-                                            onClick={() =>
-                                              handleTrackBody({
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              if (e.shiftKey) {
+                                                handleTrackBody({
+                                                  kind: 'moon',
+                                                  zoneIdx: sZoneIdx,
+                                                  bodyIdx: bIdx,
+                                                  moonIdx: mIdx,
+                                                });
+                                              } else {
+                                                handleZoomToEntity({
+                                                  kind: 'moon',
+                                                  zoneIdx: sZoneIdx,
+                                                  bodyIdx: bIdx,
+                                                  moonIdx: mIdx,
+                                                });
+                                              }
+                                            }}
+                                            onDoubleClick={(e) => {
+                                              e.stopPropagation();
+                                              setSelectedEntity({
                                                 kind: 'moon',
                                                 zoneIdx: sZoneIdx,
                                                 bodyIdx: bIdx,
                                                 moonIdx: mIdx,
-                                              })
-                                            }
-                                            className="flex items-center gap-1 truncate flex-1 text-left cursor-pointer"
-                                            title={`Track Moon: ${m.name}`}
+                                              });
+                                            }}
+                                            className="flex items-center gap-1 truncate flex-1 text-left cursor-pointer select-none"
+                                            title={`Moon: ${m.name} (${m.moonClass})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}
                                           >
                                             <span className="text-slate-600 text-[9px]">└─</span>
                                             <span className="truncate">
@@ -2472,13 +2586,39 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                         {z.bodies.map((b, bIdx) => {
                           if (b.kind === 'belt') {
                             return (
-                              <div
+                              <button
                                 key={`tree-cb-belt-${zIdx}-${bIdx}`}
-                                className="px-2 py-1 rounded text-[11px] text-amber-300/70 flex items-center justify-between"
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (e.shiftKey) {
+                                    handleTrackBody({
+                                      kind: 'belt',
+                                      zoneIdx: zIdx,
+                                      bodyIdx: bIdx,
+                                    });
+                                  } else {
+                                    handleZoomToEntity({
+                                      kind: 'belt',
+                                      zoneIdx: zIdx,
+                                      bodyIdx: bIdx,
+                                    });
+                                  }
+                                }}
+                                onDoubleClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedEntity({
+                                    kind: 'belt',
+                                    zoneIdx: zIdx,
+                                    bodyIdx: bIdx,
+                                  });
+                                }}
+                                className="w-full text-left px-2 py-1 rounded text-[11px] text-amber-300/70 hover:text-amber-200 hover:bg-amber-950/40 flex items-center justify-between cursor-pointer transition select-none"
+                                title={`Circumbinary Belt: ${b.role || 'Belt'}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Double-Click: Open Detailed Stats`}
                               >
                                 <span>{b.role || 'Belt'}</span>
                                 <span className="text-[10px]">{b.a.toFixed(2)} AU</span>
-                              </div>
+                              </button>
                             );
                           }
                           const isTracked =
@@ -2497,14 +2637,32 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             >
                               <button
                                 type="button"
-                                onClick={() =>
-                                  handleTrackBody({
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (e.shiftKey) {
+                                    handleTrackBody({
+                                      kind: 'planet',
+                                      zoneIdx: zIdx,
+                                      bodyIdx: bIdx,
+                                    });
+                                  } else {
+                                    handleZoomToEntity({
+                                      kind: 'planet',
+                                      zoneIdx: zIdx,
+                                      bodyIdx: bIdx,
+                                    });
+                                  }
+                                }}
+                                onDoubleClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedEntity({
                                     kind: 'planet',
                                     zoneIdx: zIdx,
                                     bodyIdx: bIdx,
-                                  })
-                                }
-                                className="flex items-center gap-1.5 truncate flex-1 text-left cursor-pointer"
+                                  });
+                                }}
+                                className="flex items-center gap-1.5 truncate flex-1 text-left cursor-pointer select-none"
+                                title={`Circumbinary Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}
                               >
                                 <span
                                   className="w-2 h-2 rounded-full shrink-0"
@@ -2901,6 +3059,22 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             className="cursor-pointer"
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (e.shiftKey) {
+                                handleTrackBody({
+                                  kind: 'belt',
+                                  zoneIdx: zIdx,
+                                  bodyIdx: bIdx,
+                                });
+                              } else {
+                                handleZoomToEntity({
+                                  kind: 'belt',
+                                  zoneIdx: zIdx,
+                                  bodyIdx: bIdx,
+                                });
+                              }
+                            }}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
                               setSelectedEntity({
                                 kind: 'belt',
                                 zoneIdx: zIdx,
@@ -3159,18 +3333,33 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                     onMouseDown={(e) => e.stopPropagation()}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleSelectBody(
-                                        {
+                                      if (e.shiftKey) {
+                                        handleTrackBody({
                                           kind: 'moon',
                                           zoneIdx: zIdx,
                                           bodyIdx: bIdx,
                                           moonIdx: mIdx,
-                                        },
-                                        e
-                                      );
+                                        });
+                                      } else {
+                                        handleZoomToEntity({
+                                          kind: 'moon',
+                                          zoneIdx: zIdx,
+                                          bodyIdx: bIdx,
+                                          moonIdx: mIdx,
+                                        });
+                                      }
+                                    }}
+                                    onDoubleClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedEntity({
+                                        kind: 'moon',
+                                        zoneIdx: zIdx,
+                                        bodyIdx: bIdx,
+                                        moonIdx: mIdx,
+                                      });
                                     }}
                                   >
-                                    <title>{`${m.name} (${m.moonClass})\n• Click: View Details\n• Shift+Click: Lock Camera & Track Orbit`}</title>
+                                    <title>{`${m.name} (${m.moonClass})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}</title>
                                     <ellipse
                                       cx={pProj.x}
                                       cy={pProj.y}
@@ -3209,17 +3398,30 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                               onMouseDown={(e) => e.stopPropagation()}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleSelectBody(
-                                  {
+                                if (e.shiftKey) {
+                                  handleTrackBody({
                                     kind: 'planet',
                                     zoneIdx: zIdx,
                                     bodyIdx: bIdx,
-                                  },
-                                  e
-                                );
+                                  });
+                                } else {
+                                  handleZoomToEntity({
+                                    kind: 'planet',
+                                    zoneIdx: zIdx,
+                                    bodyIdx: bIdx,
+                                  });
+                                }
+                              }}
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedEntity({
+                                  kind: 'planet',
+                                  zoneIdx: zIdx,
+                                  bodyIdx: bIdx,
+                                });
                               }}
                             >
-                              <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}\n• Click: View Planet Details\n• Shift+Click: Lock Camera & Track Orbit`}</title>
+                              <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}</title>
                               {/* Invisible click target for easy selection */}
                               <circle
                                 cx={pProj.x}
@@ -3355,10 +3557,18 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                       onMouseDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleSelectBody({ kind: 'star', starIdx: sIdx }, e);
+                        if (e.shiftKey) {
+                          handleTrackBody({ kind: 'star', starIdx: sIdx });
+                        } else {
+                          handleZoomToEntity({ kind: 'star', starIdx: sIdx });
+                        }
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedEntity({ kind: 'star', starIdx: sIdx });
                       }}
                     >
-                      <title>{`Star ${st.label} (${st.spectralType})\n• Click: View Star Dossier\n• Shift+Click: Center Camera`}</title>
+                      <title>{`Star ${st.label} (${st.spectralType})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Double-Click: Open Detailed Stats`}</title>
                       <defs>
                         <radialGradient
                           id={starGradId}
