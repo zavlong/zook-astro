@@ -128,7 +128,8 @@ function renderPlanetGlobeToCanvas(
   transparentBg = false,
   rotYaw = 0,
   rotPitch = 0,
-  interactiveFast = false
+  interactiveFast = false,
+  includeSpriteRings = true
 ): void {
   const ctx = gCanvas.getContext('2d');
   if (!ctx) return;
@@ -143,7 +144,7 @@ function renderPlanetGlobeToCanvas(
   const gasF = isMoon && moon ? moon.gasFrac : planet.gasFrac;
   const tilt = isMoon && moon ? moon.axialTiltDeg : planet.axialTiltDeg;
   const spinState = isMoon && moon ? moon.spinState : planet.spinState;
-  const ringSys = isMoon ? null : planet.ringSystem;
+  const rings = isMoon || !includeSpriteRings ? null : planet.rings;
   const sudarsky = isMoon ? null : planet.sudarskyClass;
 
   // Planets with 1:1 tidal locking to their host star have a permanent dayside & permanent nightside!
@@ -183,7 +184,7 @@ function renderPlanetGlobeToCanvas(
 
   const cx = W * 0.5;
   const cy = H * 0.5;
-  const R = Math.min(W, H) * (transparentBg ? 0.44 : ringSys ? 0.31 : 0.41);
+  const R = Math.min(W, H) * (rings ? 0.33 : transparentBg ? 0.44 : 0.41);
 
   // World-space starlight direction vector: on tidally-locked worlds, position substellar point slightly left of center
   // so at default angle (0,0) both the substellar bullseye ("eyeball" / dayside magma) AND the terminator + nightside are visible!
@@ -208,8 +209,17 @@ function renderPlanetGlobeToCanvas(
   const ringTiltRad = ((22 + (worldSeed % 18)) * Math.PI) / 180;
   const sinT = Math.sin(ringTiltRad);
   const cosT = Math.cos(ringTiltRad);
-  const rInner = R * (ringSys ? ringSys.innerRadiusRp : 1.24);
-  const rOuter = R * (ringSys ? Math.min(2.45, ringSys.outerRadiusRp) : 1.85);
+  const rInner = R * (planet.ringSystem ? planet.ringSystem.innerRadiusRp : 1.24);
+  const rOuter = R * (planet.ringSystem ? Math.min(2.25, planet.ringSystem.outerRadiusRp) : 1.88);
+  // World-space ring plane normal: (0, cosT, -sinT)
+  const rnWx = 0;
+  const rnWy = cosT;
+  const rnWz = -sinT;
+  const rnaX = rnWx * cosYaw - rnWz * sinYaw;
+  const rnaZ = rnWx * sinYaw + rnWz * cosYaw;
+  const rNormX = rnaX;
+  const rNormY = rnWy * cosPitch + rnaZ * sinPitch;
+  const rNormZ = -rnWy * sinPitch + rnaZ * cosPitch;
 
   const octMain = interactiveFast ? 3 : 5;
   const octSub = interactiveFast ? 3 : 4;
@@ -337,7 +347,46 @@ function renderPlanetGlobeToCanvas(
         }
       }
 
-      // Outside planet globe: render atmospheric halo
+      // Check ring intersection in 3D camera space: plane equation dx*rNormX + dy*rNormY + z*rNormZ = 0
+      let ringAlpha = 0;
+      let ringR = 0;
+      let ringG = 0;
+      let ringB = 0;
+      let ringZ = 0;
+
+      if (rings) {
+        const nzPlane = Math.abs(rNormZ) < 0.04 ? (rNormZ >= 0 ? 0.04 : -0.04) : rNormZ;
+        ringZ = -(dx * rNormX + dy * rNormY) / nzPlane;
+        const r3d = Math.sqrt(dx * dx + dy * dy + ringZ * ringZ);
+        if (r3d >= rInner && r3d <= rOuter) {
+          const u = (r3d - rInner) / (rOuter - rInner);
+          const band1 = Math.sin(u * 28 + (worldSeed % 7)) * 0.5 + 0.5;
+          const band2 = Math.sin(u * 74 + 1.7) * 0.5 + 0.5;
+          const cassiniGap = Math.abs(u - 0.62) < 0.045 ? 0.12 : 1.0;
+          const tau = planet.ringSystem?.opticalDepth ?? (rings.includes('Major') ? 1.25 : rings.includes('Silicate') || rings.includes('Roche') ? 0.55 : 0.14);
+          const baseRingAlpha = clamp(0.18 + 0.42 * Math.sqrt(clamp(tau / 1.5, 0.02, 1.2)), 0.18, 0.68);
+          ringAlpha =
+            baseRingAlpha *
+            (0.45 + 0.35 * band1 + 0.2 * band2) *
+            cassiniGap *
+            Math.sin(u * Math.PI);
+
+          // Check if ring point (dx, dy, ringZ) is in planet's shadow cylinder along lCam
+          const dotL = dx * lCamX + dy * lCamY + ringZ * lCamZ;
+          const perpSq = Math.max(0, r3d * r3d - dotL * dotL);
+          const shadowFactor =
+            dotL < 0 && perpSq < R * R * 0.96
+              ? clamp((Math.sqrt(perpSq) - R * 0.86) / (R * 0.12), 0.12, 1.0)
+              : 1.0;
+
+          const isIcyRing = rings.includes('Icy') || rings.includes('Major');
+          ringR = (isIcyRing ? 215 : 178) * (0.78 + 0.22 * band1) * shadowFactor;
+          ringG = (isIcyRing ? 206 : 158) * (0.78 + 0.22 * band1) * shadowFactor;
+          ringB = (isIcyRing ? 190 : 135) * (0.78 + 0.22 * band1) * shadowFactor;
+        }
+      }
+
+      // Outside planet globe: render atmospheric halo + full ring
       if (dist > R) {
         const haloDist = (dist - R) / (R * 0.16);
         let haloAlpha = 0;
@@ -350,21 +399,32 @@ function renderPlanetGlobeToCanvas(
           haloAlpha = Math.pow(1 - haloDist, 2.4) * sunSide * 0.68;
         }
         if (transparentBg) {
-          const totA = clamp(haloAlpha, 0, 1);
+          const totA = clamp(haloAlpha + ringAlpha * (1 - haloAlpha), 0, 1);
           if (totA <= 0.01) {
             data[idx + 3] = 0;
             continue;
           }
-          data[idx] = Math.round(atmoRgb[0]);
-          data[idx + 1] = Math.round(atmoRgb[1]);
-          data[idx + 2] = Math.round(atmoRgb[2]);
-          data[idx + 3] = Math.round(totA * 255);
+          const outR =
+            (atmoRgb[0] * haloAlpha + ringR * ringAlpha * (1 - haloAlpha)) / totA;
+          const outG =
+            (atmoRgb[1] * haloAlpha + ringG * ringAlpha * (1 - haloAlpha)) / totA;
+          const outB =
+            (atmoRgb[2] * haloAlpha + ringB * ringAlpha * (1 - haloAlpha)) / totA;
+          data[idx] = clamp(Math.round(outR), 0, 255);
+          data[idx + 1] = clamp(Math.round(outG), 0, 255);
+          data[idx + 2] = clamp(Math.round(outB), 0, 255);
+          data[idx + 3] = clamp(Math.round(totA * 255), 0, 255);
           continue;
         } else {
           if (haloAlpha > 0) {
             bgR = Math.round(lerp(bgR, atmoRgb[0], haloAlpha));
             bgG = Math.round(lerp(bgG, atmoRgb[1], haloAlpha));
             bgB = Math.round(lerp(bgB, atmoRgb[2], haloAlpha));
+          }
+          if (ringAlpha > 0) {
+            bgR = Math.round(lerp(bgR, ringR, ringAlpha));
+            bgG = Math.round(lerp(bgG, ringG, ringAlpha));
+            bgB = Math.round(lerp(bgB, ringB, ringAlpha));
           }
           data[idx] = bgR;
           data[idx + 1] = bgG;
@@ -685,6 +745,13 @@ function renderPlanetGlobeToCanvas(
         litB = lerp(litB, atmoRgb[2], limbStrength);
       }
 
+      // Front of ring (in front of planet sphere in camera space: ringZ > 0)
+      if (ringAlpha > 0 && ringZ > 0) {
+        litR = lerp(litR, ringR, ringAlpha);
+        litG = lerp(litG, ringG, ringAlpha);
+        litB = lerp(litB, ringB, ringAlpha);
+      }
+
       data[idx] = clamp(Math.round(litR), 0, 255);
       data[idx + 1] = clamp(Math.round(litG), 0, 255);
       data[idx + 2] = clamp(Math.round(litB), 0, 255);
@@ -693,71 +760,6 @@ function renderPlanetGlobeToCanvas(
   }
 
   ctx.putImageData(img, 0, 0);
-
-  // Render 3D Micro-Asteroid Ring Belt particles around portrait globe (when not generating icon sprite)
-  if (!transparentBg && ringSys) {
-    const count = ringSys.ringClass.includes('Major')
-      ? 240
-      : ringSys.ringClass.includes('Silicate') || ringSys.ringClass.includes('Roche')
-      ? 165
-      : 105;
-    for (let k = 0; k < count; k++) {
-      const u1 = (((Math.sin((k + 1) * 12.9898 + worldSeed) * 43758.5453) % 1) + 1) % 1;
-      const u2 = (((Math.sin((k + 1) * 78.233 + worldSeed * 1.7) * 43758.5453) % 1) + 1) % 1;
-      const u3 = (((Math.sin((k + 1) * 39.425 + worldSeed * 2.3) * 43758.5453) % 1) + 1) % 1;
-
-      // Radial position between rInner and rOuter (skip narrow Cassini-like division at u=0.62)
-      let uRad = u2;
-      if (Math.abs(uRad - 0.62) < 0.03) uRad = uRad < 0.62 ? 0.58 : 0.66;
-      const rOrbit = rInner + uRad * (rOuter - rInner);
-      const angle = u1 * Math.PI * 2;
-
-      // 3D position in ring plane -> tilted world space -> rotated camera space
-      const rx0 = rOrbit * Math.cos(angle);
-      const rz0 = rOrbit * Math.sin(angle);
-      const wyR = rz0 * sinT + (u3 - 0.5) * 2.2;
-      const wzR = rz0 * cosT;
-
-      const x1 = rx0 * cosYaw + wzR * sinYaw;
-      const z1 = -rx0 * sinYaw + wzR * cosYaw;
-      const camX = x1;
-      const camY = wyR * cosPitch - z1 * sinPitch;
-      const camZ = wyR * sinPitch + z1 * cosPitch;
-
-      const dist2D = Math.hypot(camX, camY);
-      // Occlude micro-asteroids behind the planet globe
-      if (camZ < 0 && dist2D < R * 1.02) continue;
-
-      // Check planet shadow cylinder
-      const dotL = camX * lCamX + camY * lCamY + camZ * lCamZ;
-      const perpSq = Math.max(0, rOrbit * rOrbit - dotL * dotL);
-      const inShadow = dotL < 0 && perpSq < R * R * 0.85;
-
-      const isIceSpeck = u3 < ringSys.iceFrac;
-      const isMetalSpeck = !isIceSpeck && u3 < ringSys.iceFrac + ringSys.metalFrac;
-      const col = isIceSpeck
-        ? inShadow
-          ? 'rgba(71, 85, 105, 0.45)'
-          : 'rgba(224, 242, 254, 0.88)'
-        : isMetalSpeck
-        ? inShadow
-          ? 'rgba(63, 63, 70, 0.45)'
-          : 'rgba(212, 212, 216, 0.85)'
-        : inShadow
-        ? 'rgba(68, 64, 60, 0.45)'
-        : 'rgba(180, 158, 132, 0.85)';
-
-      const sz = clamp((0.9 + (k % 3) * 0.55) * (W / 220), 0.7, 2.6);
-      ctx.save();
-      ctx.translate(cx + camX, cy + camY);
-      ctx.rotate(u1 * Math.PI * 2);
-      ctx.fillStyle = col;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, sz * 1.25, sz * 0.78, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-  }
 }
 
 /**
@@ -772,7 +774,8 @@ export function getProceduralPlanetIconDataUrl(
   moonIndex = 0,
   size = 56,
   rotYaw = 0,
-  rotPitch = 0
+  rotPitch = 0,
+  includeSpriteRings = true
 ): string {
   const isMoon = Boolean(moon);
   // Quantize yaw/pitch to ~0.22 rad (~12.5°) steps so 3D camera drags remain fast & cached
@@ -782,7 +785,7 @@ export function getProceduralPlanetIconDataUrl(
     isMoon ? `m_${moon?.id}_${moon?.moonClass}_${moon?.surfaceTempK}` : `p_${planet.a}_${planet.massEarth}_${planet.planetClass}_${planet.surfaceTempK}`,
     isMoon ? moon?.hydrosphere?.coveragePct : planet.hydrosphere?.coveragePct,
     isMoon ? moon?.spinState : planet.spinState,
-    planet.rings || 'norings',
+    includeSpriteRings ? planet.rings || 'norings' : 'nospriterings',
     starColorHex,
     size,
     qYaw.toFixed(2),
@@ -806,7 +809,8 @@ export function getProceduralPlanetIconDataUrl(
     true,
     qYaw,
     qPitch,
-    false
+    false,
+    includeSpriteRings
   );
   const url = canvas.toDataURL('image/png');
   if (iconDataUrlCache.size > 600) {

@@ -3701,7 +3701,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                       const isPlanetSel = isPlanetTracked || isPlanetDossier;
                       const claimInfo = getPlanetClaimInfo(b, zIdx, bIdx);
 
-                      // Actual Procedural Planet Texture from Planet Info View:
+                      // Actual Procedural Planet Texture from Planet Info View (without baked sprite rings on 3D Orrery):
                       const planetIconUrl = getProceduralPlanetIconDataUrl(
                         b,
                         null,
@@ -3710,7 +3710,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                         0,
                         144,
                         0,
-                        0
+                        0,
+                        false
                       );
                       const planetImgSize = pRad / 0.44;
                       const ringOffset = b.ringSystem
@@ -3718,39 +3719,95 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                         : 0;
 
                       // Generate 3D Micro-Asteroid Ring Belt particles (split into Back & Front halves for true 3D planet occlusion)
+                      // Ring density (opticalDepth τ & ringClass) is visibly reflected in band opacity, ringlets, speck count, and brightness
                       const ringBackNodes: React.ReactNode[] = [];
                       const ringFrontNodes: React.ReactNode[] = [];
-                      if (b.ringSystem && pRad > 3.2) {
+                      if (b.ringSystem && pRad > 2.6) {
                         const rSys = b.ringSystem;
+                        const tau = rSys.opticalDepth;
+                        // Normalized visual density factor from optical depth τ ∈ [0.04, 2.0]
+                        const densityNorm = clamp(Math.sqrt(tau / 1.45), 0.14, 1.15);
+                        const isMajorRing = tau >= 0.9 || rSys.ringClass.includes('Major');
+                        const isDenseRing =
+                          !isMajorRing &&
+                          (tau >= 0.28 ||
+                            rSys.ringClass.includes('Silicate') ||
+                            rSys.ringClass.includes('Roche'));
+
                         const rInnerPx = pRad * rSys.innerRadiusRp;
-                        const rOuterPx = pRad * Math.min(2.35, rSys.outerRadiusRp);
+                        const rOuterPx = pRad * Math.min(2.38, rSys.outerRadiusRp);
                         const tiltY = Math.max(0.28, Math.cos(orreryPitch * 0.78));
                         const ringSeed = zIdx * 997 + bIdx * 313 + Math.round(b.a * 1000);
-                        const speckCount = rSys.ringClass.includes('Major')
-                          ? 96
-                          : rSys.ringClass.includes('Silicate') || rSys.ringClass.includes('Roche')
-                          ? 68
-                          : 44;
 
-                        // Subtle inner/outer boundary & dust track behind globe
-                        const midRx = 0.5 * (rInnerPx + rOuterPx);
-                        const bandW = Math.max(1.2, rOuterPx - rInnerPx);
-                        const dustStroke =
-                          rSys.iceFrac >= 0.5
-                            ? 'rgba(186, 230, 253, 0.14)'
-                            : 'rgba(214, 195, 165, 0.14)';
-                        ringBackNodes.push(
-                          <ellipse
-                            key="ring-dust-band"
-                            cx={pProj.x}
-                            cy={pProj.y}
-                            rx={midRx}
-                            ry={midRx * tiltY}
-                            fill="none"
-                            stroke={dustStroke}
-                            strokeWidth={bandW * 0.65}
-                          />
+                        // Scale micro-asteroid speck count strongly with optical depth τ
+                        const speckCount = Math.round(
+                          clamp(22 + tau * 115, 26, 195)
                         );
+
+                        const baseRingRgb =
+                          rSys.iceFrac >= 0.5
+                            ? '186, 230, 253'
+                            : rSys.metalFrac >= 0.28
+                            ? '212, 212, 216'
+                            : '214, 190, 156';
+
+                        // Helper to push a 3D ringlet arc split into back (behind planet) and front (in front of planet)
+                        const pushRingletArcs = (
+                          keyPrefix: string,
+                          rx: number,
+                          strokeW: number,
+                          opacity: number
+                        ) => {
+                          if (rx <= 0 || strokeW <= 0.1 || opacity <= 0.01) return;
+                          const ry = rx * tiltY;
+                          const xL = (pProj.x - rx).toFixed(2);
+                          const xR = (pProj.x + rx).toFixed(2);
+                          const yC = pProj.y.toFixed(2);
+                          const rxS = rx.toFixed(2);
+                          const ryS = ry.toFixed(2);
+                          // Upper half (sin(ang) < 0 -> behind planet globe)
+                          ringBackNodes.push(
+                            <path
+                              key={`${keyPrefix}-back`}
+                              d={`M ${xL} ${yC} A ${rxS} ${ryS} 0 0 1 ${xR} ${yC}`}
+                              fill="none"
+                              stroke={`rgba(${baseRingRgb}, ${opacity.toFixed(3)})`}
+                              strokeWidth={strokeW}
+                            />
+                          );
+                          // Lower half (sin(ang) >= 0 -> in front of planet globe)
+                          ringFrontNodes.push(
+                            <path
+                              key={`${keyPrefix}-front`}
+                              d={`M ${xR} ${yC} A ${rxS} ${ryS} 0 0 1 ${xL} ${yC}`}
+                              fill="none"
+                              stroke={`rgba(${baseRingRgb}, ${opacity.toFixed(3)})`}
+                              strokeWidth={strokeW}
+                            />
+                          );
+                        };
+
+                        const spanPx = Math.max(1.2, rOuterPx - rInnerPx);
+                        if (isMajorRing) {
+                          // Saturn-class high optical depth: distinct dense inner B-ring and outer A-ring separated by Cassini gap
+                          const innerBandRx = rInnerPx + spanPx * 0.3;
+                          const innerBandW = spanPx * 0.48;
+                          const outerBandRx = rInnerPx + spanPx * 0.81;
+                          const outerBandW = spanPx * 0.28;
+                          const bandAlpha = clamp(0.24 + 0.16 * densityNorm, 0.26, 0.44);
+                          pushRingletArcs('ring-major-B', innerBandRx, innerBandW, bandAlpha);
+                          pushRingletArcs('ring-major-A', outerBandRx, outerBandW, bandAlpha * 0.78);
+                        } else if (isDenseRing) {
+                          // Moderate optical depth: visible rocky/silicate debris band with inner & outer ringlets
+                          const midRx = rInnerPx + spanPx * 0.5;
+                          const bandAlpha = clamp(0.11 + 0.14 * densityNorm, 0.14, 0.25);
+                          pushRingletArcs('ring-dense-main', midRx, spanPx * 0.68, bandAlpha);
+                        } else {
+                          // Faint dusty rings (low optical depth τ < 0.28): gossamer translucent dust track
+                          const midRx = rInnerPx + spanPx * 0.5;
+                          const bandAlpha = clamp(0.03 + 0.06 * densityNorm, 0.035, 0.085);
+                          pushRingletArcs('ring-faint-dust', midRx, spanPx * 0.45, bandAlpha);
+                        }
 
                         for (let k = 0; k < speckCount; k++) {
                           const u1 =
@@ -3765,8 +3822,10 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             1;
 
                           let uRad = u2;
-                          if (Math.abs(uRad - 0.62) < 0.035) {
-                            uRad = uRad < 0.62 ? 0.57 : 0.67;
+                          if (isMajorRing && Math.abs(uRad - 0.62) < 0.045) {
+                            uRad = uRad < 0.62 ? 0.56 : 0.68;
+                          } else if (isDenseRing && Math.abs(uRad - 0.62) < 0.025) {
+                            uRad = uRad < 0.62 ? 0.59 : 0.65;
                           }
                           const rPx = rInnerPx + uRad * (rOuterPx - rInnerPx);
                           const keplerRate = 22 / Math.pow(1 + uRad * 0.8, 1.5);
@@ -3780,11 +3839,19 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             ? '#e0f2fe'
                             : isMetal
                             ? '#d4d4d8'
-                            : '#bfa888';
+                            : '#c7b299';
+                          const densitySizeScale = isMajorRing ? 1.15 : isDenseRing ? 0.98 : 0.78;
                           const speckSz = clamp(
-                            (0.45 + (k % 3) * 0.25) * clamp(pRad / 14, 0.65, 1.65),
-                            0.35,
-                            1.45
+                            (0.42 + (k % 3) * 0.24) *
+                              clamp(pRad / 14, 0.65, 1.65) *
+                              densitySizeScale,
+                            0.32,
+                            1.65
+                          );
+                          const speckAlpha = clamp(
+                            0.22 + 0.52 * densityNorm + u3 * 0.24,
+                            0.24,
+                            0.98
                           );
                           const rotDeg = Math.round(u1 * 360 + orreryTimeYr * 120);
                           const node = (
@@ -3796,7 +3863,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                               ry={speckSz * 0.78}
                               transform={`rotate(${rotDeg} ${sx.toFixed(1)} ${sy.toFixed(1)})`}
                               fill={col}
-                              fillOpacity={0.55 + u3 * 0.38}
+                              fillOpacity={speckAlpha}
                             />
                           );
                           if (Math.sin(ang) < 0) {
