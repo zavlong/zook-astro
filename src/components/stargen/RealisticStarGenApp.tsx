@@ -16,6 +16,7 @@ import {
   Move,
   Crosshair,
   Gauge,
+  Tag,
 } from 'lucide-react';
 import {
   RealisticBeltBody,
@@ -123,6 +124,45 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
   // Modals (JSON Import/Export)
   const [showJsonModal, setShowJsonModal] = useState<boolean>(false);
+
+  // Orrery System Map Labels Toggle (default false)
+  const [showLabels, setShowLabels] = useState<boolean>(false);
+
+  // Transition state when returning to Sector Hex Map
+  const [isExitingToSector, setIsExitingToSector] = useState<boolean>(false);
+  const exitTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (exitTimerRef.current) {
+        clearTimeout(exitTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleBackToSectorWithTransition = useCallback(() => {
+    if (!onBackToSectorHex || isExitingToSector) return;
+
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (prefersReducedMotion) {
+      onBackToSectorHex();
+      return;
+    }
+
+    setIsExitingToSector(true);
+    // Smoothly zoom out orrery camera
+    setOrreryPxPerAU((p) => Math.max(0.05, p / 3));
+
+    if (exitTimerRef.current) {
+      clearTimeout(exitTimerRef.current);
+    }
+    exitTimerRef.current = setTimeout(() => {
+      onBackToSectorHex();
+    }, 350);
+  }, [onBackToSectorHex, isExitingToSector]);
 
   // Sector Empires & System Sovereignty State
   const [sectorEmpires, setSectorEmpires] = useState<SectorEmpire[]>([]);
@@ -364,19 +404,24 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
       if (selectedEntity || showJsonModal) return;
 
-      e.preventDefault();
-      e.stopPropagation();
+      if (e.key === 'l' || e.key === 'L') {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowLabels((v) => !v);
+        return;
+      }
 
       if (e.key === 'PageUp' || e.code === 'PageUp') {
-        if (onBackToSectorHex) {
-          onBackToSectorHex();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        handleBackToSectorWithTransition();
+        return;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedEntity, showJsonModal, onBackToSectorHex]);
+  }, [selectedEntity, showJsonModal, handleBackToSectorWithTransition]);
 
   const handleParamChange = (
     newLogMass: number,
@@ -1723,6 +1768,21 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               Inc {orreryIncScale}×
             </button>
 
+            {/* Toggle Labels */}
+            <button
+              type="button"
+              onClick={() => setShowLabels((v) => !v)}
+              className={`px-2 py-1 rounded border text-[11px] flex items-center gap-1 cursor-pointer transition ${
+                showLabels
+                  ? 'bg-sky-600 text-white border-sky-400 font-bold shadow-sm'
+                  : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200'
+              }`}
+              title="Toggle World, Star & Belt Labels (Hotkey: L)"
+            >
+              <Tag className="w-3 h-3" />
+              <span>Labels</span>
+            </button>
+
             {/* Dynamic Zoom Slider */}
             <button
               type="button"
@@ -1767,6 +1827,23 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
         {/* Interactive 3D Proportional SVG Orrery (Drag to Rotate 3D, Shift+Drag/Right-Drag to Pan, Scroll to Zoom) */}
         <div className="relative w-full overflow-hidden rounded-xl border border-slate-800/80 bg-[#03060c]">
+          {/* Floating Quick Toggle Controls Overlay (Always Accessible in Immersion Mode) */}
+          <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 bg-[#0b111e]/85 backdrop-blur-md px-2 py-1 rounded-xl border border-slate-800/90 shadow-xl">
+            <button
+              type="button"
+              onClick={() => setShowLabels((v) => !v)}
+              className={`px-2 py-1 rounded-lg text-[10.5px] font-mono flex items-center gap-1 cursor-pointer transition ${
+                showLabels
+                  ? 'bg-sky-600 text-white font-bold shadow-md shadow-sky-500/25'
+                  : 'bg-slate-900/90 text-slate-400 hover:text-slate-200 border border-slate-700/60'
+              }`}
+              title="Toggle Labels (Hotkey: L)"
+            >
+              <Tag className="w-3 h-3" />
+              <span>Labels</span>
+            </button>
+          </div>
+
           <svg
             ref={orrerySvgRef}
             viewBox={`0 0 ${viewW} ${viewH}`}
@@ -1996,7 +2073,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                         strokeWidth={1.2}
                         strokeDasharray="5,5"
                       />
-                      {rSnowPx > 28 && rSnowPx < 2000 && (
+                      {showLabels && rSnowPx > 28 && rSnowPx < 2000 && (
                         <text
                           x={snowLabelPt.x + 4}
                           y={snowLabelPt.y - 4}
@@ -2196,7 +2273,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             />
                             {/* 165 Individual Small 3D Asteroid Specks */}
                             {asteroidNodes}
-                            {rOrbitPx > 36 && (
+                            {showLabels && rOrbitPx > 36 && (
                               <text
                                 x={bLblPt.x}
                                 y={bLblPt.y - 6}
@@ -2536,7 +2613,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                               </g>
 
                               {/* Planet Label (#num and AU) */}
-                              {rOrbitPx > 24 && (
+                              {showLabels && rOrbitPx > 24 && (
                                 <text
                                   x={pProj.x}
                                   y={pProj.y - pRad - 4}
@@ -2692,17 +2769,19 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                           </g>
                         );
                       })()}
-                      <text
-                        x={sProj.x}
-                        y={sProj.y + sRad + 10}
-                        fill="#ffffff"
-                        fontSize={clamp(8 + sRad * 0.1, 8, 10.5)}
-                        fontWeight="bold"
-                        fontFamily="monospace"
-                        textAnchor="middle"
-                      >
-                        Star {st.label} ({st.spectralType})
-                      </text>
+                      {showLabels && (
+                        <text
+                          x={sProj.x}
+                          y={sProj.y + sRad + 10}
+                          fill="#ffffff"
+                          fontSize={clamp(8 + sRad * 0.1, 8, 10.5)}
+                          fontWeight="bold"
+                          fontFamily="monospace"
+                          textAnchor="middle"
+                        >
+                          Star {st.label} ({st.spectralType})
+                        </text>
+                      )}
                     </g>
                   ),
                 });
@@ -2938,7 +3017,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             {onBackToSectorHex && (
               <button
                 type="button"
-                onClick={onBackToSectorHex}
+                onClick={handleBackToSectorWithTransition}
                 className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-950/80 hover:bg-indigo-900 text-indigo-200 border border-indigo-700 flex items-center gap-1.5 cursor-pointer transition shadow"
                 title="Return to Sector Hex Grid (Hotkey: Page Up)"
               >

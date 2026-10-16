@@ -17,6 +17,7 @@ import {
   Grid,
   Route,
   Crown,
+  Compass,
   Shield,
   Flag,
   Trash2,
@@ -55,9 +56,11 @@ import { SpectralCategory } from '../../types/astrophysics';
 import { universeCache } from '../../core/storage/universeCache';
 
 interface SectorHexAppProps {
-  onLaunchStarGen: (params: StarGenParams) => void;
+  onLaunchStarGen: (params: StarGenParams, coord?: string) => void;
   onBackToGalaxy?: () => void;
   initialConfig?: Partial<SectorHexConfig> | null;
+  initialSelectedCoord?: string | null;
+  returnTransition?: boolean;
   showUI?: boolean;
 }
 
@@ -150,6 +153,8 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   onLaunchStarGen,
   onBackToGalaxy,
   initialConfig,
+  initialSelectedCoord,
+  returnTransition,
   showUI = false,
 }) => {
   // Sector Configuration state initialized with initialConfig if provided, or last saved sector
@@ -570,6 +575,20 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     return () => ro.disconnect();
   }, []);
 
+  // Cinematic transition into Star System (Orrery)
+  const [isEnteringSystem, setIsEnteringSystem] = useState<boolean>(false);
+  const [transitionSystem, setTransitionSystem] = useState<SectorHexSystem | null>(null);
+  const [isReturningFromSystem, setIsReturningFromSystem] = useState<boolean>(false);
+  const systemTransitionTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (systemTransitionTimerRef.current) {
+        clearTimeout(systemTransitionTimerRef.current);
+      }
+    };
+  }, []);
+
   // Center & Fit Hex Grid in Viewport
   const handleFitToScreen = useCallback(() => {
     if (!containerRef.current) return;
@@ -584,20 +603,76 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     });
   }, [gridBoundingSize]);
 
+  // Initial fit or system return animation on mount
   useEffect(() => {
-    handleFitToScreen();
-  }, [config.columns, config.rows]);
+    if (returnTransition && initialSelectedCoord) {
+      const match = gridData.systems.find(
+        (s) => s.coord === initialSelectedCoord || s.id === initialSelectedCoord
+      );
+      if (match && containerRef.current) {
+        setSelectedSystem(match);
+        setSelectedCoord(match.coord);
+        const { clientWidth, clientHeight } = containerRef.current;
+        setIsReturningFromSystem(true);
+        const startZoom = 2.4;
+        setZoom(startZoom);
+        setPan({
+          x: clientWidth / 2 - match.x * startZoom,
+          y: clientHeight / 2 - match.y * startZoom,
+        });
+
+        const timer1 = setTimeout(() => {
+          const finalZoom = 0.52;
+          setZoom(finalZoom);
+          setPan({
+            x: clientWidth / 2 - match.x * finalZoom,
+            y: clientHeight / 2 - match.y * finalZoom,
+          });
+        }, 40);
+
+        const timer2 = setTimeout(() => {
+          setIsReturningFromSystem(false);
+        }, 500);
+
+        return () => {
+          clearTimeout(timer1);
+          clearTimeout(timer2);
+        };
+      } else {
+        handleFitToScreen();
+      }
+    } else {
+      handleFitToScreen();
+    }
+  }, [returnTransition, initialSelectedCoord, gridData.systems, handleFitToScreen]);
+
+  // Find star system nearest to SVG world coordinate
+  const findSystemNearWorldPos = useCallback(
+    (worldX: number, worldY: number): SectorHexSystem | null => {
+      let closest: SectorHexSystem | null = null;
+      let minDistSq = 140 * 140;
+      for (const sys of gridData.systems) {
+        const dSq = (worldX - sys.x) ** 2 + (worldY - sys.y) ** 2;
+        if (dSq < minDistSq) {
+          minDistSq = dSq;
+          closest = sys;
+        }
+      }
+      return closest;
+    },
+    [gridData.systems]
+  );
 
   // Mouse pan handlers
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || isEnteringSystem) return;
     setIsDragging(true);
     dragStartRef.current = { x: e.clientX, y: e.clientY };
     panStartRef.current = { ...pan };
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return;
+    if (!isDragging || isEnteringSystem) return;
     const dx = e.clientX - dragStartRef.current.x;
     const dy = e.clientY - dragStartRef.current.y;
     setPan({
@@ -623,7 +698,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   }, []);
 
   const handleBackToGalaxyWithTransition = useCallback(() => {
-    if (!onBackToGalaxy || isExitingToGalaxy) return;
+    if (!onBackToGalaxy || isExitingToGalaxy || isEnteringSystem) return;
 
     const prefersReducedMotion =
       typeof window !== 'undefined' &&
@@ -641,7 +716,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     exitTimerRef.current = setTimeout(() => {
       onBackToGalaxy();
     }, 350);
-  }, [onBackToGalaxy, isExitingToGalaxy]);
+  }, [onBackToGalaxy, isExitingToGalaxy, isEnteringSystem]);
 
   // Zoom towards a specific screen coordinate (cursor or center)
   const zoomAtScreenPoint = useCallback(
@@ -667,11 +742,28 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   // Zoom with scroll wheel (zooming towards cursor, or zooming out below threshold triggers return to galaxy)
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    if (isExitingToGalaxy) return;
+    if (isExitingToGalaxy || isEnteringSystem) return;
 
     if (e.deltaY > 0 && zoom <= 0.085 && onBackToGalaxy) {
       handleBackToGalaxyWithTransition();
       return;
+    }
+
+    // Zooming in past threshold triggers transition into star system
+    if (e.deltaY < 0 && zoom >= 2.0) {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const worldX = (e.clientX - rect.left - pan.x) / zoom;
+        const worldY = (e.clientY - rect.top - pan.y) / zoom;
+        const candidate =
+          hoveredSystem ||
+          selectedSystem ||
+          findSystemNearWorldPos(worldX, worldY);
+        if (candidate) {
+          handleLaunchSystemGenerator(candidate);
+          return;
+        }
+      }
     }
 
     const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
@@ -780,9 +872,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     setTimeout(() => setCopiedId(false), 1800);
   };
 
-  // Launch StarGen Lab
+  // Launch StarGen Lab with cinematic warp zoom transition
   const handleLaunchSystemGenerator = useCallback(
     (system: SectorHexSystem) => {
+      if (isEnteringSystem) return;
+
       const systemEmpire = empireMap.get(system.id);
       const params: StarGenParams = {
         sysMass: system.mass,
@@ -799,9 +893,40 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       if (system.sysResult && !universeCache.hasCachedSystem(system.id)) {
         universeCache.cacheLoadedSystem(system.id, system.sysResult);
       }
-      onLaunchStarGen(params);
+
+      const prefersReducedMotion =
+        typeof window !== 'undefined' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      if (prefersReducedMotion) {
+        onLaunchStarGen(params, system.coord);
+        return;
+      }
+
+      setIsEnteringSystem(true);
+      setTransitionSystem(system);
+      setSelectedSystem(system);
+      setSelectedCoord(system.coord);
+
+      if (containerRef.current) {
+        const { clientWidth, clientHeight } = containerRef.current;
+        const targetZoom = 2.8;
+        setZoom(targetZoom);
+        setPan({
+          x: clientWidth / 2 - system.x * targetZoom,
+          y: clientHeight / 2 - system.y * targetZoom,
+        });
+      }
+
+      if (systemTransitionTimerRef.current) {
+        clearTimeout(systemTransitionTimerRef.current);
+      }
+
+      systemTransitionTimerRef.current = setTimeout(() => {
+        onLaunchStarGen(params, system.coord);
+      }, 450);
     },
-    [empireMap, activeEmpire, config.seed, config.columns, config.rows, onLaunchStarGen]
+    [isEnteringSystem, empireMap, activeEmpire, config.seed, config.columns, config.rows, onLaunchStarGen]
   );
 
   // Keyboard navigation: Page Up for higher view level (Galaxy), Page Down for lower view level (System / StarGen)
@@ -1048,6 +1173,13 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   // HIGH-PERFORMANCE VIEWPORT CULLING FOR VISIBLE STARS & HYPERLANES
   // ============================================================================
   const visibleSystems = useMemo(() => {
+    if (isEnteringSystem && transitionSystem) {
+      const buffer = 800;
+      return gridData.systems.filter((sys) => {
+        return Math.abs(sys.x - transitionSystem.x) <= buffer && Math.abs(sys.y - transitionSystem.y) <= buffer;
+      });
+    }
+
     const marginPx = 80; // Pixel padding around screen to prevent popping
     const viewMinX = (-pan.x - marginPx) / zoom;
     const viewMaxX = (containerSize.width - pan.x + marginPx) / zoom;
@@ -1063,7 +1195,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
         sys.y - r <= viewMaxY
       );
     });
-  }, [gridData.systems, pan.x, pan.y, zoom, containerSize]);
+  }, [gridData.systems, pan.x, pan.y, zoom, containerSize, isEnteringSystem, transitionSystem]);
 
   // Viewport culling for hyperlanes (0 DOM nodes when showHyperlanes is false)
   const visibleHyperlanes = useMemo(() => {
@@ -1657,7 +1789,13 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
 
             <g
               transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}
-              style={{ transformOrigin: '0 0' }}
+              style={{
+                transformOrigin: '0 0',
+                transition:
+                  isEnteringSystem || isReturningFromSystem
+                    ? 'transform 450ms cubic-bezier(0.2, 0.8, 0.2, 1)'
+                    : 'none',
+              }}
             >
               {/* Sector Hexagon Border & Fill */}
               <polygon
@@ -2448,6 +2586,52 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               </span>
             </div>
           </div>
+          )}
+
+          {/* High Zoom Threshold Indicator Pill to Enter System */}
+          {zoom >= 1.5 && selectedSystem && !isEnteringSystem && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-blue-950/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-cyan-500/50 text-[11px] font-mono text-cyan-200 shadow-xl flex items-center gap-2 pointer-events-none animate-pulse z-10">
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Zoom further or double-click to enter System <strong>{selectedSystem.name || selectedSystem.coord}</strong></span>
+            </div>
+          )}
+
+          {/* Cinematic Warp / Zoom Transition Overlay into Star System */}
+          {isEnteringSystem && transitionSystem && (
+            <div
+              className="absolute inset-0 z-30 pointer-events-none flex flex-col items-center justify-center transition-all duration-500 ease-out"
+              style={{
+                backgroundColor: 'rgba(3, 6, 17, 0.75)',
+                backdropFilter: 'blur(4px)',
+              }}
+            >
+              <div
+                className="w-44 h-44 rounded-full border-2 animate-ping opacity-60 absolute"
+                style={{ borderColor: transitionSystem.colorHex }}
+              />
+              <div
+                className="w-24 h-24 rounded-full border border-cyan-400/80 animate-pulse flex items-center justify-center shadow-2xl relative"
+                style={{
+                  boxShadow: `0 0 50px ${transitionSystem.colorHex}`,
+                  backgroundColor: 'rgba(5, 8, 20, 0.85)',
+                }}
+              >
+                <Compass className="w-9 h-9 text-cyan-300 animate-spin" style={{ animationDuration: '3s' }} />
+              </div>
+
+              <div className="mt-6 text-center space-y-1 font-mono">
+                <div className="text-[11px] uppercase tracking-widest text-cyan-400 font-bold flex items-center justify-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 animate-bounce" />
+                  <span>WARP TRANSITION &bull; ENTERING STAR SYSTEM {transitionSystem.coord}</span>
+                </div>
+                <h3 className="text-xl font-extrabold text-white tracking-wide">
+                  {transitionSystem.name}
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  {transitionSystem.primaryClass} &bull; Mass: {transitionSystem.mass.toFixed(2)} M&#9737; &bull; {transitionSystem.age.toFixed(1)} Gyr &bull; [Fe/H]: {transitionSystem.metallicity >= 0 ? `+${transitionSystem.metallicity.toFixed(2)}` : transitionSystem.metallicity.toFixed(2)}
+                </p>
+              </div>
+            </div>
           )}
 
           {/* Low Zoom Indicator Pill to Return to Galaxy */}

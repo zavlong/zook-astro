@@ -63,6 +63,9 @@ export const App: React.FC = () => {
   const [lastGalaxySector, setLastGalaxySector] = useState<GalaxySectorHex | null>(null);
   const [returnToGalaxyTransition, setReturnToGalaxyTransition] = useState<boolean>(false);
 
+  const [lastSectorSystemCoord, setLastSectorSystemCoord] = useState<string | null>(null);
+  const [returnToSectorTransition, setReturnToSectorTransition] = useState<boolean>(false);
+
   const handleSelectGalaxySector = (sector: GalaxySectorHex) => {
     setLastGalaxySector(sector);
     setReturnToGalaxyTransition(false);
@@ -104,6 +107,30 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleLaunchStarGenFromSector = (params: StarGenParams, coord?: string) => {
+    setLastSectorSystemCoord(coord || params.id || null);
+    setReturnToSectorTransition(false);
+    setStarGenInitialParams(params);
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      (document as unknown as { startViewTransition: (cb: () => void) => void }).startViewTransition(() => {
+        setActiveApp('stargen-lab');
+      });
+    } else {
+      setActiveApp('stargen-lab');
+    }
+  };
+
+  const handleBackToSectorHex = () => {
+    setReturnToSectorTransition(true);
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      (document as unknown as { startViewTransition: (cb: () => void) => void }).startViewTransition(() => {
+        setActiveApp('sector-hex');
+      });
+    } else {
+      setActiveApp('sector-hex');
+    }
+  };
+
   const [config, setConfig] = useState<SectorConfiguration>({
     starCount: 1000,
     morphology: 'disk',
@@ -134,7 +161,10 @@ export const App: React.FC = () => {
       }
 
       if (e.key === 'PageUp' || e.code === 'PageUp') {
-        if (activeApp === 'sector-3d') {
+        if (activeApp === 'stargen-lab') {
+          e.preventDefault();
+          handleBackToSectorHex();
+        } else if (activeApp === 'sector-3d') {
           e.preventDefault();
           handleBackToGalaxy();
         } else if (activeApp === 'astro-architect') {
@@ -312,11 +342,10 @@ export const App: React.FC = () => {
         <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
           <SectorHexApp
             initialConfig={sectorInitialConfig}
+            initialSelectedCoord={lastSectorSystemCoord}
+            returnTransition={returnToSectorTransition}
             onBackToGalaxy={handleBackToGalaxy}
-            onLaunchStarGen={(params) => {
-              setStarGenInitialParams(params);
-              setActiveApp('stargen-lab');
-            }}
+            onLaunchStarGen={handleLaunchStarGenFromSector}
             showUI={showUI}
           />
         </main>
@@ -403,7 +432,7 @@ export const App: React.FC = () => {
         <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
           <RealisticStarGenApp
             initialParams={starGenInitialParams}
-            onBackToSectorHex={() => setActiveApp('sector-hex')}
+            onBackToSectorHex={handleBackToSectorHex}
             onOpenInArchitect={(archSys) => {
               setArchitectInitialSystem(archSys);
               setActiveApp('astro-architect');
