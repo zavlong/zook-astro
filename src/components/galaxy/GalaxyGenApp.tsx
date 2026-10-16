@@ -1418,32 +1418,6 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
             </div>
           )}
 
-          {/* Color & Opacity Astrophysics Legend Overlay */}
-          {showUI && (
-            <div className="absolute top-4 left-4 bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-xl border border-slate-800 text-[10px] font-mono shadow-lg pointer-events-none hidden sm:block">
-              <div className="text-slate-400 font-bold mb-1 uppercase tracking-wider flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                <span>Astrophysical Color Scale</span>
-              </div>
-              <div className="flex items-center gap-1 mb-1.5">
-                <span className="w-3 h-2 rounded-sm bg-[#00d2ff]" />
-                <span className="w-3 h-2 rounded-sm bg-[#38bdf8]" />
-                <span className="w-3 h-2 rounded-sm bg-[#60a5fa]" />
-                <span className="w-3 h-2 rounded-sm bg-[#facc15]" />
-                <span className="w-3 h-2 rounded-sm bg-[#fb923c]" />
-                <span className="w-3 h-2 rounded-sm bg-[#ef4444]" />
-                <span className="w-3 h-2 rounded-sm bg-[#dc2626]" />
-              </div>
-              <div className="flex justify-between text-[9px] text-slate-500">
-                <span className="text-cyan-300 font-bold">Young (Blue)</span>
-                <span className="text-amber-300 font-bold">Old (Red)</span>
-              </div>
-              <div className="text-[9px] text-slate-400 mt-1 border-t border-slate-800/80 pt-1 space-y-0.5">
-                <div>Opacity: <strong className="text-slate-200">Dense</strong> (Opaque) &rarr; <strong className="text-slate-500">Sparse</strong> (Transparent)</div>
-                <div>Overdensity (&gt;100%): <strong className="text-white">Desaturates to white</strong> &bull; Mass &amp; Remnant overflow</div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* ============================================================================ */}
@@ -1544,7 +1518,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                   <div className="flex justify-between text-[11px] mb-1">
                     <span className="text-slate-400">Stellar Density</span>
                     <span className={`font-bold ${selectedSector.density > 1.0 ? 'text-amber-300' : 'text-white'}`}>
-                      {Math.round(selectedSector.density * 100)}%{selectedSector.density > 1.0 ? ' 🔥 Overdensity' : ''}
+                      {Math.round(selectedSector.density * 100)}%
                     </span>
                   </div>
                   <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
@@ -1560,12 +1534,6 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                   <div className="flex justify-end text-[9.5px] text-emerald-400 font-semibold mt-1">
                     <span>~{selectedSector.estimatedStars50x50.toLocaleString()} Systems (50&times;50)</span>
                   </div>
-
-                  {selectedSector.density > 1.0 && (
-                    <div className="mt-2.5 p-2 rounded-lg bg-amber-950/40 border border-amber-600/50 text-[10px] text-amber-200/90 leading-relaxed font-mono">
-                      🔥 <strong>Overdensity Overflow Active:</strong> Excess density overflows into progenitor mass, spawning heavy O/B stars and stellar remnants!
-                    </div>
-                  )}
                 </div>
 
                 {/* Mean Stellar Age & Range */}
@@ -1577,50 +1545,31 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                       {selectedSector.meanAge} Gyr
                     </span>
                   </div>
-                  <div className="flex justify-between text-[10px] text-slate-300 font-mono mb-1.5 bg-slate-950/50 p-1.5 rounded-lg border border-slate-800/70">
+                  <div className="flex justify-between text-[10px] text-slate-300 font-mono bg-slate-950/50 p-1.5 rounded-lg border border-slate-800/70">
                     <span className="text-slate-400">Age Range:</span>
                     <span className="text-cyan-300 font-bold">&plusmn;{(selectedSector.ageRange / 2).toFixed(1)} Gyr &bull; {selectedSector.ageMin} &ndash; {selectedSector.ageMax} Gyr</span>
-                  </div>
-                  <div className="text-[10px] text-slate-300 font-medium">
-                    {selectedSector.meanAge < 2.0
-                      ? 'Spiral Arm Ridge (Starburst Sector)'
-                      : selectedSector.rNorm > 0.90
-                      ? 'Galactic Halo'
-                      : selectedSector.ageDistribution === 'uniform'
-                      ? 'Galactic Bulge'
-                      : 'Thin Disk Population'}
                   </div>
                 </div>
 
                 {/* Average Color */}
                 <div className="border-t border-slate-800/80 pt-2.5">
-                  <div className="flex justify-between text-[11px] mb-1">
+                  <div className="flex justify-between text-[11px]">
                     <span className="text-slate-400">Average Color</span>
                     <span className="font-bold flex items-center gap-1.5 font-mono" style={{ color: selectedSector.colorHex }}>
                       <span className="w-2.5 h-2.5 rounded-full border border-white/50 shadow-sm" style={{ backgroundColor: selectedSector.colorHex }} />
                       {selectedSector.colorHex}
                     </span>
                   </div>
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Luminosity-weighted average of all constituent stars in the sector.
-                  </p>
                 </div>
 
                 {/* Mean Metallicity */}
                 <div className="border-t border-slate-800/80 pt-2.5">
-                  <div className="flex justify-between text-[11px] mb-1">
+                  <div className="flex justify-between text-[11px]">
                     <span className="text-slate-400">Mean Metallicity [Fe/H]</span>
                     <span className={`font-bold ${selectedSector.metallicityMean >= 0 ? 'text-amber-300' : 'text-cyan-300'}`}>
-                      {selectedSector.metallicityMean >= 0 ? `+${selectedSector.metallicityMean}` : selectedSector.metallicityMean} dex
+                      {selectedSector.metallicityMean >= 0 ? `+${selectedSector.metallicityMean}` : selectedSector.metallicityMean} dex : <span className="font-normal text-slate-300">{selectedSector.metallicityMean >= -0.4 ? 'Population I' : 'Population II'}</span>
                     </span>
                   </div>
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    {selectedSector.metallicityMean >= 0.15
-                      ? 'Super-solar metallicity: promotes giant planet formation and heavy rocky cores.'
-                      : selectedSector.metallicityMean >= -0.3
-                      ? 'Near-solar metallicity: balanced terrestrial and gas giant disk partitions.'
-                      : 'Sub-solar / metal-poor: terrestrial planets are smaller; gas giants rare.'}
-                  </p>
                 </div>
               </div>
 
@@ -1645,19 +1594,16 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               )}
 
               {/* Giant Star Systems Card */}
-              <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 font-mono space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                    <span>⭐</span> Giant Star Systems (10–50 M☉)
-                  </span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-400 border border-amber-800/80 font-bold">
-                    {selectedSector.giantStars?.length || 0} Systems
-                  </span>
-                </div>
-                <div className="text-[10.5px] text-slate-400">
-                  Calculated as: <span className="text-cyan-300 font-semibold">{Math.round(selectedSector.density * 100)}% density &divide; 10 &rarr; {Math.floor(Math.round(selectedSector.density * 100) / 10)} giant stars</span>. Rendered as spectral-coded stellar points distributed within this sector hex.
-                </div>
-                {selectedSector.giantStars && selectedSector.giantStars.length > 0 && (
+              {selectedSector.giantStars && selectedSector.giantStars.length > 0 && (
+                <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 font-mono space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                      <span>⭐</span> Giant Star Systems (10–50 M☉)
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-400 border border-amber-800/80 font-bold">
+                      {selectedSector.giantStars.length} Systems
+                    </span>
+                  </div>
                   <div className="flex flex-wrap gap-1.5 pt-1 max-h-32 overflow-y-auto pr-1">
                     {selectedSector.giantStars.map((gs) => (
                       <span
@@ -1676,20 +1622,13 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                       </span>
                     ))}
                   </div>
-                )}
-              </div>
-
-              {/* Seed & Transfer Metadata */}
-              <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-800/60 text-[10px] font-mono text-slate-400">
-                <div className="text-slate-500 uppercase tracking-wider font-bold mb-1">Parameters Passed to SectorHex</div>
-                <div className="space-y-0.5 text-slate-300">
-                  <div>&bull; Seed: <code className="text-blue-300">{selectedSector.seed}</code></div>
-                  <div>&bull; Grid Dimensions: <code className="text-blue-300">50 &times; 50</code> (2,500 hexes)</div>
-                  <div>&bull; Density: <code className="text-blue-300">{selectedSector.density}</code></div>
-                  <div>&bull; Mean Age: <code className="text-blue-300">{selectedSector.meanAge} Gyr</code></div>
-                  <div>&bull; Age Range: <code className="text-blue-300">{selectedSector.ageRange} Gyr ({selectedSector.ageDistribution})</code></div>
-                  <div>&bull; Metallicity: <code className="text-blue-300">{selectedSector.metallicityMean} dex</code></div>
                 </div>
+              )}
+
+              {/* Seed Card */}
+              <div className="p-2.5 rounded-xl bg-slate-900/40 border border-slate-800/60 text-xs font-mono flex items-center justify-between">
+                <span className="text-slate-400">Sector Seed:</span>
+                <code className="text-cyan-300 font-bold">{selectedSector.seed}</code>
               </div>
             </div>
           ) : (
