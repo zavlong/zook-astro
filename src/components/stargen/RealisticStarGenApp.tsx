@@ -136,8 +136,69 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   // Quick Jump Hierarchy Tree on left side (toggled with J or button)
   const [showQuickJump, setShowQuickJump] = useState<boolean>(false);
 
-  // Lagrange Points (L1-L5), Hill Sphere & Hohmann Transfer Overlay (toggled with P or button)
+  // Dedicated Orbital Mechanics & Flight Planner Overlay (toggled with P or button)
   const [showLagrange, setShowLagrange] = useState<boolean>(false);
+  const [navZoneIdx, setNavZoneIdx] = useState<number>(0);
+  const [navOriginIdx, setNavOriginIdx] = useState<number>(0);
+  const [navDestIdx, setNavDestIdx] = useState<number>(1);
+
+  // Sync Orbital Mechanics Origin when system changes
+  useEffect(() => {
+    if (!systemResult) return;
+    let bestZ = 0;
+    let bestB = 0;
+    let bestScore = -1;
+    systemResult.zones.forEach((z, zIdx) => {
+      z.bodies.forEach((cand, bIdx) => {
+        if (cand.kind !== 'planet') return;
+        const score =
+          (cand.hydrosphere?.biosphere && cand.hydrosphere.biosphere !== 'none' ? 1000 : 0) +
+          (cand.gasFrac < 0.05 ? 100 : 0) +
+          Math.min(50, cand.massEarth);
+        if (score > bestScore) {
+          bestScore = score;
+          bestZ = zIdx;
+          bestB = bIdx;
+        }
+      });
+    });
+    setNavZoneIdx(bestZ);
+    setNavOriginIdx(bestB);
+    const zoneBodies = systemResult.zones[bestZ]?.bodies || [];
+    const nextPlanetIdx = zoneBodies.findIndex(
+      (b, idx) => b.kind === 'planet' && idx > bestB
+    );
+    const prevPlanetIdx = zoneBodies.findIndex(
+      (b, idx) => b.kind === 'planet' && idx !== bestB
+    );
+    setNavDestIdx(nextPlanetIdx !== -1 ? nextPlanetIdx : prevPlanetIdx !== -1 ? prevPlanetIdx : bestB);
+  }, [systemResult?.step1?.id, systemResult?.roll]);
+
+  // Sync Orbital Mechanics Origin when user tracks or selects a planet on the map
+  useEffect(() => {
+    const active = trackedTarget || selectedEntity;
+    if (!active || !systemResult) return;
+    if (active.kind === 'planet' || active.kind === 'moon') {
+      const zIdx = active.zoneIdx;
+      const bIdx = active.bodyIdx;
+      setNavZoneIdx(zIdx);
+      setNavOriginIdx(bIdx);
+      setNavDestIdx((prevDest) => {
+        const zoneBodies = systemResult.zones[zIdx]?.bodies || [];
+        if (
+          prevDest !== bIdx &&
+          zoneBodies[prevDest] &&
+          zoneBodies[prevDest].kind === 'planet'
+        ) {
+          return prevDest;
+        }
+        const nextIdx = zoneBodies.findIndex((b, idx) => b.kind === 'planet' && idx > bIdx);
+        if (nextIdx !== -1) return nextIdx;
+        const anyOtherIdx = zoneBodies.findIndex((b, idx) => b.kind === 'planet' && idx !== bIdx);
+        return anyOtherIdx !== -1 ? anyOtherIdx : bIdx;
+      });
+    }
+  }, [trackedTarget, selectedEntity, systemResult]);
 
   // "Entering <System>" Briefing Overlay State (fades out after a few seconds)
   const [showEnteringOverlay, setShowEnteringOverlay] = useState<boolean>(true);
@@ -2189,10 +2250,10 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                   ? 'bg-sky-600 text-white font-bold shadow-md shadow-sky-500/25'
                   : 'bg-slate-900/90 text-slate-300 hover:text-white border border-slate-700/80'
               }`}
-              title="Toggle Lagrange Points (L1-L5), Hill Sphere & Hohmann Transfer Overlay (Hotkey: P)"
+              title="Toggle Orbital Mechanics, Lagrange (L1-L5) & Flight Transfer Overlay (Hotkey: P)"
             >
-              <Compass className="w-3.5 h-3.5" />
-              <span>Lagrange {showLagrange ? 'ON' : 'OFF'}</span>
+              <Rocket className="w-3.5 h-3.5" />
+              <span>Orbital {showLagrange ? 'ON' : 'OFF'}</span>
               <kbd className="px-1 py-0.2 text-[9px] bg-slate-950/80 rounded text-slate-400 border border-slate-700 font-mono ml-0.5">
                 P
               </kbd>
@@ -2753,6 +2814,285 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               </div>
             </aside>
           )}
+
+          {/* Right-Hand Dedicated Orbital Mechanics & Flight Planner Overlay (Toggled with P) */}
+          {showLagrange &&
+            (() => {
+              const validZones = res.zones
+                .map((z, zIdx) => ({
+                  z,
+                  zIdx,
+                  planets: z.bodies
+                    .map((b, bIdx) => ({ b, bIdx }))
+                    .filter(
+                      (item): item is { b: RealisticPlanetBody; bIdx: number } =>
+                        item.b.kind === 'planet'
+                    ),
+                }))
+                .filter((zItem) => zItem.planets.length > 0);
+
+              if (validZones.length === 0) return null;
+
+              const currentZoneEntry =
+                validZones.find((vz) => vz.zIdx === navZoneIdx) || validZones[0];
+              const activeZIdx = currentZoneEntry.zIdx;
+              const activeZone = currentZoneEntry.z;
+              const zonePlanets = currentZoneEntry.planets;
+
+              const originEntry =
+                zonePlanets.find((p) => p.bIdx === navOriginIdx) || zonePlanets[0];
+              const originPlanet = originEntry.b;
+              const originIdx = originEntry.bIdx;
+
+              const otherPlanets = zonePlanets.filter((p) => p.bIdx !== originIdx);
+              const destEntry =
+                otherPlanets.find((p) => p.bIdx === navDestIdx) || otherPlanets[0] || null;
+
+              const muStar = Math.max(0.08, activeZone.mass || 1.0);
+              const vOrbKmS = 29.7847 * Math.sqrt(muStar / Math.max(0.005, originPlanet.a));
+              const vEscKmS =
+                11.186 *
+                Math.sqrt(
+                  Math.max(1e-5, originPlanet.massEarth) /
+                    Math.max(0.005, originPlanet.radiusEarth)
+                );
+              const hillAU =
+                originPlanet.a *
+                (1 - originPlanet.e) *
+                Math.cbrt((originPlanet.massEarth * 3.003e-6) / (3 * muStar));
+              const hillMillionKm = hillAU * 149.598;
+
+              const transferStats = destEntry
+                ? (() => {
+                    const r1 = originPlanet.a;
+                    const r2 = destEntry.b.a;
+                    const aTrans = 0.5 * (r1 + r2);
+                    const v1 = 29.7847 * Math.sqrt(muStar / r1);
+                    const v2 = 29.7847 * Math.sqrt(muStar / r2);
+                    const dv1 = v1 * Math.abs(Math.sqrt((2 * r2) / (r1 + r2)) - 1);
+                    const dv2 = v2 * Math.abs(1 - Math.sqrt((2 * r1) / (r1 + r2)));
+                    const transitYrs = 0.5 * Math.sqrt(Math.pow(aTrans, 3) / muStar);
+                    const phaseAngleDeg = 180 * (1 - Math.pow(aTrans / r2, 1.5));
+                    return {
+                      dv1,
+                      dv2,
+                      totalDv: dv1 + dv2,
+                      transitYrs,
+                      transitDays: transitYrs * 365.25,
+                      phaseAngleDeg: ((phaseAngleDeg % 360) + 540) % 360 - 180,
+                    };
+                  })()
+                : null;
+
+              return (
+                <aside
+                  role="region"
+                  aria-label="Orbital Mechanics & Flight Planner"
+                  onWheel={(e) => e.stopPropagation()}
+                  className="absolute top-12 right-3 w-76 sm:w-84 max-h-[calc(100%-3.75rem)] z-30 flex flex-col bg-[#080d1a]/95 backdrop-blur-md border border-slate-700/90 rounded-xl shadow-2xl overflow-hidden font-mono text-xs select-none"
+                >
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800/90 bg-slate-900/60">
+                    <div className="flex items-center gap-2 text-cyan-300 font-bold text-xs tracking-wide">
+                      <Rocket className="w-4 h-4 text-cyan-400" />
+                      <span>Orbital Mechanics</span>
+                      <kbd className="px-1 py-0.2 text-[9px] bg-slate-950 rounded text-slate-400 border border-slate-700 font-mono">
+                        P
+                      </kbd>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowLagrange(false)}
+                      className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                      title="Close Orbital Mechanics Overlay (Hotkey: P)"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="p-3 space-y-2.5 overflow-y-auto overscroll-contain">
+                    {/* Zone Selector (if multi-zone system) */}
+                    {validZones.length > 1 && (
+                      <div className="flex items-center justify-between gap-1.5 pb-2 border-b border-slate-800/80">
+                        <span className="text-[10px] text-slate-400 uppercase shrink-0">Zone</span>
+                        <div className="flex flex-wrap gap-1 justify-end">
+                          {validZones.map((vz) => (
+                            <button
+                              key={vz.zIdx}
+                              type="button"
+                              onClick={() => {
+                                setNavZoneIdx(vz.zIdx);
+                                const firstP = vz.planets[0]?.bIdx ?? 0;
+                                const secondP = vz.planets[1]?.bIdx ?? firstP;
+                                setNavOriginIdx(firstP);
+                                setNavDestIdx(secondP);
+                              }}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer border transition ${
+                                vz.zIdx === activeZIdx
+                                  ? 'bg-sky-900/80 border-sky-400 text-sky-200'
+                                  : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'
+                              }`}
+                            >
+                              {vz.z.title.replace(/\s*\([^)]*\)/g, '')}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Origin Planet Selector */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-slate-400 uppercase">
+                          Origin Body
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleZoomToEntity({
+                              kind: 'planet',
+                              zoneIdx: activeZIdx,
+                              bodyIdx: originIdx,
+                            })
+                          }
+                          className="text-[10px] text-sky-400 hover:text-sky-300 flex items-center gap-1 cursor-pointer"
+                          title="Center camera on Origin Planet"
+                        >
+                          <Crosshair className="w-3 h-3" />
+                          <span>Center #{originIdx + 1}</span>
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {zonePlanets.map((p) => {
+                          const isOrig = p.bIdx === originIdx;
+                          return (
+                            <button
+                              key={p.bIdx}
+                              type="button"
+                              onClick={() => {
+                                setNavOriginIdx(p.bIdx);
+                                if (navDestIdx === p.bIdx) {
+                                  const alt = zonePlanets.find((x) => x.bIdx !== p.bIdx);
+                                  if (alt) setNavDestIdx(alt.bIdx);
+                                }
+                              }}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer border transition flex items-center gap-1 ${
+                                isOrig
+                                  ? 'bg-sky-600 border-sky-400 text-white shadow-sm'
+                                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+                              }`}
+                            >
+                              <span
+                                className="w-1.5 h-1.5 rounded-full"
+                                style={{ backgroundColor: getPlanetVisualColor(p.b) }}
+                              />
+                              <span>
+                                #{p.bIdx + 1} ({p.b.a.toFixed(2)} AU)
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Origin Gravity Well & Slingshot Stats */}
+                    <div className="grid grid-cols-2 gap-2 bg-[#0c121d] p-2.5 rounded-lg border border-slate-800">
+                      <div>
+                        <span className="text-slate-400 block text-[9px]">ORBITAL SPEED</span>
+                        <b className="text-white">{vOrbKmS.toFixed(1)} km/s</b>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[9px]">ESCAPE VELOCITY</span>
+                        <b className="text-cyan-300">{vEscKmS.toFixed(1)} km/s</b>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[9px]">HILL SPHERE (L1/L2)</span>
+                        <b className="text-white">
+                          {hillMillionKm >= 1
+                            ? `${hillMillionKm.toFixed(2)}M km`
+                            : `${Math.round(hillMillionKm * 1000).toLocaleString()} km`}
+                        </b>
+                        <span className="text-[9px] text-slate-400 block">{hillAU.toFixed(4)} AU</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[9px]">MAX SLINGSHOT</span>
+                        <b className="text-emerald-300">+{vEscKmS.toFixed(1)} km/s</b>
+                      </div>
+                    </div>
+
+                    {/* Hohmann Transfer Planner */}
+                    {otherPlanets.length > 0 && destEntry && transferStats && (
+                      <div className="space-y-2 pt-1 border-t border-slate-800/80">
+                        <div className="space-y-1.5">
+                          <span className="text-[10px] text-slate-400 uppercase block">
+                            Transfer Destination
+                          </span>
+                          <div className="flex flex-wrap gap-1">
+                            {otherPlanets.map((p) => {
+                              const isDest = p.bIdx === destEntry.bIdx;
+                              return (
+                                <button
+                                  key={p.bIdx}
+                                  type="button"
+                                  onClick={() => setNavDestIdx(p.bIdx)}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer border transition flex items-center gap-1 ${
+                                    isDest
+                                      ? 'bg-amber-600/80 border-amber-400 text-white shadow-sm'
+                                      : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+                                  }`}
+                                >
+                                  <span
+                                    className="w-1.5 h-1.5 rounded-full"
+                                    style={{ backgroundColor: getPlanetVisualColor(p.b) }}
+                                  />
+                                  <span>
+                                    #{p.bIdx + 1} ({p.b.a.toFixed(2)} AU)
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 bg-[#0c121d] p-2.5 rounded-lg border border-slate-800">
+                          <div>
+                            <span className="text-slate-400 block text-[9px]">DEPARTURE ΔV</span>
+                            <b className="text-amber-300">{transferStats.dv1.toFixed(2)} km/s</b>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[9px]">ARRIVAL ΔV</span>
+                            <b className="text-amber-300">{transferStats.dv2.toFixed(2)} km/s</b>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[9px]">TOTAL ΔV</span>
+                            <b className="text-white">{transferStats.totalDv.toFixed(2)} km/s</b>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[9px]">TRANSIT TIME</span>
+                            <b className="text-cyan-300">
+                              {transferStats.transitYrs >= 1
+                                ? `${transferStats.transitYrs.toFixed(2)} yrs`
+                                : `${Math.round(transferStats.transitDays)} d`}
+                            </b>
+                            <span className="text-[9px] text-slate-400 block">
+                              Phase {transferStats.phaseAngleDeg >= 0 ? '+' : ''}
+                              {transferStats.phaseAngleDeg.toFixed(0)}°
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Compact Map Legend */}
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800/80">
+                      <span className="text-sky-300">◇ L1–L3</span>
+                      <span className="text-emerald-300">△ L4/L5 Trojans</span>
+                      <span className="text-amber-300">--- Transfer</span>
+                    </div>
+                  </div>
+                </aside>
+              );
+            })()}
 
           <svg
             ref={orrerySvgRef}
@@ -3595,31 +3935,14 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
                       if (!orbitPath3D) return null;
 
-                      // Determine if this planet should display the Lagrange & Hohmann Transfer overlay
-                      const hasAnySelectedPlanet =
-                        trackedTarget?.kind === 'planet' || selectedEntity?.kind === 'planet';
-                      const defaultShowcaseIdx = (() => {
-                        let bestIdx = -1;
-                        let bestScore = -1;
-                        z.bodies.forEach((cand, cIdx) => {
-                          if (cand.kind !== 'planet') return;
-                          const score =
-                            (cand.hydrosphere?.biosphere && cand.hydrosphere.biosphere !== 'none'
-                              ? 1000
-                              : 0) +
-                            (cand.gasFrac < 0.05 ? 100 : 0) +
-                            Math.min(50, cand.massEarth);
-                          if (score > bestScore) {
-                            bestScore = score;
-                            bestIdx = cIdx;
-                          }
-                        });
-                        return bestIdx;
-                      })();
-                      const showLagrangeForThisPlanet =
+                      const isNavOrigin =
+                        showLagrange && zIdx === navZoneIdx && bIdx === navOriginIdx;
+                      const isNavDest =
                         showLagrange &&
-                        rOrbitPx > 28 &&
-                        (isPlanetSel || (!hasAnySelectedPlanet && bIdx === defaultShowcaseIdx));
+                        zIdx === navZoneIdx &&
+                        bIdx === navDestIdx &&
+                        navDestIdx !== navOriginIdx;
+                      const showLagrangeForThisPlanet = isNavOrigin && rOrbitPx > 24;
 
                       return (
                         <g key={`orbit-bg-${zIdx}-${bIdx}`}>
@@ -3628,15 +3951,25 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             d={orbitPath3D}
                             fill="none"
                             stroke={
-                              isPlanetSel
+                              isPlanetSel || isNavOrigin
                                 ? '#38bdf8'
+                                : isNavDest
+                                ? 'rgba(251, 191, 36, 0.85)'
                                 : claimInfo
                                 ? `${claimInfo.empire.color}90`
                                 : isCircumbinary
                                 ? 'rgba(251, 191, 36, 0.32)'
                                 : 'rgba(51, 65, 85, 0.88)'
                             }
-                            strokeWidth={isPlanetSel ? 1.8 : claimInfo ? 1.4 : 1.15}
+                            strokeWidth={
+                              isPlanetSel || isNavOrigin
+                                ? 1.8
+                                : isNavDest
+                                ? 1.5
+                                : claimInfo
+                                ? 1.4
+                                : 1.15
+                            }
                           />
 
                           {/* Lagrange Points (L1-L5), Hill Sphere & Hohmann Transfer Overlay */}
@@ -3704,8 +4037,16 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                               const l4Proj = project3D(l4Pos.wx, l4Pos.wy, l4Pos.wz);
                               const l5Proj = project3D(l5Pos.wx, l5Pos.wy, l5Pos.wz);
 
-                              // Find adjacent planet in zone for Hohmann transfer arc
+                              // Resolve selected Transfer Destination planet in zone
                               const neighborPlanet = (() => {
+                                const selDest = z.bodies[navDestIdx];
+                                if (
+                                  navDestIdx !== bIdx &&
+                                  selDest &&
+                                  selDest.kind === 'planet'
+                                ) {
+                                  return { body: selDest, idx: navDestIdx };
+                                }
                                 for (let i = bIdx + 1; i < z.bodies.length; i++) {
                                   const cand = z.bodies[i];
                                   if (cand.kind === 'planet') return { body: cand, idx: i };
