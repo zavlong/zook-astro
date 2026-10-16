@@ -150,13 +150,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     setShowEnteringOverlay(true);
     setIsEnteringFading(false);
 
-    // Stays solid for 4.2 seconds, then begins 700ms smooth fade-out
+    // Stays solid for 5.0 seconds, then begins 700ms smooth fade-out
     enteringTimerRef.current = setTimeout(() => {
       setIsEnteringFading(true);
       enteringFadeTimerRef.current = setTimeout(() => {
         setShowEnteringOverlay(false);
       }, 700);
-    }, 4200);
+    }, 5000);
 
     return () => {
       if (enteringTimerRef.current) clearTimeout(enteringTimerRef.current);
@@ -2092,7 +2092,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                   enteringFadeTimerRef.current = setTimeout(() => {
                     setShowEnteringOverlay(false);
                   }, 700);
-                }, 4200);
+                }, 5000);
               }}
               className="px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1.5 cursor-pointer bg-slate-900/90 text-slate-300 hover:text-white border border-slate-700/80 transition"
               title="Show System Detailed Stats Briefing"
@@ -2138,7 +2138,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             </button>
           </div>
 
-          {/* "Entering <System>" Briefing Table Overlay (Fades out after a few seconds) */}
+          {/* "Entering <System>" Briefing Table Overlay (Fades out after 5 seconds, centered and bigger) */}
           {showEnteringOverlay && systemBriefingStats && (
             <div
               onMouseEnter={() => {
@@ -2152,30 +2152,36 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                   enteringFadeTimerRef.current = setTimeout(() => {
                     setShowEnteringOverlay(false);
                   }, 700);
-                }, 2200);
+                }, 2500);
               }}
-              className={`absolute top-4 left-1/2 -translate-x-1/2 z-40 w-[94%] sm:w-[380px] p-3.5 rounded-xl bg-[#080d1a]/95 backdrop-blur-md border border-slate-700/90 shadow-2xl text-xs font-mono space-y-2 select-none pointer-events-auto transition-all duration-700 ${
-                isEnteringFading ? 'opacity-0 -translate-y-3 pointer-events-none' : 'opacity-100 translate-y-0'
+              className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 w-[94%] sm:w-[500px] md:w-[540px] max-h-[85vh] overflow-y-auto p-5 sm:p-6 rounded-2xl bg-[#080d1a]/95 backdrop-blur-lg border border-slate-700/90 shadow-[0_0_50px_rgba(0,0,0,0.85)] text-sm font-mono space-y-3 select-none pointer-events-auto transition-all duration-700 ${
+                isEnteringFading
+                  ? 'opacity-0 scale-95 pointer-events-none'
+                  : 'opacity-100 scale-100'
               }`}
             >
-              <div className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center justify-between pb-1.5 border-b border-slate-800">
-                <span className="text-sky-300 font-bold truncate">Entering {systemBriefingStats.sysName}</span>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-cyan-400 font-semibold">{systemBriefingStats.archName}</span>
+              <div className="text-xs sm:text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center justify-between pb-2.5 border-b border-slate-800">
+                <span className="text-sky-300 text-base sm:text-lg font-bold truncate">
+                  Entering {systemBriefingStats.sysName}
+                </span>
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <span className="text-cyan-400 font-semibold text-xs sm:text-sm">
+                    {systemBriefingStats.archName}
+                  </span>
                   <button
                     type="button"
                     onClick={() => setShowEnteringOverlay(false)}
-                    className="text-slate-400 hover:text-white p-0.5 rounded cursor-pointer transition"
+                    className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer transition hover:bg-slate-800/60"
                     title="Dismiss briefing"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
 
               {/* Primary Star */}
               {systemBriefingStats.primaryStar && (
-                <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                <div className="flex items-center justify-between py-1.5 border-b border-slate-800/60 text-xs sm:text-sm">
                   <span className="text-slate-400">Primary Star</span>
                   <span className="text-slate-200 font-semibold">
                     {systemBriefingStats.primaryStar.spectralType} {systemBriefingStats.primaryStar.mass.toFixed(3)} M☉
@@ -2185,18 +2191,18 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
               {/* Companions */}
               {systemBriefingStats.companionStars.length > 0 && (
-                <div className="flex items-start justify-between py-1 border-b border-slate-800/60">
+                <div className="flex items-start justify-between py-1.5 border-b border-slate-800/60 text-xs sm:text-sm">
                   <span className="text-slate-400">Companions</span>
-                  <div className="text-right text-slate-300 font-medium space-y-1">
+                  <div className="text-right text-slate-300 font-medium space-y-1.5">
                     {systemBriefingStats.companionStars.map((cs) => {
                       const isBH = isBlackHoleStar({ spectralType: cs.spectralType });
                       return (
-                        <div key={cs.label} className="flex items-center justify-end gap-1.5 text-xs">
+                        <div key={cs.label} className="flex items-center justify-end gap-2 text-xs sm:text-sm">
                           {isBH ? (
-                            <BlackHoleIcon isSupermassive={cs.mass > 999999} size={15} />
+                            <BlackHoleIcon isSupermassive={cs.mass > 999999} size={16} />
                           ) : (
                             <span
-                              className="w-2 h-2 rounded-full shrink-0 shadow-sm"
+                              className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
                               style={{ backgroundColor: cs.colorHex }}
                             />
                           )}
@@ -2211,7 +2217,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               )}
 
               {/* Luminosity: sum of all star luminosities */}
-              <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+              <div className="flex items-center justify-between py-1.5 border-b border-slate-800/60 text-xs sm:text-sm">
                 <span className="text-slate-400">Luminosity</span>
                 <span className="text-slate-200 font-semibold">{systemBriefingStats.totalLuminosity} L☉</span>
               </div>
@@ -2219,12 +2225,12 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               {/* Effective Temp & Evolutionary State: only for single star systems */}
               {!systemBriefingStats.isMultiple && systemBriefingStats.primaryStar && (
                 <>
-                  <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-800/60 text-xs sm:text-sm">
                     <span className="text-slate-400">Effective Temp</span>
                     <span className="text-slate-200 font-semibold">{Math.round(systemBriefingStats.primaryStar.Teff)} K</span>
                   </div>
 
-                  <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-800/60 text-xs sm:text-sm">
                     <span className="text-slate-400">Evolutionary State</span>
                     <span className="text-cyan-400 font-semibold">
                       {systemBriefingStats.primaryStar.category || 'Main Sequence'}
@@ -2234,7 +2240,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               )}
 
               {/* Astronomical Bodies: placed between Evolutionary State and Biospheres */}
-              <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+              <div className="flex items-center justify-between py-1.5 border-b border-slate-800/60 text-xs sm:text-sm">
                 <span className="text-slate-400">Astronomical Bodies</span>
                 <span className="text-slate-200 font-semibold">
                   {systemBriefingStats.planetCount} Planets &bull; {systemBriefingStats.beltCount} Belts
@@ -2242,7 +2248,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               </div>
 
               {/* Planetary Biospheres */}
-              <div className="flex items-center justify-between py-1">
+              <div className="flex items-center justify-between py-1.5 text-xs sm:text-sm">
                 <span className="text-slate-400">Planetary Biospheres:</span>
                 <span className={systemBriefingStats.biosphereText !== '<none>' ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
                   {systemBriefingStats.biosphereText}
