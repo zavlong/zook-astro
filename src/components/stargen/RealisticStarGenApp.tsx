@@ -41,6 +41,8 @@ import {
 import {
   getProceduralPlanetIconDataUrl,
 } from './ProceduralPlanetPortrait';
+import { isBlackHoleStar } from '../../core/generation/sectorHex';
+import { BlackHoleIcon } from '../ui/BlackHoleIcon';
 import {
   SelectedMapEntity,
   Vec2AU,
@@ -132,6 +134,95 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
   // Quick Jump Hierarchy Tree on left side (toggled with J or button)
   const [showQuickJump, setShowQuickJump] = useState<boolean>(false);
+
+  // "Entering <System>" Briefing Overlay State (fades out after a few seconds)
+  const [showEnteringOverlay, setShowEnteringOverlay] = useState<boolean>(true);
+  const [isEnteringFading, setIsEnteringFading] = useState<boolean>(false);
+  const enteringTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const enteringFadeTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (!systemResult) return;
+
+    if (enteringTimerRef.current) clearTimeout(enteringTimerRef.current);
+    if (enteringFadeTimerRef.current) clearTimeout(enteringFadeTimerRef.current);
+
+    setShowEnteringOverlay(true);
+    setIsEnteringFading(false);
+
+    // Stays solid for 4.2 seconds, then begins 700ms smooth fade-out
+    enteringTimerRef.current = setTimeout(() => {
+      setIsEnteringFading(true);
+      enteringFadeTimerRef.current = setTimeout(() => {
+        setShowEnteringOverlay(false);
+      }, 700);
+    }, 4200);
+
+    return () => {
+      if (enteringTimerRef.current) clearTimeout(enteringTimerRef.current);
+      if (enteringFadeTimerRef.current) clearTimeout(enteringFadeTimerRef.current);
+    };
+  }, [systemResult?.step1?.id, systemResult?.roll]);
+
+  // System stats summary for the "Entering <System>" briefing card
+  const systemBriefingStats = useMemo(() => {
+    if (!systemResult) return null;
+    const sysName =
+      systemResult.step1?.name ||
+      initialParams?.name ||
+      systemResult.step1?.id ||
+      'System';
+    const stars = systemResult.hierarchy?.stars || [];
+    const primaryStar = stars[0];
+    const companionStars = stars.slice(1);
+    const isMultiple = stars.length > 1;
+    const archName =
+      systemResult.hierarchy?.archName?.replace(/\s*\(.*\)/g, '') ||
+      (isMultiple ? 'BINARY SYSTEM' : 'SINGLE STAR');
+
+    const totalLuminosity = +stars
+      .reduce(
+        (acc, st) => acc + (typeof st.lumNum === 'number' ? st.lumNum : 0),
+        0
+      )
+      .toFixed(3);
+
+    let planetCount = 0;
+    let beltCount = 0;
+    let biospheresWithLife = 0;
+    let dominantLiquid = 'water';
+
+    (systemResult.zones || []).forEach((z) => {
+      (z.bodies || []).forEach((b) => {
+        if (b.kind === 'belt') {
+          beltCount++;
+        } else if (b.kind === 'planet') {
+          planetCount++;
+          if (b.hydrosphere?.biosphere && b.hydrosphere.biosphere !== 'none') {
+            biospheresWithLife++;
+            if (b.hydrosphere.solvent) dominantLiquid = b.hydrosphere.solvent;
+          }
+        }
+      });
+    });
+
+    const biosphereText =
+      biospheresWithLife === 0
+        ? '<none>'
+        : `${biospheresWithLife} (${dominantLiquid})`;
+
+    return {
+      sysName,
+      archName,
+      primaryStar,
+      companionStars,
+      isMultiple,
+      totalLuminosity,
+      planetCount,
+      beltCount,
+      biosphereText,
+    };
+  }, [systemResult, initialParams?.name]);
 
   const orreryStateRef = useRef({
     pxPerAU: orreryPxPerAU,
@@ -1945,6 +2036,26 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
           <div className="absolute top-3 right-28 z-20 flex items-center gap-1.5 bg-[#0b111e]/90 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-slate-800/90 shadow-2xl">
             <button
               type="button"
+              onClick={() => {
+                if (enteringTimerRef.current) clearTimeout(enteringTimerRef.current);
+                if (enteringFadeTimerRef.current) clearTimeout(enteringFadeTimerRef.current);
+                setShowEnteringOverlay(true);
+                setIsEnteringFading(false);
+                enteringTimerRef.current = setTimeout(() => {
+                  setIsEnteringFading(true);
+                  enteringFadeTimerRef.current = setTimeout(() => {
+                    setShowEnteringOverlay(false);
+                  }, 700);
+                }, 4200);
+              }}
+              className="px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1.5 cursor-pointer bg-slate-900/90 text-slate-300 hover:text-white border border-slate-700/80 transition"
+              title="Show System Detailed Stats Briefing"
+            >
+              <Gauge className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Stats</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setShowQuickJump((v) => !v)}
               aria-pressed={showQuickJump}
               aria-keyshortcuts="j"
@@ -1980,6 +2091,119 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               </kbd>
             </button>
           </div>
+
+          {/* "Entering <System>" Briefing Table Overlay (Fades out after a few seconds) */}
+          {showEnteringOverlay && systemBriefingStats && (
+            <div
+              onMouseEnter={() => {
+                if (enteringTimerRef.current) clearTimeout(enteringTimerRef.current);
+                if (enteringFadeTimerRef.current) clearTimeout(enteringFadeTimerRef.current);
+                setIsEnteringFading(false);
+              }}
+              onMouseLeave={() => {
+                enteringTimerRef.current = setTimeout(() => {
+                  setIsEnteringFading(true);
+                  enteringFadeTimerRef.current = setTimeout(() => {
+                    setShowEnteringOverlay(false);
+                  }, 700);
+                }, 2200);
+              }}
+              className={`absolute top-4 left-1/2 -translate-x-1/2 z-40 w-[94%] sm:w-[380px] p-3.5 rounded-xl bg-[#080d1a]/95 backdrop-blur-md border border-slate-700/90 shadow-2xl text-xs font-mono space-y-2 select-none pointer-events-auto transition-all duration-700 ${
+                isEnteringFading ? 'opacity-0 -translate-y-3 pointer-events-none' : 'opacity-100 translate-y-0'
+              }`}
+            >
+              <div className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center justify-between pb-1.5 border-b border-slate-800">
+                <span className="text-sky-300 font-bold truncate">Entering {systemBriefingStats.sysName}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-cyan-400 font-semibold">{systemBriefingStats.archName}</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowEnteringOverlay(false)}
+                    className="text-slate-400 hover:text-white p-0.5 rounded cursor-pointer transition"
+                    title="Dismiss briefing"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Primary Star */}
+              {systemBriefingStats.primaryStar && (
+                <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                  <span className="text-slate-400">Primary Star</span>
+                  <span className="text-slate-200 font-semibold">
+                    {systemBriefingStats.primaryStar.spectralType} {systemBriefingStats.primaryStar.mass.toFixed(3)} M☉
+                  </span>
+                </div>
+              )}
+
+              {/* Companions */}
+              {systemBriefingStats.companionStars.length > 0 && (
+                <div className="flex items-start justify-between py-1 border-b border-slate-800/60">
+                  <span className="text-slate-400">Companions</span>
+                  <div className="text-right text-slate-300 font-medium space-y-1">
+                    {systemBriefingStats.companionStars.map((cs) => {
+                      const isBH = isBlackHoleStar({ spectralType: cs.spectralType });
+                      return (
+                        <div key={cs.label} className="flex items-center justify-end gap-1.5 text-xs">
+                          {isBH ? (
+                            <BlackHoleIcon isSupermassive={cs.mass > 999999} size={15} />
+                          ) : (
+                            <span
+                              className="w-2 h-2 rounded-full shrink-0 shadow-sm"
+                              style={{ backgroundColor: cs.colorHex }}
+                            />
+                          )}
+                          <span>
+                            {cs.label}: {cs.spectralType} {cs.mass.toFixed(3)} M☉
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Luminosity: sum of all star luminosities */}
+              <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                <span className="text-slate-400">Luminosity</span>
+                <span className="text-slate-200 font-semibold">{systemBriefingStats.totalLuminosity} L☉</span>
+              </div>
+
+              {/* Effective Temp & Evolutionary State: only for single star systems */}
+              {!systemBriefingStats.isMultiple && systemBriefingStats.primaryStar && (
+                <>
+                  <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                    <span className="text-slate-400">Effective Temp</span>
+                    <span className="text-slate-200 font-semibold">{Math.round(systemBriefingStats.primaryStar.Teff)} K</span>
+                  </div>
+
+                  <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                    <span className="text-slate-400">Evolutionary State</span>
+                    <span className="text-cyan-400 font-semibold">
+                      {systemBriefingStats.primaryStar.category || 'Main Sequence'}
+                    </span>
+                  </div>
+                </>
+              )}
+
+              {/* Astronomical Bodies: placed between Evolutionary State and Biospheres */}
+              <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                <span className="text-slate-400">Astronomical Bodies</span>
+                <span className="text-slate-200 font-semibold">
+                  {systemBriefingStats.planetCount} Planets &bull; {systemBriefingStats.beltCount} Belts
+                </span>
+              </div>
+
+              {/* Planetary Biospheres */}
+              <div className="flex items-center justify-between py-1">
+                <span className="text-slate-400">Planetary Biospheres:</span>
+                <span className={systemBriefingStats.biosphereText !== '<none>' ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                  {systemBriefingStats.biosphereText}
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Left-Hand Floating Button When Hierarchy is Collapsed */}
           {!showQuickJump && (
