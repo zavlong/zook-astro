@@ -671,6 +671,8 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   const handleRollGalaxy = () => {
     setCustomGalaxyData(null);
     setBgImageUrl(null);
+    universeCache.clearSectorCache();
+    universeCache.clearSystemCache();
     const newSeed = Math.floor(Math.random() * 90000) + 1000;
     setConfig((prev) => ({
       ...prev,
@@ -682,6 +684,8 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   const handleMorphologyChange = (morph: GalaxyMorphology) => {
     setCustomGalaxyData(null);
     setBgImageUrl(null);
+    universeCache.clearSectorCache();
+    universeCache.clearSystemCache();
     setConfig((prev) => ({
       ...prev,
       morphology: morph,
@@ -727,6 +731,10 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
 
   // Apply custom sliders
   const handleApplySliders = () => {
+    if (draftConfig.seed !== config.seed || draftConfig.morphology !== config.morphology) {
+      universeCache.clearSectorCache();
+      universeCache.clearSystemCache();
+    }
     setConfig({ ...draftConfig });
     setShowConfigModal(false);
   };
@@ -900,14 +908,14 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
             </button>
           </form>
 
-          {/* Roll Galaxy Button */}
+          {/* Reroll Galaxy Button */}
           <button
             onClick={handleRollGalaxy}
             className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg shadow-blue-500/20 transition cursor-pointer"
-            title="Generate a brand new procedural galaxy with random astrophysical seed"
+            title="Generate a brand new procedural galaxy with random astrophysical seed (clears cached sectors)"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            <span>Roll Galaxy</span>
+            <span>Reroll Galaxy</span>
           </button>
         </div>
       </div>
