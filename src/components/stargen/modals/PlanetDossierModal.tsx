@@ -10,6 +10,7 @@ import {
   Flag,
   Trash2,
   Compass,
+  Rocket,
 } from 'lucide-react';
 import {
   RealisticPlanetBody,
@@ -77,6 +78,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
   const [targetEmpireId, setTargetEmpireId] = useState<string>(
     planetClaimInfo?.empire?.id || currentEmpire?.id || (sectorEmpires[0]?.id ?? '')
   );
+  const [transferTargetIdx, setTransferTargetIdx] = useState<number | null>(null);
 
   useEffect(() => {
     if (planetClaimInfo?.designation) {
@@ -90,6 +92,10 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
       setTargetEmpireId(sectorEmpires[0].id);
     }
   }, [planetClaimInfo, currentEmpire, sectorEmpires]);
+
+  useEffect(() => {
+    setTransferTargetIdx(null);
+  }, [selectedEntity.zoneIdx, selectedEntity.bodyIdx]);
 
   const zone = systemResult.zones[selectedEntity.zoneIdx];
   const hostPlanet = zone?.bodies[selectedEntity.bodyIdx] as RealisticPlanetBody | undefined;
@@ -118,6 +124,51 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
   const hydro = isMoon && activeMoon ? activeMoon.hydrosphere : hostPlanet.hydrosphere;
   const magField = isMoon && activeMoon ? activeMoon.magneticField : hostPlanet.magneticField;
   const sysAge = systemResult?.step1?.age ?? 4.5;
+
+  // Space Physics Workbench calculations (Vis-Viva, Hill Sphere, Slingshot, Eddington Optical Depth)
+  const bodyMassE = isMoon && activeMoon ? activeMoon.massEarth : hostPlanet.massEarth;
+  const bodyRadE = isMoon && activeMoon ? activeMoon.radiusEarth : hostPlanet.radiusEarth;
+  const vEscKmS = 11.186 * Math.sqrt(Math.max(1e-5, bodyMassE) / Math.max(0.005, bodyRadE));
+  const vOrbKmS =
+    isMoon && activeMoon
+      ? 7.905 * Math.sqrt(hostPlanet.massEarth / Math.max(0.1, activeMoon.a_Rp * hostPlanet.radiusEarth))
+      : 29.7847 * Math.sqrt(Math.max(0.08, zone.mass) / Math.max(0.005, hostPlanet.a));
+  const hillAU =
+    hostPlanet.a *
+    (1 - hostPlanet.e) *
+    Math.pow(hostPlanet.massEarth / (3 * Math.max(0.08, zone.mass) * 332946), 1 / 3);
+  const hillMillionKm = hillAU * 149.598;
+  const tauIR =
+    ghK > 0 && Tatm > 10 ? Math.max(0.01, (4 / 3) * (Math.pow(Tsurf / Tatm, 4) - 1)) : 0;
+
+  const otherZonePlanets = zone.bodies
+    .map((b, idx) => ({ body: b, idx }))
+    .filter(
+      (item): item is { body: RealisticPlanetBody; idx: number } =>
+        item.body.kind === 'planet' && item.idx !== selectedEntity.bodyIdx
+    );
+  const activeTransferTarget =
+    otherZonePlanets.find((p) => p.idx === transferTargetIdx) || otherZonePlanets[0] || null;
+  const transferStats = activeTransferTarget
+    ? (() => {
+        const r1 = hostPlanet.a;
+        const r2 = activeTransferTarget.body.a;
+        const aTrans = 0.5 * (r1 + r2);
+        const muStar = Math.max(0.08, zone.mass);
+        const v1 = 29.7847 * Math.sqrt(muStar / r1);
+        const v2 = 29.7847 * Math.sqrt(muStar / r2);
+        const dv1 = v1 * Math.abs(Math.sqrt((2 * r2) / (r1 + r2)) - 1);
+        const dv2 = v2 * Math.abs(1 - Math.sqrt((2 * r1) / (r1 + r2)));
+        const transitYrs = 0.5 * Math.sqrt(Math.pow(aTrans, 3) / muStar);
+        return {
+          dv1,
+          dv2,
+          totalDv: dv1 + dv2,
+          transitYrs,
+          transitDays: transitYrs * 365.25,
+        };
+      })()
+    : null;
 
   const effT = Tsurf ?? Tatm ?? Teq;
   const cleanPlanetClass = resolvePlanetClass(
@@ -511,6 +562,11 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                 <b className="text-amber-300">
                   {ghK > 0 ? `+${ghK.toFixed(1)} K` : 'None'}
                 </b>
+                {tauIR > 0 && (
+                  <span className="text-[9px] text-slate-400 block">
+                    τ_IR: {tauIR < 100 ? tauIR.toFixed(2) : Math.round(tauIR)}
+                  </span>
+                )}
               </div>
             </div>
             <div>
@@ -691,6 +747,97 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
             </div>
           </div>
         )}
+
+        {/* Orbital Mechanics, Lagrange & Slingshot Lab */}
+        <div className="bg-[#151d2c] p-3.5 rounded-xl border border-slate-800 flex flex-col gap-2.5 font-mono text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Rocket className="w-3.5 h-3.5 text-cyan-400" />
+              Orbital Mechanics &amp; Transfer Lab
+            </span>
+            <span className="text-[10px] text-slate-400">
+              {isMoon
+                ? `Orbiting Planet #${selectedEntity.bodyIdx + 1}`
+                : `${hostPlanet.a.toFixed(3)} AU · e = ${hostPlanet.e.toFixed(3)}`}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#0c121d] p-2.5 rounded-lg border border-slate-800">
+            <div>
+              <span className="text-slate-400 block text-[10px]">ORBITAL SPEED</span>
+              <b className="text-white">{vOrbKmS.toFixed(1)} km/s</b>
+            </div>
+            <div>
+              <span className="text-slate-400 block text-[10px]">ESCAPE VELOCITY</span>
+              <b className="text-cyan-300">{vEscKmS.toFixed(1)} km/s</b>
+            </div>
+            <div>
+              <span className="text-slate-400 block text-[10px]">HILL SPHERE (L1/L2)</span>
+              <b className="text-white">
+                {hillMillionKm >= 1
+                  ? `${hillMillionKm.toFixed(2)}M km`
+                  : `${Math.round(hillMillionKm * 1000).toLocaleString()} km`}
+              </b>
+              <span className="text-[9px] text-slate-400 block">{hillAU.toFixed(4)} AU</span>
+            </div>
+            <div>
+              <span className="text-slate-400 block text-[10px]">MAX SLINGSHOT</span>
+              <b className="text-emerald-300">+{vEscKmS.toFixed(1)} km/s</b>
+            </div>
+          </div>
+
+          {!isMoon && otherZonePlanets.length > 0 && activeTransferTarget && transferStats && (
+            <div className="bg-[#0c121d] p-2.5 rounded-lg border border-slate-800 flex flex-col gap-2">
+              <div className="flex items-center justify-between flex-wrap gap-1.5">
+                <span className="text-[10px] text-slate-400 uppercase">
+                  Hohmann Transfer To:
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {otherZonePlanets.map((p) => {
+                    const isActive = p.idx === activeTransferTarget.idx;
+                    return (
+                      <button
+                        key={p.idx}
+                        type="button"
+                        onClick={() => setTransferTargetIdx(p.idx)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer transition border ${
+                          isActive
+                            ? 'bg-cyan-900/70 border-cyan-400 text-cyan-200'
+                            : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        #{p.idx + 1} ({p.body.a.toFixed(2)} AU)
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-slate-800/80">
+                <div>
+                  <span className="text-slate-400 block text-[10px]">DEPARTURE ΔV</span>
+                  <b className="text-amber-300">{transferStats.dv1.toFixed(2)} km/s</b>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">ARRIVAL ΔV</span>
+                  <b className="text-amber-300">{transferStats.dv2.toFixed(2)} km/s</b>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">TOTAL ΔV</span>
+                  <b className="text-white">{transferStats.totalDv.toFixed(2)} km/s</b>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">TRANSIT TIME</span>
+                  <b className="text-cyan-300">
+                    {transferStats.transitYrs >= 1
+                      ? `${transferStats.transitYrs.toFixed(2)} yrs`
+                      : `${Math.round(transferStats.transitDays)} d`}
+                  </b>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* ============================================================================ */}
         {/* IMPERIAL SOVEREIGNTY & COLONY ADMINISTRATION CARD                           */}

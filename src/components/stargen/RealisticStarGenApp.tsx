@@ -136,6 +136,9 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   // Quick Jump Hierarchy Tree on left side (toggled with J or button)
   const [showQuickJump, setShowQuickJump] = useState<boolean>(false);
 
+  // Lagrange Points (L1-L5), Hill Sphere & Hohmann Transfer Overlay (toggled with P or button)
+  const [showLagrange, setShowLagrange] = useState<boolean>(false);
+
   // "Entering <System>" Briefing Overlay State (fades out after a few seconds)
   const [showEnteringOverlay, setShowEnteringOverlay] = useState<boolean>(true);
   const [isEnteringFading, setIsEnteringFading] = useState<boolean>(false);
@@ -631,7 +634,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         e.code === 'PageUp';
       const isLabelKey = e.key === 'l' || e.key === 'L';
       const isQuickJumpKey = e.key === 'j' || e.key === 'J';
-      if (!isPageKey && !isLabelKey && !isQuickJumpKey) return;
+      const isLagrangeKey = e.key === 'p' || e.key === 'P';
+      if (!isPageKey && !isLabelKey && !isQuickJumpKey && !isLagrangeKey) return;
 
       const target = e.target as HTMLElement | null;
       if (
@@ -657,6 +661,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         e.preventDefault();
         e.stopPropagation();
         setShowQuickJump((v) => !v);
+        return;
+      }
+
+      if (isLagrangeKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowLagrange((v) => !v);
         return;
       }
 
@@ -2168,6 +2179,24 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                 L
               </kbd>
             </button>
+            <button
+              type="button"
+              onClick={() => setShowLagrange((v) => !v)}
+              aria-pressed={showLagrange}
+              aria-keyshortcuts="p"
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1.5 cursor-pointer transition ${
+                showLagrange
+                  ? 'bg-sky-600 text-white font-bold shadow-md shadow-sky-500/25'
+                  : 'bg-slate-900/90 text-slate-300 hover:text-white border border-slate-700/80'
+              }`}
+              title="Toggle Lagrange Points (L1-L5), Hill Sphere & Hohmann Transfer Overlay (Hotkey: P)"
+            >
+              <Compass className="w-3.5 h-3.5" />
+              <span>Lagrange {showLagrange ? 'ON' : 'OFF'}</span>
+              <kbd className="px-1 py-0.2 text-[9px] bg-slate-950/80 rounded text-slate-400 border border-slate-700 font-mono ml-0.5">
+                P
+              </kbd>
+            </button>
           </div>
 
           {/* "Entering <System>" Briefing Table Overlay (Fades out after 5 seconds, centered and bigger) */}
@@ -3565,6 +3594,33 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                       });
 
                       if (!orbitPath3D) return null;
+
+                      // Determine if this planet should display the Lagrange & Hohmann Transfer overlay
+                      const hasAnySelectedPlanet =
+                        trackedTarget?.kind === 'planet' || selectedEntity?.kind === 'planet';
+                      const defaultShowcaseIdx = (() => {
+                        let bestIdx = -1;
+                        let bestScore = -1;
+                        z.bodies.forEach((cand, cIdx) => {
+                          if (cand.kind !== 'planet') return;
+                          const score =
+                            (cand.hydrosphere?.biosphere && cand.hydrosphere.biosphere !== 'none'
+                              ? 1000
+                              : 0) +
+                            (cand.gasFrac < 0.05 ? 100 : 0) +
+                            Math.min(50, cand.massEarth);
+                          if (score > bestScore) {
+                            bestScore = score;
+                            bestIdx = cIdx;
+                          }
+                        });
+                        return bestIdx;
+                      })();
+                      const showLagrangeForThisPlanet =
+                        showLagrange &&
+                        rOrbitPx > 28 &&
+                        (isPlanetSel || (!hasAnySelectedPlanet && bIdx === defaultShowcaseIdx));
+
                       return (
                         <g key={`orbit-bg-${zIdx}-${bIdx}`}>
                           {/* 3D Keplerian Inclined Orbit Path */}
@@ -3582,6 +3638,238 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             }
                             strokeWidth={isPlanetSel ? 1.8 : claimInfo ? 1.4 : 1.15}
                           />
+
+                          {/* Lagrange Points (L1-L5), Hill Sphere & Hohmann Transfer Overlay */}
+                          {showLagrangeForThisPlanet &&
+                            (() => {
+                              const mStar = Math.max(0.08, zoneStar?.mass || 1.0);
+                              const qRatio = (b.massEarth * 3.003e-6) / mStar;
+                              const rHillPhysAU = b.a * (1 - b.e) * Math.cbrt(qRatio / 3);
+                              const rHillVisAU = Math.max(
+                                rHillPhysAU,
+                                visualPlanetRadAU * 2.4,
+                                b.a * 0.075
+                              );
+                              const rHillPx = Math.max(
+                                pRad + 9,
+                                rHillVisAU * orreryPxPerAU * pProj.scale
+                              );
+
+                              const dx3 = pos3.wx - centerAU.x;
+                              const dy3 = pos3.wy - centerAU.y;
+                              const dz3 = pos3.wz;
+                              const dist3 = Math.max(1e-6, Math.hypot(dx3, dy3, dz3));
+                              const ux = dx3 / dist3;
+                              const uy = dy3 / dist3;
+                              const uz = dz3 / dist3;
+
+                              const l1Proj = project3D(
+                                pos3.wx - ux * rHillVisAU,
+                                pos3.wy - uy * rHillVisAU,
+                                pos3.wz - uz * rHillVisAU
+                              );
+                              const l2Proj = project3D(
+                                pos3.wx + ux * rHillVisAU,
+                                pos3.wy + uy * rHillVisAU,
+                                pos3.wz + uz * rHillVisAU
+                              );
+                              const l3Pos = evalKepler3D(
+                                centerAU,
+                                b.a,
+                                b.e,
+                                incRad,
+                                omegaNode,
+                                argPeri,
+                                theta + Math.PI
+                              );
+                              const l4Pos = evalKepler3D(
+                                centerAU,
+                                b.a,
+                                b.e,
+                                incRad,
+                                omegaNode,
+                                argPeri,
+                                theta + Math.PI / 3
+                              );
+                              const l5Pos = evalKepler3D(
+                                centerAU,
+                                b.a,
+                                b.e,
+                                incRad,
+                                omegaNode,
+                                argPeri,
+                                theta - Math.PI / 3
+                              );
+                              const l3Proj = project3D(l3Pos.wx, l3Pos.wy, l3Pos.wz);
+                              const l4Proj = project3D(l4Pos.wx, l4Pos.wy, l4Pos.wz);
+                              const l5Proj = project3D(l5Pos.wx, l5Pos.wy, l5Pos.wz);
+
+                              // Find adjacent planet in zone for Hohmann transfer arc
+                              const neighborPlanet = (() => {
+                                for (let i = bIdx + 1; i < z.bodies.length; i++) {
+                                  const cand = z.bodies[i];
+                                  if (cand.kind === 'planet') return { body: cand, idx: i };
+                                }
+                                for (let i = bIdx - 1; i >= 0; i--) {
+                                  const cand = z.bodies[i];
+                                  if (cand.kind === 'planet') return { body: cand, idx: i };
+                                }
+                                return null;
+                              })();
+
+                              let hohmannPath = '';
+                              let hohmannMid = { x: 0, y: 0 };
+                              let hohmannDvTotal = 0;
+
+                              if (neighborPlanet) {
+                                const r1 = b.a;
+                                const r2 = neighborPlanet.body.a;
+                                const aTrans = (r1 + r2) / 2;
+                                const v1 = 29.784 * Math.sqrt(mStar / r1);
+                                const v2 = 29.784 * Math.sqrt(mStar / r2);
+                                const vTrans1 = 29.784 * Math.sqrt(mStar * (2 / r1 - 1 / aTrans));
+                                const vTrans2 = 29.784 * Math.sqrt(mStar * (2 / r2 - 1 / aTrans));
+                                hohmannDvTotal = Math.abs(vTrans1 - v1) + Math.abs(v2 - vTrans2);
+
+                                const steps = 28;
+                                const pts: string[] = [];
+                                for (let s = 0; s <= steps; s++) {
+                                  const u = s / steps;
+                                  const dTheta = u * Math.PI;
+                                  // Interpolate radius along Hohmann transfer ellipse
+                                  const eTrans = Math.abs(r2 - r1) / (r1 + r2);
+                                  const pSemi = aTrans * (1 - eTrans * eTrans);
+                                  const cosNu = r2 >= r1 ? Math.cos(dTheta) : -Math.cos(dTheta);
+                                  const rStep = pSemi / Math.max(0.05, 1 + eTrans * cosNu);
+                                  const pt3 = evalKepler3D(
+                                    centerAU,
+                                    rStep,
+                                    0,
+                                    incRad,
+                                    omegaNode,
+                                    argPeri,
+                                    theta + dTheta
+                                  );
+                                  const pr = project3D(pt3.wx, pt3.wy, pt3.wz);
+                                  pts.push(
+                                    `${s === 0 ? 'M' : 'L'}${pr.x.toFixed(1)},${pr.y.toFixed(1)}`
+                                  );
+                                  if (s === Math.floor(steps / 2)) {
+                                    hohmannMid = { x: pr.x, y: pr.y };
+                                  }
+                                }
+                                hohmannPath = pts.join(' ');
+                              }
+
+                              const lagrangePts = [
+                                { id: 'L1', p: l1Proj, stable: false },
+                                { id: 'L2', p: l2Proj, stable: false },
+                                { id: 'L3', p: l3Proj, stable: false },
+                                { id: 'L4', p: l4Proj, stable: true },
+                                { id: 'L5', p: l5Proj, stable: true },
+                              ];
+
+                              return (
+                                <g className="pointer-events-none">
+                                  {/* Trojan Equilateral Triangles (Star - L4/L5 - Planet) */}
+                                  <polygon
+                                    points={`${starProj.x.toFixed(1)},${starProj.y.toFixed(1)} ${pProj.x.toFixed(1)},${pProj.y.toFixed(1)} ${l4Proj.x.toFixed(1)},${l4Proj.y.toFixed(1)}`}
+                                    fill="rgba(52, 211, 153, 0.035)"
+                                    stroke="rgba(52, 211, 153, 0.28)"
+                                    strokeWidth={1}
+                                    strokeDasharray="3,3"
+                                  />
+                                  <polygon
+                                    points={`${starProj.x.toFixed(1)},${starProj.y.toFixed(1)} ${pProj.x.toFixed(1)},${pProj.y.toFixed(1)} ${l5Proj.x.toFixed(1)},${l5Proj.y.toFixed(1)}`}
+                                    fill="rgba(52, 211, 153, 0.035)"
+                                    stroke="rgba(52, 211, 153, 0.28)"
+                                    strokeWidth={1}
+                                    strokeDasharray="3,3"
+                                  />
+
+                                  {/* Hill Sphere Boundary Ring */}
+                                  <circle
+                                    cx={pProj.x}
+                                    cy={pProj.y}
+                                    r={rHillPx}
+                                    fill="rgba(56, 189, 248, 0.04)"
+                                    stroke="rgba(56, 189, 248, 0.45)"
+                                    strokeWidth={1.1}
+                                    strokeDasharray="2,2"
+                                  />
+
+                                  {/* Hohmann Transfer Trajectory Arc */}
+                                  {hohmannPath && (
+                                    <g>
+                                      <path
+                                        d={hohmannPath}
+                                        fill="none"
+                                        stroke="#fbbf24"
+                                        strokeWidth={1.6}
+                                        strokeDasharray="5,3"
+                                        opacity={0.88}
+                                      />
+                                      <rect
+                                        x={hohmannMid.x - 42}
+                                        y={hohmannMid.y - 9}
+                                        width={84}
+                                        height={16}
+                                        rx={4}
+                                        fill="rgba(15, 23, 42, 0.88)"
+                                        stroke="rgba(251, 191, 36, 0.55)"
+                                        strokeWidth={0.9}
+                                      />
+                                      <text
+                                        x={hohmannMid.x}
+                                        y={hohmannMid.y + 2.5}
+                                        fill="#fde68a"
+                                        fontSize={8.5}
+                                        fontFamily="monospace"
+                                        fontWeight="bold"
+                                        textAnchor="middle"
+                                      >
+                                        Δv {hohmannDvTotal.toFixed(1)} km/s
+                                      </text>
+                                    </g>
+                                  )}
+
+                                  {/* L1-L5 Markers */}
+                                  {lagrangePts.map((lp) => (
+                                    <g
+                                      key={lp.id}
+                                      transform={`translate(${lp.p.x.toFixed(1)}, ${lp.p.y.toFixed(1)})`}
+                                    >
+                                      {lp.stable ? (
+                                        <polygon
+                                          points="0,-4.5 4.2,3.2 -4.2,3.2"
+                                          fill="#10b981"
+                                          stroke="#022c22"
+                                          strokeWidth={1}
+                                        />
+                                      ) : (
+                                        <polygon
+                                          points="0,-4 4,0 0,4 -4,0"
+                                          fill="#38bdf8"
+                                          stroke="#082f49"
+                                          strokeWidth={1}
+                                        />
+                                      )}
+                                      <text
+                                        x={0}
+                                        y={-6.5}
+                                        fill={lp.stable ? '#6ee7b7' : '#7dd3fc'}
+                                        fontSize={8.5}
+                                        fontFamily="monospace"
+                                        fontWeight="bold"
+                                        textAnchor="middle"
+                                      >
+                                        {lp.id}
+                                      </text>
+                                    </g>
+                                  ))}
+                                </g>
+                              );
+                            })()}
                         </g>
                       );
                     });
