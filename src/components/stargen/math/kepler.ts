@@ -347,7 +347,10 @@ export function getBodyWorldPosAU(
   res: RealisticStarSystemResult,
   entity: SelectedMapEntity,
   timeYr: number,
-  incScale: number
+  incScale: number,
+  pitch = 0.94,
+  yaw = -0.42,
+  pxPerAU = 35
 ): Vec2AU | null {
   const layout = computeSystem2DLayout(res, timeYr);
   if (entity.kind === 'star') {
@@ -388,6 +391,48 @@ export function getBodyWorldPosAU(
     argPeri,
     theta
   );
+
+  if (entity.kind === 'moon' && b.kind === 'planet' && b.moons && b.moons.length > 0) {
+    const mIdx = clamp(entity.moonIdx, 0, b.moons.length - 1);
+    const mSpeed = 12 + mIdx * 5;
+    const mAngle =
+      theta +
+      (mIdx * Math.PI * 2) / Math.max(1, b.moons.length) +
+      timeYr * mSpeed;
+
+    const closestPlanet = z.bodies.find((body) => body.kind === 'planet');
+    const closestPeriAU = closestPlanet
+      ? closestPlanet.a * (1 - closestPlanet.e)
+      : z.a_in;
+    const baselineRadAU = Math.min(0.08, Math.max(0.012, 0.04 * closestPeriAU));
+    const closestPhysRad = closestPlanet ? closestPlanet.radiusEarth : 1.0;
+    const physRad = b.radiusEarth || 1.0;
+    const relRad = Math.max(0.0001, physRad / closestPhysRad);
+    const rawRadAU = baselineRadAU * Math.sqrt(relRad);
+    const pRad = Math.min(130, Math.max(8, rawRadAU * pxPerAU));
+    const mDist = pRad + Math.max(4, pRad * (0.55 + mIdx * 0.38));
+
+    const dxScreen = mDist * Math.cos(mAngle);
+    const dyScreen =
+      mDist * Math.sin(mAngle) * Math.max(0.32, Math.cos(pitch * 0.78));
+
+    // Convert screen offset into camera focal offset in AU
+    const xCam = -dxScreen / Math.max(1, pxPerAU);
+    const yCam = -dyScreen / Math.max(1, pxPerAU);
+    const cosP = Math.max(0.2, Math.cos(pitch));
+    const x1 = xCam;
+    const y1 = yCam / cosP;
+    const cosY = Math.cos(yaw);
+    const sinY = Math.sin(yaw);
+    const dAU_x = x1 * cosY + y1 * sinY;
+    const dAU_y = -x1 * sinY + y1 * cosY;
+
+    return {
+      x: pos3.wx - dAU_x,
+      y: pos3.wy - dAU_y,
+      z: pos3.wz,
+    };
+  }
 
   return { x: pos3.wx, y: pos3.wy, z: pos3.wz };
 }

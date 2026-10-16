@@ -451,7 +451,10 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         systemResult,
         entity,
         orreryTimeYr,
-        orreryIncScale
+        orreryIncScale,
+        orreryPitch,
+        orreryYaw,
+        orreryPxPerAU
       );
       if (targetPos) {
         setOrreryCamAU(targetPos);
@@ -489,28 +492,37 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       return;
     }
 
-    const pos = getBodyWorldPosAU(systemResult, entity, orreryTimeYr, orreryIncScale);
-    if (!pos) return;
-    setOrreryCamAU(pos);
-
+    let targetZoom = orreryPxPerAU;
     if (entity.kind === 'planet') {
       const z = systemResult.zones[entity.zoneIdx];
       const b = z?.bodies[entity.bodyIdx];
       if (b && b.kind === 'planet') {
         const hasMoons = b.moons && b.moons.length > 0;
-        const zoomPx = hasMoons ? 12000 : 22000;
-        setOrreryPxPerAU(zoomPx);
+        targetZoom = hasMoons ? 12000 : 22000;
       } else {
-        setOrreryPxPerAU(1200);
+        targetZoom = 1200;
       }
     } else if (entity.kind === 'moon') {
-      setOrreryPxPerAU(45000);
+      targetZoom = 45000;
     } else if (entity.kind === 'belt') {
       const z = systemResult.zones[entity.zoneIdx];
       const b = z?.bodies[entity.bodyIdx];
       const beltA = b ? b.a : 3.0;
-      setOrreryPxPerAU(clamp(260 / Math.max(0.5, beltA * 1.5), 0.15, 60000));
+      targetZoom = clamp(260 / Math.max(0.5, beltA * 1.5), 0.15, 60000);
     }
+    setOrreryPxPerAU(targetZoom);
+
+    const pos = getBodyWorldPosAU(
+      systemResult,
+      entity,
+      orreryTimeYr,
+      orreryIncScale,
+      orreryPitch,
+      orreryYaw,
+      targetZoom
+    );
+    if (!pos) return;
+    setOrreryCamAU(pos);
   };
 
   // System persistent cache status
@@ -570,7 +582,10 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             systemResult,
             trackedTarget,
             nextTime,
-            orreryIncScale
+            orreryIncScale,
+            orreryPitch,
+            orreryYaw,
+            orreryPxPerAU
           );
           if (targetPos) {
             setOrreryCamAU(targetPos);
@@ -582,7 +597,17 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     };
     rafId = requestAnimationFrame(step);
     return () => cancelAnimationFrame(rafId);
-  }, [orreryPlaying, mapMode, orrerySpeed, trackedTarget, systemResult, orreryIncScale]);
+  }, [
+    orreryPlaying,
+    mapMode,
+    orrerySpeed,
+    trackedTarget,
+    systemResult,
+    orreryIncScale,
+    orreryPitch,
+    orreryYaw,
+    orreryPxPerAU,
+  ]);
 
   // Close blow-up modal on Escape
   useEffect(() => {
@@ -1808,7 +1833,11 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                   {trackedTarget.kind === 'planet'
                     ? `#${trackedTarget.bodyIdx + 1} (${res.zones[trackedTarget.zoneIdx]?.bodies[trackedTarget.bodyIdx]?.a.toFixed(2)} AU)`
                     : trackedTarget.kind === 'moon'
-                    ? 'Moon'
+                    ? (() => {
+                        const pb = res.zones[trackedTarget.zoneIdx]?.bodies[trackedTarget.bodyIdx];
+                        const m = pb && pb.kind === 'planet' ? pb.moons[trackedTarget.moonIdx] : null;
+                        return m ? `${m.name}` : 'Moon';
+                      })()
                     : 'Star'}
                 </span>
                 <button
@@ -3239,7 +3268,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                         effectiveMaxRadAU * orreryPxPerAU * pProj.scale;
                       const maxStarCapPx = lerp(
                         starPxRad * 0.88,
-                        5000,
+                        130,
                         soloRatio
                       );
 
@@ -3252,7 +3281,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                         2.0,
                         maxOrbitClearanceAU * orreryPxPerAU * pProj.scale
                       );
-                      pRad = Math.max(minFloorPx, pRad);
+                      pRad = Math.min(130, Math.max(minFloorPx, pRad));
 
                       const isPlanetTracked =
                         trackedTarget?.kind === 'planet' &&
@@ -3287,7 +3316,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                         node: (
                           <g key={`planet-fg-${zIdx}-${bIdx}`}>
                             {/* Moons around planet in 3D: procedural textures from info view */}
-                            {pRad > 5 &&
+                            {(pRad > 5 || trackedTarget?.kind === 'moon') &&
                               b.moons.map((m, mIdx) => {
                                 const mSpeed = 12 + mIdx * 5;
                                 const mAngle =
@@ -3336,6 +3365,18 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                     0
                                   );
                                 const moonImgSize = mRad / 0.44;
+
+                                const isMoonTracked =
+                                  trackedTarget?.kind === 'moon' &&
+                                  trackedTarget.zoneIdx === zIdx &&
+                                  trackedTarget.bodyIdx === bIdx &&
+                                  trackedTarget.moonIdx === mIdx;
+                                const isMoonDossier =
+                                  selectedEntity?.kind === 'moon' &&
+                                  selectedEntity.zoneIdx === zIdx &&
+                                  selectedEntity.bodyIdx === bIdx &&
+                                  selectedEntity.moonIdx === mIdx;
+                                const isMoonSel = isMoonTracked || isMoonDossier;
 
                                 return (
                                   <g
@@ -3387,6 +3428,16 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                       strokeWidth={0.7}
                                       strokeDasharray="2,2"
                                     />
+                                    {isMoonSel && (
+                                      <circle
+                                        cx={mxPos}
+                                        cy={myPos}
+                                        r={mRad + 3.0}
+                                        fill="none"
+                                        stroke="#38bdf8"
+                                        strokeWidth={1.6}
+                                      />
+                                    )}
                                     <g
                                       transform={`translate(${mxPos.toFixed(1)}, ${myPos.toFixed(1)})`}
                                     >
@@ -3399,6 +3450,19 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                         preserveAspectRatio="xMidYMid meet"
                                       />
                                     </g>
+                                    {showLabels && (
+                                      <text
+                                        x={mxPos}
+                                        y={myPos - mRad - 3}
+                                        fill="#bae6fd"
+                                        fontSize={9}
+                                        fontFamily="monospace"
+                                        fontWeight="bold"
+                                        textAnchor="middle"
+                                      >
+                                        {m.name || `Moon ${mIdx + 1}`}
+                                      </text>
+                                    )}
                                   </g>
                                 );
                               })}
