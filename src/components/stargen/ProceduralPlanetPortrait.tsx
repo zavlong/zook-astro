@@ -325,6 +325,41 @@ function renderPlanetGlobeToCanvas(
   const cTilt = Math.cos(tiltRad * 0.45);
   const sTilt = Math.sin(tiltRad * 0.45);
 
+  // Planetary / Lunar Magnetospheric Aurorae (for worlds with sufficiently strong magnetic fields & an atmosphere)
+  const magField = isMoon && moon ? moon.magneticField : planet.magneticField;
+  const bGauss = magField?.surfaceFieldGauss ?? 0;
+  const hasAurora = Boolean(
+    magField &&
+      magField.hasActiveDynamo &&
+      bGauss >= 0.25 &&
+      (pBar === null || pBar >= 0.005)
+  );
+  // Scales from ~0.35 for Earth-like (0.45 G) up to 1.0 for Jovian/Super-Earth dynamos (4–15 G)
+  const auroraStrength = hasAurora
+    ? clamp(0.32 + 0.38 * Math.log10(Math.max(0.25, bGauss) / 0.25), 0.3, 1.0)
+    : 0;
+
+  // Spectroscopically authentic auroral emission colors by atmospheric gas composition
+  let auroraPrimaryRgb: RGB = [38, 255, 142]; // Atomic O (557.7 nm emerald green)
+  let auroraSecondaryRgb: RGB = [225, 72, 248]; // N2+ / high-altitude O (630 nm crimson-violet)
+  if (pBar === null || (gases.H2 || 0) >= 0.15) {
+    // H2/He Gas & Ice Giants: electric cyan-blue Lyman/Werner + violet-magenta H-alpha
+    auroraPrimaryRgb = [52, 232, 255];
+    auroraSecondaryRgb = [182, 84, 255];
+  } else if ((gases.O2 || 0) >= 0.015 || (gases.N2 || 0) >= 0.25) {
+    // Terrestrial N2/O2: vivid emerald green curtain with magenta-crimson upper fringe
+    auroraPrimaryRgb = [38, 255, 142];
+    auroraSecondaryRgb = [232, 68, 245];
+  } else if ((gases.CO2 || 0) >= 0.25 || (gases.SO2 || 0) >= 0.05) {
+    // CO2 / SO2 atmospheres: cyan-violet CO2+ doublet glow
+    auroraPrimaryRgb = [96, 185, 255];
+    auroraSecondaryRgb = [192, 92, 255];
+  } else if ((gases.CH4 || 0) >= 0.05 || (gases.NH3 || 0) >= 0.05) {
+    // Methane / Ammonia atmospheres: aquamarine-teal to indigo-violet
+    auroraPrimaryRgb = [42, 245, 205];
+    auroraSecondaryRgb = [158, 98, 255];
+  }
+
   for (let py = 0; py < H; py++) {
     for (let px = 0; px < W; px++) {
       const idx = (py * W + px) * 4;
@@ -386,10 +421,13 @@ function renderPlanetGlobeToCanvas(
         }
       }
 
-      // Outside planet globe: render atmospheric halo + full ring
+      // Outside planet globe: render atmospheric halo + polar auroral crown + full ring
       if (dist > R) {
         const haloDist = (dist - R) / (R * 0.16);
         let haloAlpha = 0;
+        let haloR = atmoRgb[0];
+        let haloG = atmoRgb[1];
+        let haloB = atmoRgb[2];
         if (haloDist < 1.0 && (pBar === null || pBar > 0.005)) {
           const sunSide = clamp(
             ((dx / dist) * lCamX + (dy / dist) * lCamY + 0.35) * 0.85,
@@ -398,6 +436,48 @@ function renderPlanetGlobeToCanvas(
           );
           haloAlpha = Math.pow(1 - haloDist, 2.4) * sunSide * 0.68;
         }
+        // Exospheric polar auroral crown rising above North & South magnetic poles
+        if (hasAurora && haloDist < 1.38) {
+          const nxL = dx / dist;
+          const nyL = dy / dist;
+          const y1L = nyL * cosPitch;
+          const z1L = nyL * sinPitch;
+          const wxL = nxL * cosYaw + z1L * sinYaw;
+          const wyL = y1L;
+          const wzL = -nxL * sinYaw + z1L * cosYaw;
+          const sxL = wxL * cTilt - wyL * sTilt;
+          const syL = wxL * sTilt + wyL * cTilt;
+          const szL = wzL;
+          const latL = Math.abs(syL);
+          if (latL > 0.72) {
+            const poleFactor = clamp((latL - 0.72) / 0.24, 0, 1);
+            const lonL = Math.atan2(szL, sxL);
+            const rays =
+              0.55 +
+              0.45 *
+                Math.sin(lonL * 13 + (worldSeed % 17)) *
+                Math.cos(lonL * 7 - haloDist * 2.5);
+            const aurHaloA =
+              Math.pow(1 - haloDist / 1.38, 1.85) *
+              poleFactor *
+              rays *
+              auroraStrength *
+              0.78;
+            if (aurHaloA > 0.01) {
+              const aurCol = mixRgb(
+                auroraPrimaryRgb,
+                auroraSecondaryRgb,
+                clamp(haloDist * 0.65, 0, 1)
+              );
+              const combA = clamp(haloAlpha + aurHaloA * (1 - haloAlpha * 0.5), 0, 1);
+              const wAur = aurHaloA / Math.max(1e-4, haloAlpha + aurHaloA);
+              haloR = lerp(haloR, aurCol[0], wAur);
+              haloG = lerp(haloG, aurCol[1], wAur);
+              haloB = lerp(haloB, aurCol[2], wAur);
+              haloAlpha = combA;
+            }
+          }
+        }
         if (transparentBg) {
           const totA = clamp(haloAlpha + ringAlpha * (1 - haloAlpha), 0, 1);
           if (totA <= 0.01) {
@@ -405,11 +485,11 @@ function renderPlanetGlobeToCanvas(
             continue;
           }
           const outR =
-            (atmoRgb[0] * haloAlpha + ringR * ringAlpha * (1 - haloAlpha)) / totA;
+            (haloR * haloAlpha + ringR * ringAlpha * (1 - haloAlpha)) / totA;
           const outG =
-            (atmoRgb[1] * haloAlpha + ringG * ringAlpha * (1 - haloAlpha)) / totA;
+            (haloG * haloAlpha + ringG * ringAlpha * (1 - haloAlpha)) / totA;
           const outB =
-            (atmoRgb[2] * haloAlpha + ringB * ringAlpha * (1 - haloAlpha)) / totA;
+            (haloB * haloAlpha + ringB * ringAlpha * (1 - haloAlpha)) / totA;
           data[idx] = clamp(Math.round(outR), 0, 255);
           data[idx + 1] = clamp(Math.round(outG), 0, 255);
           data[idx + 2] = clamp(Math.round(outB), 0, 255);
@@ -417,9 +497,9 @@ function renderPlanetGlobeToCanvas(
           continue;
         } else {
           if (haloAlpha > 0) {
-            bgR = Math.round(lerp(bgR, atmoRgb[0], haloAlpha));
-            bgG = Math.round(lerp(bgG, atmoRgb[1], haloAlpha));
-            bgB = Math.round(lerp(bgB, atmoRgb[2], haloAlpha));
+            bgR = Math.round(lerp(bgR, haloR, haloAlpha));
+            bgG = Math.round(lerp(bgG, haloG, haloAlpha));
+            bgB = Math.round(lerp(bgB, haloB, haloAlpha));
           }
           if (ringAlpha > 0) {
             bgR = Math.round(lerp(bgR, ringR, ringAlpha));
@@ -450,6 +530,7 @@ function renderPlanetGlobeToCanvas(
       const sx = wx * cTilt - wy * sTilt;
       const sy = wx * sTilt + wy * cTilt;
       const sz = wz;
+      const latAbs = Math.abs(sy);
 
       // Angular cosine to substellar point in 3D world space: ndotl = +1 at substellar center, 0 at terminator, < 0 on nightside
       const ndotl = wx * lx + wy * ly + wz * lz;
@@ -745,6 +826,49 @@ function renderPlanetGlobeToCanvas(
         litB = lerp(litB, atmoRgb[2], limbStrength);
       }
 
+      // 3D Magnetospheric Polar Auroral Ovals (North & South Magnetic Poles)
+      if (hasAurora && latAbs > 0.64) {
+        const lon = Math.atan2(sz, sx);
+        // Wavy multi-harmonic longitudinal ripple along the magnetic auroral oval
+        const ovalWave =
+          0.028 * Math.sin(lon * 5 + (worldSeed % 13)) +
+          0.016 * Math.cos(lon * 11 - sy * 6.5);
+        // Stronger magnetic fields expand the auroral oval slightly equatorward
+        const ovalCenter = clamp(0.83 - 0.045 * auroraStrength + ovalWave, 0.72, 0.89);
+        const ovalHalfW = 0.055 + 0.042 * auroraStrength;
+        const distFromOval = Math.abs(latAbs - ovalCenter);
+
+        if (distFromOval < ovalHalfW) {
+          const profile = Math.pow(1 - distFromOval / ovalHalfW, 1.65);
+          // Fine vertical rayed curtain striations along magnetic field lines
+          const curtainRays =
+            0.52 +
+            0.48 *
+              (0.5 +
+                0.5 *
+                  Math.sin(
+                    lon * 18 +
+                      fbm3D(sx * 3.8, sy * 3.8, sz * 3.8, worldSeed + 881, 2) * 5.2
+                  ));
+          // Aurorae are self-luminous upper-atmospheric emission: vivid on nightside/terminator & polar limb, visible on dayside for strong fields
+          const nightVisibility = clamp(1.18 - ndotl * 0.48, 0.45, 1.35);
+          const limbBoost = 1.0 + 0.38 * Math.pow(1 - nz, 1.4);
+          const aurIntensity = clamp(
+            profile * curtainRays * auroraStrength * nightVisibility * limbBoost * 0.92,
+            0,
+            1.0
+          );
+          if (aurIntensity > 0.015) {
+            // Color gradient across curtain: primary emission at lower edge, secondary emission at poleward/upper edge
+            const uCurtain = clamp((latAbs - (ovalCenter - ovalHalfW)) / (2 * ovalHalfW), 0, 1);
+            const aurRgb = mixRgb(auroraPrimaryRgb, auroraSecondaryRgb, uCurtain * 0.78);
+            litR = clamp(litR + aurRgb[0] * aurIntensity, 0, 255);
+            litG = clamp(litG + aurRgb[1] * aurIntensity, 0, 255);
+            litB = clamp(litB + aurRgb[2] * aurIntensity, 0, 255);
+          }
+        }
+      }
+
       // Front of ring (in front of planet sphere in camera space: ringZ > 0)
       if (ringAlpha > 0 && ringZ > 0) {
         litR = lerp(litR, ringR, ringAlpha);
@@ -778,6 +902,7 @@ export function getProceduralPlanetIconDataUrl(
   includeSpriteRings = true
 ): string {
   const isMoon = Boolean(moon);
+  const magG = (isMoon ? moon?.magneticField?.surfaceFieldGauss : planet.magneticField?.surfaceFieldGauss) ?? 0;
   // Quantize yaw/pitch to ~0.22 rad (~12.5°) steps so 3D camera drags remain fast & cached
   const qYaw = Math.round(rotYaw / 0.22) * 0.22;
   const qPitch = Math.round(rotPitch / 0.22) * 0.22;
@@ -786,6 +911,7 @@ export function getProceduralPlanetIconDataUrl(
     isMoon ? moon?.hydrosphere?.coveragePct : planet.hydrosphere?.coveragePct,
     isMoon ? moon?.spinState : planet.spinState,
     includeSpriteRings ? planet.rings || 'norings' : 'nospriterings',
+    magG.toFixed(2),
     starColorHex,
     size,
     qYaw.toFixed(2),
