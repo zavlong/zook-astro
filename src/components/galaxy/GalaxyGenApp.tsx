@@ -1505,9 +1505,9 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               <button
                 onClick={() => handleTriggerEnterSector(selectedSector)}
                 className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-mono text-xs font-bold uppercase tracking-wider transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer group"
-                title="Enter Sector Hex Map (Hotkey: Page Down)"
+                title="Enter Sector Map (Hotkey: Page Down)"
               >
-                <span>Enter Sector Hex Map (50&times;50)</span>
+                <span>Enter Sector Map (50&times;50)</span>
                 <kbd className="px-1.5 py-0.5 text-[9px] bg-slate-950/70 border border-slate-700/80 rounded text-slate-300 font-sans normal-case tracking-normal">
                   PgDn
                 </kbd>
@@ -1519,42 +1519,32 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
 
               {/* Galactic Position & Region */}
               <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 text-xs font-mono">
-                <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold mb-2 flex items-center gap-1.5">
-                  <Compass className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Galactic Cartography</span>
-                </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
                   <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800">
-                    <span className="text-slate-500 block text-[9px]">Galactic Radius</span>
+                    <span className="text-slate-500 block text-[9px]">Distance from Core</span>
                     <strong className="text-white text-xs">{selectedSector.rKpc} kpc</strong>
                     <span className="text-slate-400 text-[9px] block">({Math.round(selectedSector.rNorm * 100)}% of rim)</span>
                   </div>
                   <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800">
-                    <span className="text-slate-500 block text-[9px]">Polar Angle &theta;</span>
+                    <span className="text-slate-500 block text-[9px]">Longitude</span>
                     <strong className="text-white text-xs">{(selectedSector.thetaRad * 57.2958).toFixed(1)}&deg;</strong>
-                    <span className="text-slate-400 text-[9px] block">({selectedSector.thetaRad} rad)</span>
                   </div>
                 </div>
 
                 <div className="mt-2 p-2 rounded-lg bg-slate-950/60 border border-slate-800">
-                  <span className="text-slate-500 block text-[9px]">Galactic Region Classification</span>
+                  <span className="text-slate-500 block text-[9px]">Region</span>
                   <strong className="text-blue-300 text-xs">{selectedSector.region}</strong>
                 </div>
               </div>
 
-              {/* Astrophysical Sector Environment */}
+              {/* Sector Stats */}
               <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 text-xs font-mono flex flex-col gap-3">
-                <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Sector Astrophysical Environment</span>
-                </div>
-
                 {/* Stellar Density */}
                 <div>
                   <div className="flex justify-between text-[11px] mb-1">
                     <span className="text-slate-400">Stellar Density</span>
                     <span className={`font-bold ${selectedSector.density > 1.0 ? 'text-amber-300' : 'text-white'}`}>
-                      {Math.round(selectedSector.density * 100)}% ({selectedSector.density}){selectedSector.density > 1.0 ? ' 🔥 Overdensity' : ''}
+                      {Math.round(selectedSector.density * 100)}%{selectedSector.density > 1.0 ? ' 🔥 Overdensity' : ''}
                     </span>
                   </div>
                   <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
@@ -1567,14 +1557,13 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                       style={{ width: `${Math.min(100, selectedSector.density <= 1.0 ? selectedSector.density * 100 : (selectedSector.density / 3.0) * 100)}%` }}
                     />
                   </div>
-                  <div className="flex justify-between text-[9px] text-slate-500 mt-1">
-                    <span>Opacity: {selectedSector.opacity}</span>
-                    <span className="text-emerald-400 font-semibold">~{selectedSector.estimatedStars50x50.toLocaleString()} Systems (50&times;50)</span>
+                  <div className="flex justify-end text-[9.5px] text-emerald-400 font-semibold mt-1">
+                    <span>~{selectedSector.estimatedStars50x50.toLocaleString()} Systems (50&times;50)</span>
                   </div>
 
                   {selectedSector.density > 1.0 && (
                     <div className="mt-2.5 p-2 rounded-lg bg-amber-950/40 border border-amber-600/50 text-[10px] text-amber-200/90 leading-relaxed font-mono">
-                      🔥 <strong>Overdensity Overflow Active:</strong> Saturation decreased towards white. Excess density overflows into progenitor mass, spawning heavy O/B stars, multiple-star hierarchies, and stellar remnants!
+                      🔥 <strong>Overdensity Overflow Active:</strong> Excess density overflows into progenitor mass, spawning heavy O/B stars and stellar remnants!
                     </div>
                   )}
                 </div>
@@ -1588,31 +1577,25 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                       {selectedSector.meanAge} Gyr
                     </span>
                   </div>
-                  <div className="flex justify-between text-[10px] text-slate-300 font-mono mb-1 bg-slate-950/50 p-1.5 rounded-lg border border-slate-800/70">
+                  <div className="flex justify-between text-[10px] text-slate-300 font-mono mb-1.5 bg-slate-950/50 p-1.5 rounded-lg border border-slate-800/70">
                     <span className="text-slate-400">Age Range:</span>
-                    <span className="text-cyan-300 font-bold">&plusmn;{(selectedSector.ageRange / 2).toFixed(1)} Gyr ({selectedSector.ageMin} &ndash; {selectedSector.ageMax} Gyr)</span>
+                    <span className="text-cyan-300 font-bold">&plusmn;{(selectedSector.ageRange / 2).toFixed(1)} Gyr &bull; {selectedSector.ageMin} &ndash; {selectedSector.ageMax} Gyr</span>
                   </div>
-                  <div className="text-[9.5px] text-slate-400 font-mono mb-1.5 flex items-center gap-1.5">
-                    <span className="text-slate-500">Distribution:</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${selectedSector.ageDistribution === 'uniform' ? 'bg-amber-950/80 text-amber-300 border border-amber-800' : 'bg-blue-950/80 text-blue-300 border border-blue-800'}`}>
-                      {selectedSector.ageDistribution === 'uniform' ? 'Uniform Distribution' : 'Normal Distribution'}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    {selectedSector.ageDistribution === 'uniform'
-                      ? '🌌 Galactic Bulge: Wide uniform age distribution spanning from primordial remnants to ongoing stellar accretion.'
+                  <div className="text-[10px] text-slate-300 font-medium">
+                    {selectedSector.meanAge < 2.0
+                      ? 'Spiral Arm Ridge (Starburst Sector)'
                       : selectedSector.rNorm > 0.90
-                      ? '⚪ Galactic Halo: Ancient Population II stars with narrow age range (all stars are uniformly old).'
-                      : selectedSector.meanAge < 2.0
-                      ? '🌀 Spiral Arm Ridge: Active Population I starburst with hot young O/B/A stars.'
-                      : 'Intermediate Solar-age thin disk population with balanced stellar generations.'}
-                  </p>
+                      ? 'Galactic Halo'
+                      : selectedSector.ageDistribution === 'uniform'
+                      ? 'Galactic Bulge'
+                      : 'Thin Disk Population'}
+                  </div>
                 </div>
 
-                {/* Integrated Photometric Light */}
+                {/* Average Color */}
                 <div className="border-t border-slate-800/80 pt-2.5">
                   <div className="flex justify-between text-[11px] mb-1">
-                    <span className="text-slate-400">Integrated Photometric Light</span>
+                    <span className="text-slate-400">Average Color</span>
                     <span className="font-bold flex items-center gap-1.5 font-mono" style={{ color: selectedSector.colorHex }}>
                       <span className="w-2.5 h-2.5 rounded-full border border-white/50 shadow-sm" style={{ backgroundColor: selectedSector.colorHex }} />
                       {selectedSector.colorHex}

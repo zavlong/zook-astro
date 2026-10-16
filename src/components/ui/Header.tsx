@@ -109,10 +109,10 @@ export const Header: React.FC<HeaderProps> = ({
               ? 'bg-gradient-to-r from-cyan-600 via-indigo-600 to-purple-600 text-white font-bold shadow-md shadow-cyan-500/20'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
           }`}
-          title="Sector Hex Map (View Level 2 • PgUp from System, PgDn from Galaxy)"
+          title="Sector Map (View Level 2 • PgUp from System, PgDn from Galaxy)"
         >
           <Hexagon className="w-3.5 h-3.5" />
-          <span>Sector Hex Map</span>
+          <span>Sector Map</span>
         </button>
 
         <button

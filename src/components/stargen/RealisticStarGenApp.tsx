@@ -3035,9 +3035,9 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                 type="button"
                 onClick={handleBackToSectorWithTransition}
                 className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-950/80 hover:bg-indigo-900 text-indigo-200 border border-indigo-700 flex items-center gap-1.5 cursor-pointer transition shadow"
-                title="Return to Sector Hex Grid (Hotkey: Page Up)"
+                title="Return to Sector Map (Hotkey: Page Up)"
               >
-                <span>&larr; Back to Sector Hex Map</span>
+                <span>&larr; Back to Sector Map</span>
                 <kbd className="px-1.5 py-0.5 text-[9px] bg-slate-900/90 border border-indigo-500/50 rounded text-indigo-300 font-sans font-normal ml-0.5">
                   PgUp
                 </kbd>
