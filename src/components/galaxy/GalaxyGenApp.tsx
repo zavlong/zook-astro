@@ -9,7 +9,6 @@ import {
   Maximize2,
   Sliders,
   X,
-  Copy,
   Check,
   ArrowRight,
   Disc,
@@ -21,6 +20,7 @@ import {
   Layers,
   FolderOpen,
   Save,
+  Edit2,
 } from 'lucide-react';
 import {
   GalaxyConfig,
@@ -94,9 +94,8 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   const [bgImageOpacity, setBgImageOpacity] = useState<number>(0.75); // Opacity of imported photo or procedural blur
   const [sectorOpacity, setSectorOpacity] = useState<number>(0.85); // 0.0 to 1.0 (hex fill opacity multiplier)
 
-  // Search input & Copy feedback
+  // Search input
   const [searchCoord, setSearchCoord] = useState<string>('');
-  const [copiedId, setCopiedId] = useState<boolean>(false);
 
   // Viewport visibility toggles (default false for maximum performance)
   const [showHexBoundaries, setShowHexBoundaries] = useState<boolean>(false);
@@ -153,6 +152,51 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     const core = galaxyData.sectors.find((s) => s.col === 25 && s.row === 25);
     setSelectedSector(core || galaxyData.sectors[0] || null);
   }, [galaxyData]);
+
+  // Custom Sector Names map (persisted in localStorage by galaxy seed)
+  const [customSectorNames, setCustomSectorNames] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = localStorage.getItem(`zook_sector_names_${config.seed}`);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(`zook_sector_names_${config.seed}`);
+      setCustomSectorNames(raw ? JSON.parse(raw) : {});
+    } catch {
+      setCustomSectorNames({});
+    }
+  }, [config.seed]);
+
+  const [isEditingSectorName, setIsEditingSectorName] = useState<boolean>(false);
+  const [sectorNameDraft, setSectorNameDraft] = useState<string>('');
+
+  useEffect(() => {
+    if (selectedSector) {
+      setSectorNameDraft(customSectorNames[selectedSector.coord] || selectedSector.name);
+      setIsEditingSectorName(false);
+    }
+  }, [selectedSector?.coord, customSectorNames]);
+
+  const handleSaveSectorName = () => {
+    if (!selectedSector) return;
+    const trimmed = sectorNameDraft.trim();
+    const finalName = trimmed || selectedSector.name;
+    const updated = { ...customSectorNames, [selectedSector.coord]: finalName };
+    setCustomSectorNames(updated);
+    try {
+      localStorage.setItem(`zook_sector_names_${config.seed}`, JSON.stringify(updated));
+    } catch (e) {
+      console.warn('Failed to save custom sector name:', e);
+    }
+    setIsEditingSectorName(false);
+  };
 
   // ============================================================================
   // HEX GEOMETRY (Pointy-topped)
@@ -357,18 +401,21 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     (sector: GalaxySectorHex) => {
       if (isEnteringSector) return;
 
+      const customName = customSectorNames[sector.coord] || sector.name;
+      const sectorPayload = { ...sector, name: customName };
+
       const prefersReducedMotion =
         typeof window !== 'undefined' &&
         window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
       if (prefersReducedMotion) {
-        onSelectSector(sector);
+        onSelectSector(sectorPayload);
         return;
       }
 
       setIsEnteringSector(true);
-      setTransitionSector(sector);
-      setSelectedSector(sector);
+      setTransitionSector(sectorPayload);
+      setSelectedSector(sectorPayload);
 
       if (containerRef.current) {
         const { clientWidth, clientHeight } = containerRef.current;
@@ -386,10 +433,10 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
       }
 
       transitionTimerRef.current = setTimeout(() => {
-        onSelectSector(sector);
+        onSelectSector(sectorPayload);
       }, 450);
     },
-    [isEnteringSector, getHexCenter, onSelectSector]
+    [isEnteringSector, getHexCenter, onSelectSector, customSectorNames]
   );
 
   // Save current galaxy with all seeds, explored sectors, and generated star systems
@@ -657,13 +704,6 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   const handleResetToProcedural = () => {
     setCustomGalaxyData(null);
     setBgImageUrl(null);
-  };
-
-  // Copy seed / ID
-  const handleCopyId = (id: string) => {
-    navigator.clipboard.writeText(id);
-    setCopiedId(true);
-    setTimeout(() => setCopiedId(false), 1800);
   };
 
   // Load saved galaxy from catalog and rehydrate cached sectors & systems
@@ -1436,56 +1476,80 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                   className="absolute top-0 right-0 w-24 h-24 rounded-full blur-2xl opacity-20 pointer-events-none"
                   style={{ backgroundColor: selectedSector.colorHex }}
                 />
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-blue-950/80 text-blue-300 border border-blue-800 font-bold">
-                    SECTOR {selectedSector.coord}
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-400">
-                    Row {selectedSector.row}, Col {selectedSector.col}
-                  </span>
-                </div>
 
-                <h3 className="text-base font-extrabold text-white mb-1">
-                  {selectedSector.name}
-                </h3>
+                <div className="flex items-center justify-between gap-2">
+                  {isEditingSectorName ? (
+                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                      <input
+                        type="text"
+                        value={sectorNameDraft}
+                        onChange={(e) => setSectorNameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveSectorName();
+                          if (e.key === 'Escape') setIsEditingSectorName(false);
+                        }}
+                        autoFocus
+                        className="bg-slate-950 border border-cyan-500 rounded-lg px-2 py-1 text-sm font-bold text-white flex-1 focus:outline-none"
+                        placeholder="Sector Name..."
+                      />
+                      <button
+                        onClick={handleSaveSectorName}
+                        className="p-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition cursor-pointer"
+                        title="Save Sector Name"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <h3
+                        onClick={() => setIsEditingSectorName(true)}
+                        className="text-base font-extrabold text-white truncate cursor-pointer hover:text-cyan-300 transition"
+                        title="Click to rename sector"
+                      >
+                        {customSectorNames[selectedSector.coord] || selectedSector.name}
+                      </h3>
+                      <button
+                        onClick={() => setIsEditingSectorName(true)}
+                        className="p-1 text-slate-500 hover:text-cyan-300 transition cursor-pointer"
+                        title="Rename sector"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
 
-                <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-                  <span>ID: <code className="text-slate-200">{selectedSector.seedString}</code></span>
-                  <button
-                    onClick={() => handleCopyId(selectedSector.seedString)}
-                    className="p-1 hover:bg-slate-800 rounded transition text-slate-400 hover:text-white cursor-pointer"
-                    title="Copy Sector Seed String"
-                  >
-                    {copiedId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                  </button>
+                  <span className="text-xs font-mono text-slate-400 shrink-0">
+                    ({selectedSector.col}, {selectedSector.row})
+                  </span>
                 </div>
 
                 {universeCache.isSectorCached(selectedSector.seed, selectedSector.coord) && (
-                  <div className="mt-2 px-2.5 py-1 rounded-lg bg-emerald-950/80 border border-emerald-500/60 text-emerald-300 text-xs font-mono font-medium flex items-center gap-1.5 shadow-sm">
+                  <div className="mt-2.5 px-2.5 py-1 rounded-lg bg-emerald-950/80 border border-emerald-500/60 text-emerald-300 text-xs font-mono font-semibold flex items-center gap-1.5 shadow-sm">
                     <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Explored &amp; Cached in Universe ({universeCache.getCachedSector(universeCache.getSectorCacheKey(selectedSector.seed, selectedSector.coord))?.systems.length || 'Full'} Systems)</span>
+                    <span>Explored Sector</span>
                   </div>
                 )}
 
                 {selectedSector.coord === '2525' && (
                   <div className="mt-2.5 px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-purple-950/90 to-indigo-950/90 border border-purple-500/70 text-purple-200 text-xs font-mono font-bold flex items-center gap-2 shadow-lg">
                     <span className="text-sm">🌀</span>
-                    <span>Galactic Nucleus SMBH (Sagittarius A* &bull; 1,000,000 M☉)</span>
+                    <span>Galactic Nucleus</span>
                   </div>
                 )}
               </div>
 
-              {/* PRIMARY ACTION BUTTON: ENTER 50x50 SECTOR MAP */}
+              {/* PRIMARY ACTION BUTTON: ENTER SECTOR MAP */}
               <button
                 onClick={() => handleTriggerEnterSector(selectedSector)}
-                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-mono text-xs font-bold uppercase tracking-wider transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer group"
-                title="Enter Sector Map (Hotkey: Page Down)"
+                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-mono text-xs font-bold tracking-wider transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer group"
+                title="Sector Map (Hotkey: Page Down)"
               >
-                <span>Enter Sector Map (50&times;50)</span>
+                <span>Sector Map</span>
                 <kbd className="px-1.5 py-0.5 text-[9px] bg-slate-950/70 border border-slate-700/80 rounded text-slate-300 font-sans normal-case tracking-normal">
                   PgDn
                 </kbd>
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform ml-1" />
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform ml-0.5" />
               </button>
               <p className="text-[10px] text-slate-500 font-mono text-center -mt-2">
                 Hotkey: <strong className="text-slate-400">Page Down</strong> to zoom in &bull; Double-click hex opens directly
@@ -1551,21 +1615,10 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                   </div>
                 </div>
 
-                {/* Average Color */}
+                {/* Metallicity */}
                 <div className="border-t border-slate-800/80 pt-2.5">
                   <div className="flex justify-between text-[11px]">
-                    <span className="text-slate-400">Average Color</span>
-                    <span className="font-bold flex items-center gap-1.5 font-mono" style={{ color: selectedSector.colorHex }}>
-                      <span className="w-2.5 h-2.5 rounded-full border border-white/50 shadow-sm" style={{ backgroundColor: selectedSector.colorHex }} />
-                      {selectedSector.colorHex}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Mean Metallicity */}
-                <div className="border-t border-slate-800/80 pt-2.5">
-                  <div className="flex justify-between text-[11px]">
-                    <span className="text-slate-400">Mean Metallicity [Fe/H]</span>
+                    <span className="text-slate-400">Metallicity</span>
                     <span className={`font-bold ${selectedSector.metallicityMean >= 0 ? 'text-amber-300' : 'text-cyan-300'}`}>
                       {selectedSector.metallicityMean >= 0 ? `+${selectedSector.metallicityMean}` : selectedSector.metallicityMean} dex : <span className="font-normal text-slate-300">{selectedSector.metallicityMean >= -0.4 ? 'Population I' : 'Population II'}</span>
                     </span>
