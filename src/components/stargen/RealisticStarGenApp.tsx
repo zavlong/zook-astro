@@ -324,7 +324,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       const cyScreen = vH / 2;
       const dxSvg = mouseSvgX - cxScreen;
       const dySvg = mouseSvgY - cyScreen;
-      const cosP = Math.max(0.2, Math.cos(pitch));
+      const rawCosP = Math.cos(pitch);
+      const cosP = (rawCosP < 0 ? -1 : 1) * Math.max(0.2, Math.abs(rawCosP));
       const cosY = Math.cos(yaw);
       const sinY = Math.sin(yaw);
       const xCam = dxSvg / pxPerAU;
@@ -3168,17 +3169,16 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
               if (dragStartRef.current.action === 'rotate') {
                 setOrreryYaw(dragStartRef.current.yaw + dxPx * 0.0085);
-                setOrreryPitch(
-                  clamp(dragStartRef.current.pitch - dyPx * 0.0075, 0, 1.48)
-                );
+                setOrreryPitch(dragStartRef.current.pitch - dyPx * 0.0075);
               } else {
                 setTrackedTarget(null);
                 const dxSvg = (dxPx / Math.max(1, rect.width)) * viewW;
                 const dySvg = (dyPx / Math.max(1, rect.height)) * viewH;
+                const rawCosP = Math.cos(orreryPitch);
+                const safeCosP =
+                  (rawCosP < 0 ? -1 : 1) * Math.max(0.22, Math.abs(rawCosP));
                 const dCamX = -dxSvg / orreryPxPerAU;
-                const dCamY =
-                  -dySvg /
-                  (orreryPxPerAU * Math.max(0.22, Math.cos(orreryPitch)));
+                const dCamY = -dySvg / (orreryPxPerAU * safeCosP);
                 // Unrotate pan vector by camera yaw into world ecliptic plane
                 const cY = Math.cos(orreryYaw);
                 const sY = Math.sin(orreryYaw);
@@ -3736,7 +3736,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
                         const rInnerPx = pRad * rSys.innerRadiusRp;
                         const rOuterPx = pRad * Math.min(2.38, rSys.outerRadiusRp);
-                        const tiltY = Math.max(0.28, Math.cos(orreryPitch * 0.78));
+                        const tiltY = Math.max(0.24, Math.abs(Math.cos(orreryPitch)));
+                        const ringFrontSign = Math.sin(orreryPitch) < 0 ? -1 : 1;
                         const ringSeed = zIdx * 997 + bIdx * 313 + Math.round(b.a * 1000);
 
                         // Scale micro-asteroid speck count strongly with optical depth τ
@@ -3765,26 +3766,31 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                           const yC = pProj.y.toFixed(2);
                           const rxS = rx.toFixed(2);
                           const ryS = ry.toFixed(2);
-                          // Upper half (sin(ang) < 0 -> behind planet globe)
-                          ringBackNodes.push(
+                          const upperArc = (
                             <path
-                              key={`${keyPrefix}-back`}
+                              key={`${keyPrefix}-upper`}
                               d={`M ${xL} ${yC} A ${rxS} ${ryS} 0 0 1 ${xR} ${yC}`}
                               fill="none"
                               stroke={`rgba(${baseRingRgb}, ${opacity.toFixed(3)})`}
                               strokeWidth={strokeW}
                             />
                           );
-                          // Lower half (sin(ang) >= 0 -> in front of planet globe)
-                          ringFrontNodes.push(
+                          const lowerArc = (
                             <path
-                              key={`${keyPrefix}-front`}
+                              key={`${keyPrefix}-lower`}
                               d={`M ${xR} ${yC} A ${rxS} ${ryS} 0 0 1 ${xL} ${yC}`}
                               fill="none"
                               stroke={`rgba(${baseRingRgb}, ${opacity.toFixed(3)})`}
                               strokeWidth={strokeW}
                             />
                           );
+                          if (ringFrontSign >= 0) {
+                            ringBackNodes.push(upperArc);
+                            ringFrontNodes.push(lowerArc);
+                          } else {
+                            ringFrontNodes.push(upperArc);
+                            ringBackNodes.push(lowerArc);
+                          }
                         };
 
                         const spanPx = Math.max(1.2, rOuterPx - rInnerPx);
@@ -3866,7 +3872,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                               fillOpacity={speckAlpha}
                             />
                           );
-                          if (Math.sin(ang) < 0) {
+                          if (Math.sin(ang) * ringFrontSign < 0) {
                             ringBackNodes.push(node);
                           } else {
                             ringFrontNodes.push(node);
@@ -3894,14 +3900,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                   ringOffset +
                                   Math.max(4, pRad * (0.55 + mIdx * 0.38));
                                 const mxPos = pProj.x + mDist * Math.cos(mAngle);
+                                const rawCosP = Math.cos(orreryPitch);
                                 const myPos =
                                   pProj.y +
                                   mDist *
                                     Math.sin(mAngle) *
-                                    Math.max(
-                                      0.32,
-                                      Math.cos(orreryPitch * 0.78)
-                                    );
+                                    (rawCosP < 0 ? -1 : 1) *
+                                    Math.max(0.28, Math.abs(rawCosP));
                                 const relMoonRadius = Math.max(
                                   0.00001,
                                   m.radiusKm / 6371 / closestPhysRadEarth

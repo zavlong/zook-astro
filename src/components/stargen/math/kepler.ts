@@ -415,14 +415,15 @@ export function getBodyWorldPosAU(
       : 0;
     const mDist = pRad + ringOffset + Math.max(4, pRad * (0.55 + mIdx * 0.38));
 
+    const rawCosP = Math.cos(pitch);
+    const signedTilt = (rawCosP < 0 ? -1 : 1) * Math.max(0.28, Math.abs(rawCosP));
     const dxScreen = mDist * Math.cos(mAngle);
-    const dyScreen =
-      mDist * Math.sin(mAngle) * Math.max(0.32, Math.cos(pitch * 0.78));
+    const dyScreen = mDist * Math.sin(mAngle) * signedTilt;
 
     // Convert screen offset into camera focal offset in AU
     const xCam = -dxScreen / Math.max(1, pxPerAU);
     const yCam = -dyScreen / Math.max(1, pxPerAU);
-    const cosP = Math.max(0.2, Math.cos(pitch));
+    const cosP = (rawCosP < 0 ? -1 : 1) * Math.max(0.2, Math.abs(rawCosP));
     const x1 = xCam;
     const y1 = yCam / cosP;
     const cosY = Math.cos(yaw);

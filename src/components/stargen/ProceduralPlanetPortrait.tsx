@@ -1752,9 +1752,7 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
               const dx = e.clientX - dragGlobeRef.current.startX;
               const dy = e.clientY - dragGlobeRef.current.startY;
               setRotYaw(dragGlobeRef.current.startYaw - dx * 0.015);
-              setRotPitch(
-                clamp(dragGlobeRef.current.startPitch + dy * 0.014, -1.42, 1.42)
-              );
+              setRotPitch(dragGlobeRef.current.startPitch + dy * 0.014);
             }}
             onMouseUp={() => {
               setIsDraggingGlobe(false);
@@ -1784,9 +1782,7 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
               const dx = t.clientX - dragGlobeRef.current.startX;
               const dy = t.clientY - dragGlobeRef.current.startY;
               setRotYaw(dragGlobeRef.current.startYaw - dx * 0.015);
-              setRotPitch(
-                clamp(dragGlobeRef.current.startPitch + dy * 0.014, -1.42, 1.42)
-              );
+              setRotPitch(dragGlobeRef.current.startPitch + dy * 0.014);
             }}
             onTouchEnd={() => {
               setIsDraggingGlobe(false);
