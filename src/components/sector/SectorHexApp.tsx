@@ -149,6 +149,22 @@ const SECTOR_PRESETS: SectorPreset[] = [
   },
 ];
 
+const getBiosphereDisplay = (sys: SectorHexSystem): string => {
+  if (!sys.candidateHabitable || !sys.habitableWorldCount || sys.habitableWorldCount === 0) {
+    return '<none>';
+  }
+  let ammoniaCount = 0;
+  let waterCount = 0;
+  if (sys.habitableTypes) {
+    for (const t of sys.habitableTypes) {
+      if (t.toLowerCase().includes('ammonia')) ammoniaCount++;
+      else waterCount++;
+    }
+  }
+  const dominant = ammoniaCount > waterCount ? 'ammonia' : 'water';
+  return `${sys.habitableWorldCount} ${dominant}`;
+};
+
 export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   onLaunchStarGen,
   onBackToGalaxy,
@@ -2958,21 +2974,15 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                           {selectedSystem.nStars} Stars
                         </span>
                       )}
-                      {selectedSystem.isGiantSystem && (
-                        <span className="text-[10px] text-amber-300 bg-amber-950/80 px-1.5 py-0.2 rounded border border-amber-800 font-bold flex items-center gap-1">
-                          <span>⭐</span>
-                          <span>Giant System ({selectedSystem.mass.toFixed(1)} M☉)</span>
-                        </span>
-                      )}
                       {selectedSystem.mass > 999999 && (
                         <span className="text-[10px] text-purple-300 bg-purple-950/80 px-1.5 py-0.2 rounded border border-purple-800 font-bold flex items-center gap-1">
                           <span>🌀</span>
-                          <span>Supermassive Black Hole ({selectedSystem.mass.toLocaleString()} M☉)</span>
+                          <span>Supermassive Black Hole {selectedSystem.mass.toLocaleString()} M☉</span>
                         </span>
                       )}
                       {isNonMainSequenceSystem(selectedSystem) && (
                         <span className="text-[10px] text-fuchsia-300 bg-fuchsia-950/80 px-1.5 py-0.2 rounded border border-fuchsia-800 font-bold">
-                          Non-MS (≠ V)
+                          Non-MS
                         </span>
                       )}
                       {universeCache.hasCachedSystem(selectedSystem.id) && (
@@ -2987,24 +2997,24 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               </div>
 
               {/* ============================================================================ */}
-              {/* CORE REQUIREMENT: HIGH-VISIBILITY {age, mass, metallicity, id} TUPLET CARD   */}
+              {/* SYSTEM STATS CARD                                                            */}
               {/* ============================================================================ */}
               <div className="p-3.5 rounded-xl bg-gradient-to-br from-indigo-950/50 via-slate-900 to-slate-950 border border-cyan-500/40 shadow-xl relative overflow-hidden">
                 <div className="flex items-center justify-between pb-2 border-b border-cyan-900/40 mb-3">
                   <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-cyan-400 uppercase tracking-wider">
                     <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>System Parameters Tuplet</span>
+                    <span>System Stats</span>
                   </div>
                   <span className="text-[10px] font-mono text-slate-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">
                     Seeded PRNG
                   </span>
                 </div>
 
-                {/* 2x2 Grid of the 4 Tuple Values */}
+                {/* 2x2 Grid of the 4 Values */}
                 <div className="grid grid-cols-2 gap-2 text-xs font-mono">
                   {/* Mass */}
                   <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
-                    <div className="text-[10px] text-slate-400 uppercase">Mass (sysMass)</div>
+                    <div className="text-[10px] text-slate-400 uppercase">Mass</div>
                     <div className="text-sm font-bold text-amber-300 mt-0.5">
                       {selectedSystem.mass >= 100000 ? selectedSystem.mass.toLocaleString() : selectedSystem.mass.toFixed(3)} <span className="text-xs text-slate-400">M☉</span>
                     </div>
@@ -3019,12 +3029,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     <div className="text-sm font-bold text-cyan-300 mt-0.5">
                       {selectedSystem.age.toFixed(2)} <span className="text-xs text-slate-400">Gyr</span>
                     </div>
-                    <div className="text-[9.5px] text-slate-500 mt-0.5">Cosmic System Age</div>
                   </div>
 
                   {/* Metallicity */}
                   <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
-                    <div className="text-[10px] text-slate-400 uppercase">Metallicity ([Fe/H])</div>
+                    <div className="text-[10px] text-slate-400 uppercase">Metallicity</div>
                     <div className="text-sm font-bold text-emerald-300 mt-0.5">
                       {selectedSystem.metallicity > 0
                         ? `+${selectedSystem.metallicity.toFixed(2)}`
@@ -3053,18 +3062,17 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     <div className="text-xs font-bold text-fuchsia-300 mt-0.5 truncate" title={selectedSystem.id}>
                       {selectedSystem.id}
                     </div>
-                    <div className="text-[9.5px] text-slate-500 mt-0.5">Deterministic Seed</div>
                   </div>
                 </div>
 
-                {/* Primary Action Button: Launch into StarGen Lab */}
+                {/* Primary Action Button: Launch into System Map */}
                 <button
                   onClick={() => handleLaunchSystemGenerator(selectedSystem)}
                   className="w-full mt-3 py-2.5 px-3 rounded-lg bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-mono font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 border border-emerald-400/40 transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
-                  title="Launch StarGen Lab with this System (Hotkey: Page Down)"
+                  title="System Map (Hotkey: Page Down)"
                 >
                   <Atom className="w-4 h-4 animate-spin-slow" />
-                  <span>Launch StarGen Lab &rarr;</span>
+                  <span>System Map &rarr;</span>
                   <kbd className="px-1.5 py-0.5 text-[9px] bg-slate-950/70 border border-emerald-400/50 rounded text-emerald-200 font-sans font-normal ml-1">
                     PgDn
                   </kbd>
@@ -3265,13 +3273,13 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs font-mono space-y-2">
                 <div className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
                   <span>System Architecture &amp; Telemetry</span>
-                  <span className="text-cyan-400 font-semibold">{selectedSystem.archName}</span>
+                  <span className="text-cyan-400 font-semibold">{selectedSystem.archName.replace(/\s*\(.*\)/g, '')}</span>
                 </div>
 
                 <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                  <span className="text-slate-400">Primary Star (A)</span>
+                  <span className="text-slate-400">Primary Star</span>
                   <span className="text-slate-200 font-semibold">
-                    {selectedSystem.primaryClass} ({selectedSystem.primaryMass.toFixed(3)} M☉)
+                    {selectedSystem.primaryClass} {selectedSystem.primaryMass.toFixed(3)} M☉
                   </span>
                 </div>
 
@@ -3292,7 +3300,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                               />
                             )}
                             <span>
-                              {cs.label}: {cs.spectralType} ({cs.mass.toFixed(3)} M☉)
+                              {cs.label}: {cs.spectralType} {cs.mass.toFixed(3)} M☉
                             </span>
                           </div>
                         );
@@ -3309,12 +3317,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                  <span className="text-slate-400">Effective Temp (Teff)</span>
+                  <span className="text-slate-400">Effective Temp</span>
                   <span className="text-slate-200 font-semibold">{Math.round(selectedSystem.teff)} K</span>
                 </div>
 
                 <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                  <span className="text-slate-400">Luminosity (L/L☉)</span>
+                  <span className="text-slate-400">Luminosity</span>
                   <span className="text-slate-200 font-semibold">{selectedSystem.lumLsun} L☉</span>
                 </div>
 
@@ -3329,11 +3337,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between py-1">
-                  <span className="text-slate-400">Habitable / Biosphere Worlds</span>
-                  <span className={selectedSystem.candidateHabitable ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                    {selectedSystem.candidateHabitable
-                      ? `Yes (${selectedSystem.habitableTypes && selectedSystem.habitableTypes.length > 0 ? selectedSystem.habitableTypes.join(', ') : 'Candidate Present'})`
-                      : 'None'}
+                  <span className="text-slate-400">Planetary Biospheres:</span>
+                  <span className={getBiosphereDisplay(selectedSystem) !== '<none>' ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                    {getBiosphereDisplay(selectedSystem)}
                   </span>
                 </div>
               </div>
@@ -3343,10 +3349,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 <div className="flex items-center justify-between text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">
                   <span className="flex items-center gap-1.5 text-cyan-400">
                     <Route className="w-3.5 h-3.5" />
-                    Hyperlanes ({connectedLanes.length})
-                  </span>
-                  <span className="text-[10px] text-slate-500 lowercase font-normal">
-                    6 closest planar
+                    Hyperlanes
                   </span>
                 </div>
                 {connectedLanes.length === 0 ? (
@@ -3379,11 +3382,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                               {neighbor.name}
                             </span>
                             <span className="text-[9.5px] text-slate-500 font-mono">
-                              ({neighbor.coord})
+                              {neighbor.coord}
                             </span>
                           </div>
                           <span className="text-[10.5px] text-cyan-400/90 font-mono flex-shrink-0">
-                            {lane.lengthLy} ly
+                            {(lane.lengthLy / 3.26156).toFixed(1)} pc
                           </span>
                         </div>
                       );
@@ -3415,7 +3418,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     <span className="text-red-400 font-bold">{gridData.stats.kmCount}</span>
                   </div>
                   <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
-                    <span className="text-slate-500">Remnants (WD/NS/BH):</span>{' '}
+                    <span className="text-slate-500">Remnants:</span>{' '}
                     <span className="text-purple-400 font-bold">{gridData.stats.remnantCount}</span>
                   </div>
                   <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
@@ -3423,7 +3426,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     <span className="text-indigo-300 font-bold">{gridData.stats.multipleSystemCount}</span>
                   </div>
                   <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
-                    <span className="text-slate-500">Heavy Stars (&ge;3 M☉):</span>{' '}
+                    <span className="text-slate-500">Heavy Stars &ge;3 M☉:</span>{' '}
                     <span className="text-amber-300 font-bold">{gridData.stats.heavyMassCount}</span>
                   </div>
                   <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
@@ -3435,7 +3438,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     <span className="text-emerald-400 font-bold">{empires.length}</span>
                   </div>
                   <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50 col-span-2 flex items-center justify-between">
-                    <span className="text-slate-400">Integrated Light (Constituent Stars):</span>
+                    <span className="text-slate-400">Integrated Light:</span>
                     <span className="flex items-center gap-1.5 font-bold" style={{ color: gridData.integratedColorHex }}>
                       <span className="w-2.5 h-2.5 rounded-full border border-white/40" style={{ backgroundColor: gridData.integratedColorHex }} />
                       {gridData.integratedColorHex}
@@ -3448,16 +3451,14 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               <div className="p-2.5 rounded-lg bg-cyan-950/30 border border-cyan-800/40 text-[10.5px] text-cyan-300/80 font-mono leading-relaxed flex items-start gap-2">
                 <Info className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
                 <span>
-                  Double-click any system hex to launch StarGen Lab instantly. The ID{' '}
-                  <span className="text-cyan-200 font-bold">{selectedSystem.id}</span> functions as
-                  a 100% reproducible seed.
+                  double click or zoom in for system map
                 </span>
               </div>
             </div>
           ) : (
             <div className="p-6 h-full flex flex-col items-center justify-center text-center text-slate-500 font-mono text-xs gap-3">
               <Hexagon className="w-10 h-10 text-slate-700 animate-pulse" />
-              <p>Select any hex with a star system to inspect its astrophysics parameters and launch StarGen Lab.</p>
+              <p>Select any hex with a star system to inspect its stats or open the system map.</p>
             </div>
           )}
         </div>
