@@ -17,6 +17,7 @@ import {
   Crosshair,
   Gauge,
   Tag,
+  ListTree,
 } from 'lucide-react';
 import {
   RealisticBeltBody,
@@ -118,6 +119,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     action: 'rotate' | 'pan';
   } | null>(null);
   const orrerySvgRef = useRef<SVGSVGElement | null>(null);
+  const orreryContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Click-to-Blow-Up Selected Entity Modal State
   const [selectedEntity, setSelectedEntity] = useState<SelectedMapEntity | null>(null);
@@ -127,6 +129,75 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
   // Orrery System Map Labels Toggle (default false)
   const [showLabels, setShowLabels] = useState<boolean>(false);
+
+  // Quick Jump Hierarchy Tree on left side (toggled with J or button)
+  const [showQuickJump, setShowQuickJump] = useState<boolean>(false);
+
+  const orreryStateRef = useRef({
+    pxPerAU: orreryPxPerAU,
+    pitch: orreryPitch,
+    yaw: orreryYaw,
+  });
+
+  useEffect(() => {
+    orreryStateRef.current = {
+      pxPerAU: orreryPxPerAU,
+      pitch: orreryPitch,
+      yaw: orreryYaw,
+    };
+  }, [orreryPxPerAU, orreryPitch, orreryYaw]);
+
+  const handleNativeWheel = useCallback((e: WheelEvent) => {
+    // Intercept and prevent the browser from scrolling the containing page
+    e.preventDefault();
+    e.stopPropagation();
+
+    const { pxPerAU, pitch, yaw } = orreryStateRef.current;
+    const zoomFactor = e.deltaY < 0 ? 1.22 : 0.82;
+    const newPxPerAU = clamp(pxPerAU * zoomFactor, 0.05, 5000000);
+    if (newPxPerAU === pxPerAU) return;
+
+    const svgEl = orrerySvgRef.current;
+    if (svgEl) {
+      const rect = svgEl.getBoundingClientRect();
+      const vW = rect.width || 1280;
+      const vH = rect.height || 780;
+      const mouseSvgX = ((e.clientX - rect.left) / Math.max(1, rect.width)) * vW;
+      const mouseSvgY = ((e.clientY - rect.top) / Math.max(1, rect.height)) * vH;
+      const cxScreen = vW / 2;
+      const cyScreen = vH / 2;
+      const dxSvg = mouseSvgX - cxScreen;
+      const dySvg = mouseSvgY - cyScreen;
+      const cosP = Math.max(0.2, Math.cos(pitch));
+      const cosY = Math.cos(yaw);
+      const sinY = Math.sin(yaw);
+      const xCam = dxSvg / pxPerAU;
+      const yCam = dySvg / (pxPerAU * cosP);
+      const dAU_x = xCam * cosY + yCam * sinY;
+      const dAU_y = -xCam * sinY + yCam * cosY;
+      const k = newPxPerAU / pxPerAU;
+
+      setTrackedTarget(null);
+      setOrreryCamAU((prev) => ({
+        x: prev.x + dAU_x * (1 - 1 / k),
+        y: prev.y + dAU_y * (1 - 1 / k),
+      }));
+    }
+    setOrreryPxPerAU(newPxPerAU);
+  }, []);
+
+  const setOrreryContainer = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (orreryContainerRef.current) {
+        orreryContainerRef.current.removeEventListener('wheel', handleNativeWheel);
+      }
+      orreryContainerRef.current = node;
+      if (node) {
+        node.addEventListener('wheel', handleNativeWheel, { passive: false });
+      }
+    },
+    [handleNativeWheel]
+  );
 
   // Transition state when returning to Sector Hex Map
   const [isExitingToSector, setIsExitingToSector] = useState<boolean>(false);
@@ -395,7 +466,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         e.key === 'PageUp' ||
         e.code === 'PageUp';
       const isLabelKey = e.key === 'l' || e.key === 'L';
-      if (!isPageKey && !isLabelKey) return;
+      const isQuickJumpKey = e.key === 'j' || e.key === 'J';
+      if (!isPageKey && !isLabelKey && !isQuickJumpKey) return;
 
       const target = e.target as HTMLElement | null;
       if (
@@ -414,6 +486,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         e.preventDefault();
         e.stopPropagation();
         setShowLabels((v) => !v);
+        return;
+      }
+
+      if (isQuickJumpKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowQuickJump((v) => !v);
         return;
       }
 
@@ -1774,6 +1853,26 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               Inc {orreryIncScale}×
             </button>
 
+            {/* Toggle Hierarchy Tree */}
+            <button
+              type="button"
+              onClick={() => setShowQuickJump((v) => !v)}
+              aria-pressed={showQuickJump}
+              aria-keyshortcuts="j"
+              className={`px-2.5 py-1 rounded border text-[11px] flex items-center gap-1.5 cursor-pointer transition ${
+                showQuickJump
+                  ? 'bg-sky-600 text-white border-sky-400 font-bold shadow-sm'
+                  : 'bg-slate-900 text-slate-300 border-slate-700 hover:text-slate-100 hover:border-slate-500'
+              }`}
+              title="Toggle System Hierarchy Quick Jump Tree (Hotkey: J)"
+            >
+              <ListTree className="w-3 h-3" />
+              <span>Hierarchy {showQuickJump ? 'ON' : 'OFF'}</span>
+              <kbd className="px-1 py-0.2 text-[9px] bg-slate-950/80 rounded text-slate-400 border border-slate-700 font-mono ml-0.5">
+                J
+              </kbd>
+            </button>
+
             {/* Toggle Labels */}
             <button
               type="button"
@@ -1837,9 +1936,31 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         )}
 
         {/* Interactive 3D Proportional SVG Orrery (Drag to Rotate 3D, Shift+Drag/Right-Drag to Pan, Scroll to Zoom) */}
-        <div className="relative w-full overflow-hidden rounded-xl border border-slate-800/80 bg-[#03060c]">
+        <div
+          ref={setOrreryContainer}
+          style={{ overscrollBehavior: 'contain' }}
+          className="relative w-full overflow-hidden rounded-xl border border-slate-800/80 bg-[#03060c] touch-none"
+        >
           {/* Floating Quick Toggle Controls Overlay (Accessible in Immersion Mode and UI Mode) */}
           <div className="absolute top-3 right-28 z-20 flex items-center gap-1.5 bg-[#0b111e]/90 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-slate-800/90 shadow-2xl">
+            <button
+              type="button"
+              onClick={() => setShowQuickJump((v) => !v)}
+              aria-pressed={showQuickJump}
+              aria-keyshortcuts="j"
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1.5 cursor-pointer transition ${
+                showQuickJump
+                  ? 'bg-sky-600 text-white font-bold shadow-md shadow-sky-500/25'
+                  : 'bg-slate-900/90 text-slate-300 hover:text-white border border-slate-700/80'
+              }`}
+              title="Toggle System Hierarchy Quick Jump Tree (Hotkey: J)"
+            >
+              <ListTree className="w-3.5 h-3.5" />
+              <span>Hierarchy {showQuickJump ? 'ON' : 'OFF'}</span>
+              <kbd className="px-1 py-0.2 text-[9px] bg-slate-950/80 rounded text-slate-400 border border-slate-700 font-mono ml-0.5">
+                J
+              </kbd>
+            </button>
             <button
               type="button"
               onClick={() => setShowLabels((v) => !v)}
@@ -1859,6 +1980,330 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               </kbd>
             </button>
           </div>
+
+          {/* Left-Hand Floating Button When Hierarchy is Collapsed */}
+          {!showQuickJump && (
+            <button
+              type="button"
+              onClick={() => setShowQuickJump(true)}
+              aria-keyshortcuts="j"
+              className="absolute top-3 left-3 z-20 flex items-center gap-1.5 bg-[#0b111e]/90 hover:bg-slate-800 text-slate-200 hover:text-white px-2.5 py-1.5 rounded-xl border border-slate-800 shadow-xl text-[11px] font-mono cursor-pointer transition"
+              title="Open System Hierarchy Quick Jump Tree (Hotkey: J)"
+            >
+              <ListTree className="w-3.5 h-3.5 text-sky-400" />
+              <span>Hierarchy</span>
+              <kbd className="px-1 py-0.2 text-[9px] bg-slate-950/80 rounded text-slate-400 border border-slate-700 font-mono ml-0.5">
+                J
+              </kbd>
+            </button>
+          )}
+
+          {/* Left-Hand Collapsible Hierarchy List Tree (Accessible in Immersion Mode & Normal UI) */}
+          {showQuickJump && (
+            <aside
+              role="region"
+              aria-label="System Hierarchy Quick Jump"
+              onWheel={(e) => e.stopPropagation()}
+              className="absolute top-3 left-3 bottom-3 w-72 sm:w-80 z-30 flex flex-col bg-[#080d1a]/95 backdrop-blur-md border border-slate-700/90 rounded-xl shadow-2xl overflow-hidden font-mono text-xs"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800/90 bg-slate-900/60">
+                <div className="flex items-center gap-2 text-sky-300 font-bold text-xs tracking-wide">
+                  <ListTree className="w-4 h-4 text-sky-400" />
+                  <span>Hierarchy</span>
+                  <kbd className="px-1 py-0.2 text-[9px] bg-slate-950 rounded text-slate-400 border border-slate-700 font-mono">
+                    J
+                  </kbd>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTrackedTarget(null);
+                      fitOrreryToFullSystem(res);
+                    }}
+                    className="px-2 py-0.5 rounded bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800/70 text-[10px] cursor-pointer transition"
+                    title="Fit Camera to Entire System"
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickJump(false)}
+                    className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                    title="Close Hierarchy (Hotkey: J)"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Scrollable Tree Content */}
+              <div className="flex-1 overflow-y-auto p-2 space-y-2 select-none overscroll-contain">
+                {res.hierarchy.stars.map((st) => {
+                  const sPos = layout.starPos[st.label] || { x: 0, y: 0 };
+                  const sZoneIdx = res.zones.findIndex((z) =>
+                    z.title.startsWith(`Star ${st.label} `)
+                  );
+                  const sZone = sZoneIdx >= 0 ? res.zones[sZoneIdx] : null;
+                  const maxPlanetA = sZone
+                    ? sZone.bodies.reduce((m, b) => Math.max(m, b.a), sZone.a_in * 4)
+                    : 2.5;
+
+                  return (
+                    <div key={`tree-star-${st.label}`} className="space-y-1">
+                      {/* Star Item */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTrackedTarget(null);
+                          focusCameraOn(sPos, maxPlanetA * 1.25);
+                        }}
+                        className="w-full text-left px-2 py-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-slate-700 flex items-center justify-between group cursor-pointer transition"
+                      >
+                        <div className="flex items-center gap-2 truncate">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
+                            style={{
+                              backgroundColor: st.colorHex,
+                              boxShadow: `0 0 8px ${st.colorHex}88`,
+                            }}
+                          />
+                          <span className="font-bold text-slate-200 group-hover:text-white truncate">
+                            Star {st.label}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {st.spectralType}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-1">
+                          {st.mass.toFixed(2)} M☉
+                        </span>
+                      </button>
+
+                      {/* Planet & Belt Children */}
+                      {sZone && sZone.bodies.length > 0 && (
+                        <div className="ml-3 pl-2.5 border-l border-slate-800/90 space-y-1">
+                          {sZone.bodies.map((b, bIdx) => {
+                            if (b.kind === 'belt') {
+                              return (
+                                <div
+                                  key={`tree-belt-${sZoneIdx}-${bIdx}`}
+                                  className="px-2 py-1 rounded text-[11px] text-slate-400 flex items-center justify-between bg-slate-950/40"
+                                >
+                                  <div className="flex items-center gap-1.5 truncate">
+                                    <span className="text-slate-600 text-[10px]">├─</span>
+                                    <span className="truncate">
+                                      {b.role || 'Asteroid Belt'}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] text-slate-500 shrink-0">
+                                    {b.a.toFixed(2)} AU
+                                  </span>
+                                </div>
+                              );
+                            }
+
+                            const isTracked =
+                              trackedTarget?.kind === 'planet' &&
+                              trackedTarget.zoneIdx === sZoneIdx &&
+                              trackedTarget.bodyIdx === bIdx;
+                            const isDossier =
+                              selectedEntity?.kind === 'planet' &&
+                              selectedEntity.zoneIdx === sZoneIdx &&
+                              selectedEntity.bodyIdx === bIdx;
+
+                            return (
+                              <div key={`tree-planet-${sZoneIdx}-${bIdx}`} className="space-y-0.5">
+                                <div
+                                  className={`flex items-center justify-between px-2 py-1 rounded-lg border transition ${
+                                    isTracked
+                                      ? 'bg-sky-950/80 border-sky-500 text-sky-200'
+                                      : isDossier
+                                      ? 'bg-slate-800/90 border-slate-600 text-white'
+                                      : 'bg-slate-950/50 hover:bg-slate-900 border-transparent hover:border-slate-800 text-slate-300'
+                                  }`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleTrackBody({
+                                        kind: 'planet',
+                                        zoneIdx: sZoneIdx,
+                                        bodyIdx: bIdx,
+                                      })
+                                    }
+                                    className="flex items-center gap-1.5 truncate flex-1 text-left cursor-pointer mr-1"
+                                    title={`Click to Track Orbit of Planet #${bIdx + 1}`}
+                                  >
+                                    <span className="text-slate-600 text-[10px]">├─</span>
+                                    <span
+                                      className="w-2 h-2 rounded-full shrink-0"
+                                      style={{
+                                        backgroundColor: getPlanetVisualColor(b),
+                                      }}
+                                    />
+                                    <span className="truncate text-[11px]">
+                                      #{bIdx + 1} {shortClassLabel(b.planetClass)}
+                                    </span>
+                                    {b.moons.length > 0 && (
+                                      <span className="text-[9px] text-indigo-300 bg-indigo-950/80 px-1 rounded font-mono">
+                                        {b.moons.length}☾
+                                      </span>
+                                    )}
+                                    {b.hydrosphere?.biosphere && b.hydrosphere.biosphere !== 'none' && (
+                                      <span
+                                        className="text-[10px]"
+                                        title={`Biosphere: ${b.hydrosphere.biosphere} (${b.hydrosphere.solvent || 'water'})`}
+                                      >
+                                        🌱
+                                      </span>
+                                    )}
+                                  </button>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <span className="text-[10px] text-slate-400 font-mono">
+                                      {b.a.toFixed(2)} AU
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleSelectBody({
+                                          kind: 'planet',
+                                          zoneIdx: sZoneIdx,
+                                          bodyIdx: bIdx,
+                                        })
+                                      }
+                                      className="p-1 rounded text-slate-500 hover:text-sky-300 hover:bg-slate-800 cursor-pointer"
+                                      title="Open Planet Details Dossier"
+                                    >
+                                      <Maximize2 className="w-2.5 h-2.5" />
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Moons under this planet */}
+                                {b.moons.length > 0 && (
+                                  <div className="ml-4 pl-2 border-l border-slate-800/80 space-y-0.5">
+                                    {b.moons.map((m, mIdx) => {
+                                      const isMoonTracked =
+                                        trackedTarget?.kind === 'moon' &&
+                                        trackedTarget.zoneIdx === sZoneIdx &&
+                                        trackedTarget.bodyIdx === bIdx &&
+                                        trackedTarget.moonIdx === mIdx;
+
+                                      return (
+                                        <div
+                                          key={`tree-moon-${sZoneIdx}-${bIdx}-${mIdx}`}
+                                          className={`flex items-center justify-between px-1.5 py-0.5 rounded text-[10px] transition ${
+                                            isMoonTracked
+                                              ? 'bg-indigo-950/80 text-indigo-200 border border-indigo-500/70'
+                                              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                                          }`}
+                                        >
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleTrackBody({
+                                                kind: 'moon',
+                                                zoneIdx: sZoneIdx,
+                                                bodyIdx: bIdx,
+                                                moonIdx: mIdx,
+                                              })
+                                            }
+                                            className="flex items-center gap-1 truncate flex-1 text-left cursor-pointer"
+                                            title={`Track Moon: ${m.name}`}
+                                          >
+                                            <span className="text-slate-600 text-[9px]">└─</span>
+                                            <span className="truncate">
+                                              {m.name || `Moon ${mIdx + 1}`}
+                                            </span>
+                                          </button>
+                                          <span className="text-[9px] text-slate-500 font-mono shrink-0 ml-1">
+                                            {m.radiusKm.toLocaleString()} km
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Circumbinary / Outer Zones */}
+                {res.zones
+                  .map((z, zIdx) => ({ z, zIdx }))
+                  .filter(({ z }) => z.title.includes('Circumbinary'))
+                  .map(({ z, zIdx }) => (
+                    <div key={`tree-cb-${zIdx}`} className="space-y-1 pt-1">
+                      <div className="px-2 py-1 rounded bg-amber-950/50 border border-amber-800/60 text-amber-200 font-bold text-xs flex items-center justify-between">
+                        <span>{z.title.replace(' (P-Type)', '')}</span>
+                      </div>
+                      <div className="ml-3 pl-2.5 border-l border-amber-900/40 space-y-1">
+                        {z.bodies.map((b, bIdx) => {
+                          if (b.kind === 'belt') {
+                            return (
+                              <div
+                                key={`tree-cb-belt-${zIdx}-${bIdx}`}
+                                className="px-2 py-1 rounded text-[11px] text-amber-300/70 flex items-center justify-between"
+                              >
+                                <span>{b.role || 'Belt'}</span>
+                                <span className="text-[10px]">{b.a.toFixed(2)} AU</span>
+                              </div>
+                            );
+                          }
+                          const isTracked =
+                            trackedTarget?.kind === 'planet' &&
+                            trackedTarget.zoneIdx === zIdx &&
+                            trackedTarget.bodyIdx === bIdx;
+
+                          return (
+                            <div
+                              key={`tree-cb-body-${zIdx}-${bIdx}`}
+                              className={`flex items-center justify-between px-2 py-1 rounded text-[11px] border transition ${
+                                isTracked
+                                  ? 'bg-sky-950 border-sky-500 text-sky-200'
+                                  : 'bg-slate-950/40 hover:bg-slate-900 border-transparent text-slate-300'
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleTrackBody({
+                                    kind: 'planet',
+                                    zoneIdx: zIdx,
+                                    bodyIdx: bIdx,
+                                  })
+                                }
+                                className="flex items-center gap-1.5 truncate flex-1 text-left cursor-pointer"
+                              >
+                                <span
+                                  className="w-2 h-2 rounded-full shrink-0"
+                                  style={{
+                                    backgroundColor: getPlanetVisualColor(b),
+                                  }}
+                                />
+                                <span className="truncate">
+                                  #{bIdx + 1} {shortClassLabel(b.planetClass)}
+                                </span>
+                              </button>
+                              <span className="text-[10px] text-slate-400 font-mono ml-1">
+                                {b.a.toFixed(2)} AU
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </aside>
+          )}
 
           <svg
             ref={orrerySvgRef}
@@ -1922,35 +2367,6 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             onMouseLeave={() => {
               setIsDraggingOrrery(false);
               dragStartRef.current = null;
-            }}
-            onWheel={(e) => {
-              e.preventDefault();
-              const zoomFactor = e.deltaY < 0 ? 1.22 : 0.82;
-              const newPxPerAU = clamp(orreryPxPerAU * zoomFactor, 0.05, 5000000);
-              if (newPxPerAU === orreryPxPerAU) return;
-
-              if (orrerySvgRef.current) {
-                const rect = orrerySvgRef.current.getBoundingClientRect();
-                const mouseSvgX =
-                  ((e.clientX - rect.left) / Math.max(1, rect.width)) * viewW;
-                const mouseSvgY =
-                  ((e.clientY - rect.top) / Math.max(1, rect.height)) * viewH;
-                const dxSvg = mouseSvgX - cxScreen;
-                const dySvg = mouseSvgY - cyScreen;
-                const cosP = Math.max(0.2, Math.cos(orreryPitch));
-                const xCam = dxSvg / orreryPxPerAU;
-                const yCam = dySvg / (orreryPxPerAU * cosP);
-                const dAU_x = xCam * cosYaw + yCam * sinYaw;
-                const dAU_y = -xCam * sinYaw + yCam * cosYaw;
-                const k = newPxPerAU / orreryPxPerAU;
-
-                setTrackedTarget(null);
-                setOrreryCamAU((prev) => ({
-                  x: prev.x + dAU_x * (1 - 1 / k),
-                  y: prev.y + dAU_y * (1 - 1 / k),
-                }));
-              }
-              setOrreryPxPerAU(newPxPerAU);
             }}
             xmlns="http://www.w3.org/2000/svg"
           >
@@ -3317,48 +3733,6 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
           {mapMode === 'schematic'
             ? renderUnifiedSystemSchematic(systemResult)
             : render2DTopDownOrrery(systemResult)}
-
-          {/* Quick Clickable Summary Strip of All Worlds & Moons */}
-          {showUI && (
-            <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs font-mono">
-              <span className="text-[10px] uppercase text-slate-400 mr-1">
-                Quick Jump to World:
-              </span>
-              {systemResult.zones.map((z, zIdx) =>
-                z.bodies.map((b, bIdx) => {
-                  if (b.kind === 'belt') return null;
-                  return (
-                    <button
-                      key={`${zIdx}-${bIdx}`}
-                      type="button"
-                      onClick={() =>
-                        handleSelectBody({
-                          kind: 'planet',
-                          zoneIdx: zIdx,
-                          bodyIdx: bIdx,
-                        })
-                      }
-                      className="px-2.5 py-1 rounded-lg bg-[#151d2c] hover:bg-slate-800 border border-[#2a3852] hover:border-sky-400 flex items-center gap-1.5 text-[11px] text-slate-200 cursor-pointer transition"
-                    >
-                      <span
-                        className="w-2 h-2 rounded-full"
-                        style={{ backgroundColor: getPlanetVisualColor(b) }}
-                      />
-                      <span>
-                        #{bIdx + 1} {shortClassLabel(b.planetClass)}
-                      </span>
-                      {b.moons.length > 0 && (
-                        <span className="text-[10px] text-indigo-300 bg-indigo-950/80 px-1.5 rounded">
-                          {b.moons.length}☾
-                        </span>
-                      )}
-                      <Maximize2 className="w-2.5 h-2.5 text-slate-400" />
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          )}
         </div>
       )}
 
