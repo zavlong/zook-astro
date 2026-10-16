@@ -1010,6 +1010,29 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                       stroke="none"
                     />
 
+                    {/* Explored / Cached Sector Highlight Indicator */}
+                    {universeCache.isSectorCached(sector.seed, sector.coord) && (
+                      <g className="pointer-events-none">
+                        <polygon
+                          points={hexPoints}
+                          fill="rgba(16, 185, 129, 0.12)"
+                          stroke="#10b981"
+                          strokeWidth={isSelected ? 1.8 : 1.2}
+                          strokeOpacity={0.9}
+                          strokeDasharray={isSelected ? undefined : "3,2"}
+                        />
+                        <circle
+                          cx={0}
+                          cy={-hexRadius * 0.70}
+                          r={Math.max(2.0, hexRadius * 0.14)}
+                          fill="#10b981"
+                          stroke="#022c22"
+                          strokeWidth={0.6}
+                          className="animate-pulse"
+                        />
+                      </g>
+                    )}
+
                     {/* Active Emission Nebula (Purple-Red Gas Cloud on Galaxy Map) */}
                     {sector.hasNebula && (
                       <g className="pointer-events-none" style={{ mixBlendMode: 'screen' }}>
@@ -1290,6 +1313,17 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
               <span>Labels</span>
             </button>
 
+            {/* Cached Sectors Indicator */}
+            {universeCache.getLoadedSectorCount() > 0 && (
+              <>
+                <div className="h-4 w-px bg-slate-800 mx-1" />
+                <div className="flex items-center gap-1 px-1.5 py-0.5 text-emerald-300 text-[10px] font-mono bg-emerald-950/50 rounded border border-emerald-800/60" title={`${universeCache.getLoadedSectorCount()} sectors explored and persisted in universe cache`}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>{universeCache.getLoadedSectorCount()} Cached</span>
+                </div>
+              </>
+            )}
+
             {/* Sector Fill Opacity Slider */}
             <div className="h-4 w-px bg-slate-800 mx-1" />
             <div className="flex items-center gap-1.5 px-2 py-0.5 text-blue-300">
@@ -1451,6 +1485,13 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                     {copiedId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                   </button>
                 </div>
+
+                {universeCache.isSectorCached(selectedSector.seed, selectedSector.coord) && (
+                  <div className="mt-2 px-2.5 py-1 rounded-lg bg-emerald-950/80 border border-emerald-500/60 text-emerald-300 text-xs font-mono font-medium flex items-center gap-1.5 shadow-sm">
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Explored &amp; Cached in Universe ({universeCache.getCachedSector(universeCache.getSectorCacheKey(selectedSector.seed, selectedSector.coord))?.systems.length || 'Full'} Systems)</span>
+                  </div>
+                )}
 
                 {selectedSector.coord === '2525' && (
                   <div className="mt-2.5 px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-purple-950/90 to-indigo-950/90 border border-purple-500/70 text-purple-200 text-xs font-mono font-bold flex items-center gap-2 shadow-lg">

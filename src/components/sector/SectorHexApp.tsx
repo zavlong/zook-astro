@@ -358,6 +358,26 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   const [showLabels, setShowLabels] = useState<boolean>(false);
   const [showNebulae, setShowNebulae] = useState<boolean>(true);
 
+  // Cached star systems count & sector tally
+  const [cachedSystemCount, setCachedSystemCount] = useState<number>(() =>
+    universeCache.getLoadedSystemCount()
+  );
+
+  useEffect(() => {
+    const updateCacheCount = () => {
+      setCachedSystemCount(universeCache.getLoadedSystemCount());
+    };
+    const t = setTimeout(updateCacheCount, 300);
+    return () => clearTimeout(t);
+  }, []);
+
+  const sectorCachedCount = useMemo(() => {
+    return gridData.systems.reduce(
+      (acc, sys) => acc + (universeCache.hasCachedSystem(sys.id) ? 1 : 0),
+      0
+    );
+  }, [gridData, cachedSystemCount]);
+
   // Total bounds of the sector space
   const gridBoundingSize = useMemo(() => {
     return {
@@ -892,6 +912,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       };
       if (system.sysResult && !universeCache.hasCachedSystem(system.id)) {
         universeCache.cacheLoadedSystem(system.id, system.sysResult);
+        setCachedSystemCount(universeCache.getLoadedSystemCount());
       }
 
       const prefersReducedMotion =
@@ -2109,6 +2130,35 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       />
                     )}
 
+                    {/* Explored & Cached System Highlight Ring & Pip */}
+                    {universeCache.hasCachedSystem(system.id) && (
+                      <g className="pointer-events-none">
+                        <circle
+                          r={system.influenceRadius + 3.5}
+                          fill="rgba(16, 185, 129, 0.08)"
+                          stroke="#10b981"
+                          strokeWidth={1.3}
+                          strokeDasharray="3,3"
+                          opacity={0.88}
+                          className="animate-pulse"
+                        />
+                        <circle
+                          cx={system.influenceRadius * 0.707}
+                          cy={system.influenceRadius * 0.707}
+                          r={3.2}
+                          fill="#022c22"
+                          stroke="#10b981"
+                          strokeWidth={1.0}
+                        />
+                        <circle
+                          cx={system.influenceRadius * 0.707}
+                          cy={system.influenceRadius * 0.707}
+                          r={1.5}
+                          fill="#34d399"
+                        />
+                      </g>
+                    )}
+
                     {/* Circular Zone of Influence (Primary Hit Area & Click/Hover Target) */}
                     <circle
                       r={system.influenceRadius}
@@ -2584,6 +2634,15 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
               <span className="text-[10px] text-slate-500 pl-1">
                 {Math.round(zoom * 100)}%
               </span>
+              {sectorCachedCount > 0 && (
+                <div
+                  className="px-2 py-0.5 rounded-full text-[10px] font-mono flex items-center gap-1.5 text-emerald-400 bg-emerald-950/70 border border-emerald-800/80 ml-1"
+                  title={`${sectorCachedCount} star system${sectorCachedCount === 1 ? '' : 's'} in this sector explored and cached in universe storage`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>{sectorCachedCount} Cached</span>
+                </div>
+              )}
             </div>
           </div>
           )}
@@ -2796,6 +2855,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       {hoveredSystem.nStars}★ Multiple
                     </span>
                   )}
+                  {universeCache.hasCachedSystem(hoveredSystem.id) && (
+                    <span className="text-[9.5px] text-emerald-300 bg-emerald-950/80 px-1.5 py-0.2 rounded border border-emerald-500/60 font-semibold flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Cached
+                    </span>
+                  )}
                   {(() => {
                     const hEmpire = empireMap.get(hoveredSystem.id);
                     if (!hEmpire) return null;
@@ -2908,6 +2973,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       {isNonMainSequenceSystem(selectedSystem) && (
                         <span className="text-[10px] text-fuchsia-300 bg-fuchsia-950/80 px-1.5 py-0.2 rounded border border-fuchsia-800 font-bold">
                           Non-MS (≠ V)
+                        </span>
+                      )}
+                      {universeCache.hasCachedSystem(selectedSystem.id) && (
+                        <span className="text-[10px] text-emerald-300 bg-emerald-950/90 px-1.5 py-0.2 rounded border border-emerald-500/70 font-bold flex items-center gap-1 shadow-sm">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          <span>Explored & Cached</span>
                         </span>
                       )}
                     </div>

@@ -442,6 +442,25 @@ class UniverseCacheManager {
     return this.sectorCache.has(key);
   }
 
+  public isSectorCached(seed: number | string, coord?: string): boolean {
+    if (coord) {
+      const keyWithCoord = this.getSectorCacheKey(seed, coord);
+      if (this.sectorCache.has(keyWithCoord)) return true;
+    }
+    const keyBare = `SEC_${seed}`;
+    if (this.sectorCache.has(keyBare)) return true;
+    if (coord) {
+      for (const k of this.sectorCache.keys()) {
+        if (k.endsWith(`_${coord}`)) return true;
+      }
+    }
+    return false;
+  }
+
+  public getCachedSectorKeySet(): Set<string> {
+    return new Set(this.sectorCache.keys());
+  }
+
   public cacheLoadedSector(key: string, data: SectorHexGridData): void {
     this.sectorCache.set(key, data);
     // Asynchronously persist into IndexedDB
@@ -467,6 +486,10 @@ class UniverseCacheManager {
 
   public hasCachedSystem(systemId: string): boolean {
     return this.systemCache.has(systemId);
+  }
+
+  public getCachedSystemKeySet(): Set<string> {
+    return new Set(this.systemCache.keys());
   }
 
   public cacheLoadedSystem(systemId: string, data: any): void {
