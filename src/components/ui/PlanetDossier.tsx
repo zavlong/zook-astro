@@ -352,9 +352,7 @@ export const PlanetDossier: React.FC<PlanetDossierProps> = ({
         {activeMagField && (
           <div className="bg-indigo-950/30 border-l-2 border-indigo-400 border border-indigo-900/50 rounded px-2 py-1 text-[8.5px] font-mono text-indigo-200 flex flex-col gap-0.5">
             <div className="flex justify-between items-center font-bold text-indigo-300">
-              <span className="flex items-center gap-1">
-                🧲 Magnetosphere ({activeMagField.dynamoStatus}):
-              </span>
+              <span>🧲 Magnetosphere: {activeMagField.dynamoStatus}</span>
               <span
                 className={`px-1 rounded text-[8px] ${
                   activeMagField.hasActiveDynamo
@@ -364,23 +362,23 @@ export const PlanetDossier: React.FC<PlanetDossierProps> = ({
               >
                 {activeMagField.surfaceFieldGauss >= 0.01
                   ? `${activeMagField.surfaceFieldGauss} G (${activeMagField.surfaceFieldMicroTesla} μT)`
-                  : `${activeMagField.surfaceFieldGauss.toExponential(2)} G`}
+                  : `< 0.01 G`}
               </span>
             </div>
             <div className="flex justify-between text-slate-300">
               <span>
-                R_mp: {activeMagField.magnetopauseRadiusRp} Rp · Bow Shock: {activeMagField.bowShockRadiusRp} Rp
+                Magnetopause: {activeMagField.hasActiveDynamo ? `${activeMagField.magnetopauseRadiusRp} Rp` : 'None (1.0 Rp)'}
               </span>
               <span
                 className={
-                  activeMagField.shieldingEfficiencyPct >= 80
+                  activeMagField.radiationLevel === 'Minimal'
                     ? 'text-emerald-400'
-                    : activeMagField.shieldingEfficiencyPct >= 40
+                    : activeMagField.radiationLevel === 'Moderate'
                     ? 'text-amber-400'
                     : 'text-rose-400'
                 }
               >
-                Shielding: {activeMagField.shieldingEfficiencyPct}% ({activeMagField.radiationLevel})
+                Radiation: {activeMagField.radiationLevel} ({activeMagField.shieldingEfficiencyPct}% shielded)
               </span>
             </div>
             <div className="text-slate-400 text-[8px]">

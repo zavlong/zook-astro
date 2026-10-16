@@ -615,7 +615,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
                 <Compass className="w-3.5 h-3.5 text-indigo-400" />
-                Magnetosphere &amp; Core Dynamo
+                Magnetosphere &amp; Dynamo
               </span>
               <span
                 className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
@@ -624,7 +624,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                     : 'bg-slate-900/80 border-slate-700 text-slate-400'
                 }`}
               >
-                {magField.hasActiveDynamo ? '⚡ Active Dynamo' : '🛑 Extinct / Inactive'}
+                {magField.hasActiveDynamo ? 'Active Dynamo' : 'Extinct / Inactive'}
               </span>
             </div>
 
@@ -634,10 +634,12 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                 <b className="text-white">
                   {magField.surfaceFieldGauss >= 0.01
                     ? `${magField.surfaceFieldGauss} G`
-                    : `${magField.surfaceFieldGauss.toExponential(2)} G`}
+                    : '< 0.01 G'}
                 </b>
                 <span className="text-[9px] text-indigo-300 block">
-                  {magField.surfaceFieldMicroTesla} μT
+                  {magField.surfaceFieldMicroTesla >= 0.1
+                    ? `${magField.surfaceFieldMicroTesla} μT`
+                    : '< 0.1 μT'}
                 </span>
               </div>
               <div>
@@ -645,55 +647,47 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                 <b className="text-indigo-300">
                   {magField.magneticMomentEarth >= 0.01
                     ? `${magField.magneticMomentEarth} M⊕`
-                    : `${magField.magneticMomentEarth.toExponential(2)} M⊕`}
+                    : '< 0.01 M⊕'}
                 </b>
-                <span className="text-[9px] text-slate-500 block">Relative to Earth</span>
               </div>
               <div>
-                <span className="text-slate-400 block text-[10px]">MAGNETOPAUSE (R_MP)</span>
+                <span className="text-slate-400 block text-[10px]">MAGNETOPAUSE</span>
                 <b className="text-cyan-300">
-                  {magField.magnetopauseRadiusRp.toFixed(1)} Rp
+                  {magField.hasActiveDynamo ? `${magField.magnetopauseRadiusRp.toFixed(1)} Rp` : 'None (1.0 Rp)'}
                 </b>
-                <span className="text-[9px] text-slate-500 block">
-                  Bow Shock: {magField.bowShockRadiusRp.toFixed(1)} Rp
-                </span>
               </div>
               <div>
-                <span className="text-slate-400 block text-[10px]">RADIATION SHIELDING</span>
+                <span className="text-slate-400 block text-[10px]">SURFACE RADIATION</span>
                 <b
                   className={
-                    magField.shieldingEfficiencyPct >= 80
+                    magField.radiationLevel === 'Minimal'
                       ? 'text-emerald-400'
-                      : magField.shieldingEfficiencyPct >= 40
+                      : magField.radiationLevel === 'Moderate'
                       ? 'text-amber-400'
                       : 'text-rose-400'
                   }
                 >
-                  {magField.shieldingEfficiencyPct}% ({magField.radiationLevel})
+                  {magField.radiationLevel}
                 </b>
-                <span className="text-[9px] text-slate-500 block">Cosmic Ray Deflection</span>
+                <span className="text-[9px] text-slate-400 block">
+                  {magField.shieldingEfficiencyPct}% Shielded
+                </span>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-              <div className="p-2 bg-[#0c121d] rounded-lg border border-slate-800/80">
-                <span className="text-slate-400 block text-[10px] mb-0.5">DYNAMO MECHANISM &amp; CORE STATE</span>
-                <p className="text-slate-200 font-semibold">{magField.dynamoStatus}</p>
-                <p className="text-slate-400 text-[10px] mt-0.5">{magField.coreState}</p>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-[#0c121d] p-2 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block text-[10px]">CORE &amp; DYNAMO</span>
+                <b className="text-slate-200">{magField.dynamoStatus}</b>
               </div>
-              <div className="p-2 bg-[#0c121d] rounded-lg border border-slate-800/80">
-                <span className="text-slate-400 block text-[10px] mb-0.5">AURORAL EMISSION PHENOMENOLOGY</span>
-                <p className="text-cyan-200">{magField.auroraDescription}</p>
+              <div className="bg-[#0c121d] p-2 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block text-[10px]">AURORAE</span>
+                <b className="text-cyan-300">{magField.auroraDescription}</b>
               </div>
             </div>
 
-            <div className="p-2.5 bg-indigo-950/30 border border-indigo-500/30 rounded-lg">
-              <span className="text-indigo-400 block text-[10px] font-bold mb-0.5">
-                BIOSPHERE &amp; ATMOSPHERIC RETENTION IMPLICATION
-              </span>
-              <p className="text-indigo-200 text-xs leading-relaxed">
-                {magField.biosphereImplication}
-              </p>
+            <div className="p-2.5 bg-indigo-950/30 border border-indigo-500/30 rounded-lg text-xs leading-relaxed text-indigo-200">
+              {magField.biosphereImplication}
             </div>
           </div>
         )}

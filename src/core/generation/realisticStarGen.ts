@@ -806,22 +806,21 @@ export function computePlanetaryMagneticField(params: {
     const baseField = massEarth >= 150 ? rand(3.5, 9.5) : rand(1.2, 3.8);
     const spinFactor = Math.sqrt(14 / Math.max(6, rotHours));
     surfaceFieldGauss = +(baseField * spinFactor).toFixed(2);
-    dynamoStatus = 'Active Super-Critical Metallic Hydrogen Dynamo';
-    coreState = 'Convective Liquid Metallic Hydrogen Envelope over Molten Heavy Core';
+    dynamoStatus = 'Active (Metallic Hydrogen Dynamo)';
+    coreState = 'Convective Metallic Hydrogen';
     radiationLevel = 'Minimal';
-    auroraDescription = 'Persistent Relativistic Polar Auroral Ovals & Flux Tube Footprints';
+    auroraDescription = 'Relativistic Polar Ovals';
     biosphereImplication =
-      'Extreme Jovian magnetosphere shields volatile envelope from stellar wind stripping, but generates intense inner van Allen radiation belts.';
+      'Traps intense radiation belts; upper envelope protected from solar wind.';
   } else if (isIceGiant) {
     // 2. Ice Giants: Superionic water-ammonia electrolytic mantle dynamo
     hasActiveDynamo = true;
     surfaceFieldGauss = +rand(0.18, 0.65).toFixed(2);
-    dynamoStatus = 'Active Multipolar Thin-Shell Ionic Mantle Dynamo';
-    coreState = 'Convective Superionic H2O-NH3-CH4 Mantle over Silicate/Metal Nucleus';
+    dynamoStatus = 'Active (Ionic Mantle Dynamo)';
+    coreState = 'Convective Superionic H2O-NH3';
     radiationLevel = 'Minimal';
-    auroraDescription = 'Tilted Off-Axis Asymmetric Auroral Arcs & Variable Cusp Glow';
-    biosphereImplication =
-      'Convective electrolytic mantle generates strong multipolar magnetosphere, deflecting stellar ion erosion.';
+    auroraDescription = 'Off-Axis Auroral Arcs';
+    biosphereImplication = 'Multipolar field deflects stellar wind erosion.';
   } else if (isMoon) {
     // 3. Natural Satellites / Moons:
     const hasTidalDynamo = tidalW >= 0.35 && massEarth >= 0.003;
@@ -830,58 +829,57 @@ export function computePlanetaryMagneticField(params: {
     if (hasTidalDynamo || hasLiquidCore) {
       hasActiveDynamo = true;
       surfaceFieldGauss = +(rand(0.004, 0.018) * (1 + tidalW * 0.4)).toFixed(3);
-      dynamoStatus = 'Active Miniature Tidal-Convective Dynamo';
-      coreState = 'Tidally Maintained Partially Molten Fe-S Core';
+      dynamoStatus = 'Active (Tidal Dynamo)';
+      coreState = 'Partially Molten Fe-S Core';
       radiationLevel = 'Moderate';
-      auroraDescription = 'Faint Polar Auroral Filaments & Sub-Stellar Interaction Currents';
+      auroraDescription = 'Faint Polar Filaments';
       biosphereImplication =
-        'Intrinsic mini-magnetosphere provides localized deflection against host planet plasma sheet & stellar cosmic rays.';
+        'Mini-magnetosphere provides localized cosmic ray deflection.';
     } else {
       hasActiveDynamo = false;
       surfaceFieldGauss = +rand(0.00005, 0.0006).toFixed(5);
-      dynamoStatus = 'Extinct Dynamo (Frozen Core Remanent Crustal Magnetism)';
-      coreState = 'Completely Solidified Fe-Ni / Silicate Core';
-      radiationLevel = 'High';
-      auroraDescription = 'No Global Aurora; Localized Micro-Cusps over Remanent Crustal Anomalies';
+      dynamoStatus = 'Extinct (Frozen Solid Core)';
+      coreState = 'Solidified Silicate / Fe-Ni';
+      radiationLevel = 'Extreme';
+      auroraDescription = 'None';
       biosphereImplication =
-        'Unshielded surface; reliance on host planet magnetosphere or subsurface ocean ice shell for radiation defense.';
+        'Unshielded surface; relies on host magnetosphere or ice crust.';
     }
   } else {
     // 4. Terrestrial & Super-Earth Rocky Worlds:
-    // Core cooling timescale: tau_freeze = 4.2 * M^1.25 Gyr
     const coreFreezeTauGyr = 4.2 * Math.pow(massEarth, 1.25) * (1 + tidalW * 0.3);
     const isCoreLiquid = sysAgeGyr <= coreFreezeTauGyr;
-    const isFastSpin = rotHours <= 96; // Coriolis organizing limit (Earth=24h; Venus=5832h fails)
+    const isFastSpin = rotHours <= 96;
 
     if (isCoreLiquid && isFastSpin) {
       hasActiveDynamo = true;
       const massScale = Math.pow(massEarth, 0.5);
       const spinScale = Math.sqrt(24 / Math.max(6, rotHours));
       surfaceFieldGauss = +clamp(rand(0.28, 0.62) * massScale * spinScale, 0.08, 2.5).toFixed(2);
-      dynamoStatus = 'Active Convective Fe-Ni Liquid Outer Core Geodynamo';
-      coreState = 'Convecting Molten Fe-Ni Outer Core with Crystallizing Solid Inner Core';
+      dynamoStatus = 'Active (Molten Fe-Ni Core)';
+      coreState = 'Convective Molten Fe-Ni';
       radiationLevel = 'Minimal';
-      auroraDescription = 'Dynamic Polar Auroral Curtains (O/N2 Molecular Atmospheric Emission)';
+      auroraDescription = 'Dynamic Polar Curtains';
       biosphereImplication =
-        'Coherent dipolar magnetosphere shields atmosphere from stellar wind sputtering and protects surface landmasses from cosmic ray / flare radiation, enabling complex multicellular surface life.';
+        'Shields atmosphere from stellar wind and enables surface land life.';
     } else if (isCoreLiquid && !isFastSpin) {
       hasActiveDynamo = false;
       surfaceFieldGauss = +rand(0.001, 0.025).toFixed(3);
-      dynamoStatus = 'Collapsed Dynamo (Molten Core, Sub-Critical Coriolis Rotation)';
-      coreState = 'Molten Fe-Ni Core (Stagnant Plumes, Non-Organized Convection)';
+      dynamoStatus = 'Collapsed (Slow Rotation)';
+      coreState = 'Molten Core (Weak Coriolis)';
       radiationLevel = 'Moderate';
-      auroraDescription = 'Diffuse Low-Latitude Airglow & Induced Ionospheric Tail Glow';
+      auroraDescription = 'Weak Airglow';
       biosphereImplication =
-        'Slow rotation inhibits coherent dynamo; atmosphere subject to unshielded solar wind ion pickup unless protected by high surface atmospheric pressure.';
+        'Weak shielding leads to atmospheric stripping unless surface pressure is high.';
     } else {
       hasActiveDynamo = false;
       surfaceFieldGauss = +rand(0.0001, 0.0015).toFixed(4);
-      dynamoStatus = 'Extinct Dynamo (Core Solidified / Mantle Stagnant)';
-      coreState = 'Completely Solidified Fe-Ni Core (Conductive Inactive Solid)';
-      radiationLevel = 'High';
-      auroraDescription = 'Localized Sputtered Auroral Footprints over Fossilized Crustal Magnetism';
+      dynamoStatus = 'Extinct (Frozen Solid Core)';
+      coreState = 'Solidified Fe-Ni Core';
+      radiationLevel = 'Extreme';
+      auroraDescription = 'None (Crustal Remnants)';
       biosphereImplication =
-        'Absence of magnetosphere exposes surface to stellar wind stripping and lethal cosmic radiation; surface life restricted to deep oceans, aquifers, or subsurface lithosphere unless atmosphere exceeds 2 bar.';
+        'Unshielded surface; stellar wind strips light gases and radiation limits life to oceans or subsurface.';
     }
   }
 
