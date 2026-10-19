@@ -2138,11 +2138,11 @@ export function generatePlanetarySurfaceModel(
   // Compute thermal and biome grid
   const pBarAtmo = activeBody.pressureBar ?? 0;
   const baseScaleHeightKm = Math.max(2, (8.314 * Tbase) / (0.029 * Math.max(0.05, activeBody.gravityG) * 9.81 * 1000));
-  // Atmospheric heat redistribution strongly suppresses surface temperature extremes:
-  // - At P = 0 bar (vacuum), thermalDiffFactor = 0.72 (severe equator-to-pole / day-to-night extremes)
-  // - At P = 1 bar (Earth, Tbase = 288 K), thermalDiffFactor = 0.31 -> yearly local averages span ~220 K to ~320 K
-  // - At P >= 10-90 bar (thick greenhouse / Venusian), thermalDiffFactor -> 0.08..0.016 (nearly isothermal horizontally)
+  // Atmospheric heat redistribution suppresses surface temperature extremes, but 1:1 tidally locked planets
+  // experience permanent substellar zenith irradiation (4x mean flux) on the dayside and zero direct flux on the nightside,
+  // driving much stronger hemispherical temperature extremes than diurnal rotating worlds!
   const thermalDiffFactor = 0.72 / (1.0 + 1.32 * Math.pow(Math.max(0, pBarAtmo), 0.78));
+  const lockedThermalFactor = 1.0 / (1.0 + 0.36 * Math.pow(Math.max(0, pBarAtmo), 0.66));
   const waveAtmoScale = Math.max(0.12, Math.min(1.4, thermalDiffFactor / 0.31));
   const atmoLapseFactor = Math.min(1.0, Math.pow(Math.max(0, pBarAtmo) / 0.15, 0.45));
   // On deep water/ice shell worlds with atmosphere, the freezing/melting transition between ice and liquid water is 273.15 K;
@@ -2165,8 +2165,10 @@ export function generatePlanetarySurfaceModel(
   let meltwaterPatchCount = 0;
 
   // Check if a deep water/ice shell world has any frozen ice on the globe (if Tmin <= freezingPointK)
-  const approxTminOnGlobe = Tbase * (1.0 - (isTidallyLocked ? 0.74 : 0.69) * thermalDiffFactor) - 4 * waveAtmoScale;
-  const approxTmaxOnGlobe = Tbase * (1.0 + (isTidallyLocked ? 0.34 : 0.31) * thermalDiffFactor) + 4 * waveAtmoScale;
+  const approxTminOnGlobe =
+    Tbase * (1.0 - (isTidallyLocked ? 0.82 * lockedThermalFactor : 0.69 * thermalDiffFactor)) - 4 * waveAtmoScale;
+  const approxTmaxOnGlobe =
+    Tbase * (1.0 + (isTidallyLocked ? 0.50 * lockedThermalFactor : 0.31 * thermalDiffFactor)) + 4 * waveAtmoScale;
   const hasIceBoundaryOnDeepWaterWorld = isDeepWaterOrIceShell && approxTminOnGlobe <= freezingPointK;
 
   for (let y = 0; y < height; y++) {
@@ -2200,14 +2202,20 @@ export function generatePlanetarySurfaceModel(
         waveAtmoScale;
       let Tlocal = Tbase;
       if (isTidallyLocked) {
-        const wLatRad = ((lat + warpLat * 0.45) * Math.PI) / 180;
-        const wLonRad = ((lon + warpLon * 0.45) * Math.PI) / 180;
+        const wLatRad = ((lat + warpLat * 0.42) * Math.PI) / 180;
+        const wLonRad = ((lon + warpLon * 0.42) * Math.PI) / 180;
         const cosPsi = Math.max(
           -1,
-          Math.min(1, Math.cos(latRad) * Math.cos((lon * Math.PI) / 180) * 0.72 + Math.cos(wLatRad) * Math.cos(wLonRad) * 0.28)
+          Math.min(1, Math.cos(latRad) * Math.cos((lon * Math.PI) / 180) * 0.74 + Math.cos(wLatRad) * Math.cos(wLonRad) * 0.26)
         );
         const distFromSubstellar = Math.acos(cosPsi) / Math.PI; // 0 at substellar (0,0), 0.5 at terminator, 1.0 at antistellar
-        Tlocal = Tbase * (1.0 + (0.34 - distFromSubstellar * 1.08) * thermalDiffFactor) + climateWave;
+        // Dayside (dist <= 0.5) receives cos(psi) zenith-peaked stellar flux (+50% peak at substellar hotspot);
+        // Nightside (dist > 0.5) receives zero direct stellar flux and plunges into a deep antistellar cold trap (-82% at antistellar point)
+        const lockedAnomaly =
+          distFromSubstellar <= 0.5
+            ? 0.50 * Math.pow(1.0 - distFromSubstellar * 2.0, 0.82) - 0.16 * (distFromSubstellar * 2.0)
+            : -0.16 - 0.66 * Math.pow((distFromSubstellar - 0.5) * 2.0, 0.85);
+        Tlocal = Tbase * (1.0 + lockedAnomaly * lockedThermalFactor) + climateWave;
       } else {
         // Spherical mean of cos^1.15(lat) is ~0.69 -> +0.31 at equator, -0.69 at poles (yielding ~220 K to 320 K at 1 bar, 288 K)
         Tlocal = Tbase * (1.0 + (Math.pow(blendedLatCos, 1.15) - 0.69) * thermalDiffFactor) + climateWave;
@@ -3226,23 +3234,24 @@ export function evaluateSurfaceMapTexel(
   } else if (activeLayer === 'temperature') {
     const T = temperatureGrid[idx];
     if (T < 200) {
-      r = 32;
-      g = 24;
-      b = 128;
+      const t = Math.max(0, Math.min(1, (T - 35) / 165));
+      r = Math.round(14 + t * 24);
+      g = Math.round(12 + t * 40);
+      b = Math.round(68 + t * 112);
     } else if (T < 273.15) {
       const t = (T - 200) / 73.15;
-      r = Math.round(32 + t * 56);
-      g = Math.round(52 + t * 128);
-      b = Math.round(180 + t * 65);
-    } else if (T < 320) {
-      const t = (T - 273.15) / 46.85;
-      r = Math.round(140 + t * 105);
-      g = Math.round(185 + t * 25);
-      b = Math.round(190 - t * 150);
+      r = Math.round(38 + t * 88);
+      g = Math.round(52 + t * 134);
+      b = Math.round(180 + t * 50);
+    } else if (T < 330) {
+      const t = (T - 273.15) / 56.85;
+      r = Math.round(126 + t * 119);
+      g = Math.round(186 - t * 32);
+      b = Math.round(230 - t * 195);
     } else {
-      const t = Math.min(1.0, (T - 320) / 250);
+      const t = Math.min(1.0, (T - 330) / 220);
       r = Math.round(245 + t * 10);
-      g = Math.round(140 - t * 110);
+      g = Math.round(154 - t * 124);
       b = Math.round(35 - t * 25);
     }
   } else if (activeLayer === 'moisture') {
