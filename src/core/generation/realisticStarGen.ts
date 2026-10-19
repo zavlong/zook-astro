@@ -1757,7 +1757,6 @@ export function generateZoneSystem(
 
       if (Teq > 325 || (Tpot >= 340 && (rH2 >= 1.5 || isUnbufferedOceanGreenhouse))) {
         pC = avCO2;
-        const Tdry = Teq + ghDelta(pC, pN, pH, 0, 0.02, 0, 0, Teq, grav);
         if (hasCont && Teq > 325) {
           // Hot inner rocky world: either sulfate-buffered Sulfuric Acid (H2SO4) Seas/Ocean, dry Venusian, or Molten Planet (if Tsurf >= 800 K)
           const sulfateBuffered = Teq <= 435 && random() < 0.36;
@@ -1779,14 +1778,19 @@ export function generateZoneSystem(
             pClass = 'Venusian World';
           }
         } else {
-          let Tit = Tdry;
-          for (let s = 0; s < 5; s++) {
-            pW =
+          // Global ocean dissolves excess CO2 into carbonic acid and precipitates seafloor carbonates/clathrates,
+          // while the atmosphere becomes 100% saturated with water vapor (H2O)!
+          pC = clamp(avCO2 * rand(0.04, 0.16), 0.12, 5.5);
+          pN = clamp(pN, 0.25, 2.8);
+          let Tit = Math.max(295, Teq + ghDelta(pC, pN, pH, 0, 0.08, 0, 0, Teq, grav));
+          for (let s = 0; s < 6; s++) {
+            const pSatW =
               Tit < 273.15
-                ? 0.006
+                ? 0.0061
                 : Tit >= 647.1
                 ? 220.6
                 : 1.013 * Math.exp(13.7 * (1 - 373.15 / Tit));
+            pW = Math.max(pSatW, (pC + pN + pH) * 0.08);
             Tit = 0.5 * Tit + 0.5 * (Teq + ghDelta(pC, pN, pH, 0, pW, 0, 0, Teq, grav));
           }
           if (Tit >= 647.1 || pW >= 220.6) {
@@ -1798,7 +1802,7 @@ export function generateZoneSystem(
             atmoType =
               rH2 >= 1.5
                 ? 'Hycean Greenhouse Water World (Pressure-Cooker Ocean)'
-                : 'Greenhouse Water World (CO2-Pressurized Liquid Ocean)';
+                : 'Greenhouse Water World (Water-Saturated Ocean Sky)';
             pClass = 'Greenhouse Water World';
           }
         }
@@ -1939,10 +1943,11 @@ export function generateZoneSystem(
           }
         } else {
           // Temperate Pelagic / Aquatic Ocean World: seafloor basalt weathering & clathrate trapping
-          // maintain a thick N2-dominated atmosphere with moderate/low greenhouse CO2 and equilibrium H2O vapor!
-          pN = Math.max(pN, clamp(Math.pow(b.massEarth, 0.7) * rand(1.4, 4.8), 1.2, 8.5));
-          pW = rand(0.016, 0.045);
-          const targetT = rand(280, 312);
+          // maintain an N2-CO2 atmosphere saturated with water vapor (H2O)!
+          pN = clamp(Math.pow(b.massEarth, 0.65) * rand(0.45, 1.8), 0.35, 3.2);
+          const targetT = rand(284, 326);
+          const pSatTarget = 1.013 * Math.exp(13.7 * (1 - 373.15 / targetT));
+          pW = +Math.max(pSatTarget, pN * 0.045).toFixed(4);
           pC = solveCO2ForTargetTemp(
             targetT,
             Teq,
@@ -1954,7 +1959,7 @@ export function generateZoneSystem(
             0,
             grav,
             0.0005,
-            Math.min(8.5, avCO2)
+            Math.min(5.5, avCO2)
           );
           const bioPelagic = z.age >= 1.5 && pC < 6.0 && random() < 0.58;
           if (bioPelagic) {
@@ -2124,8 +2129,9 @@ export function generateZoneSystem(
         if (gSum > 0) {
           const gks = Object.keys(rawG);
           for (let gk = 0; gk < gks.length; gk++) {
-            if (rawG[gks[gk]] / gSum >= 0.0005) {
-              gases[gks[gk]] = +(rawG[gks[gk]] / gSum).toFixed(4);
+            const key = gks[gk];
+            if (rawG[key] / gSum >= 0.0005 || (key === 'H2O' && rawG[key] > 0)) {
+              gases[key] = +Math.max(0.001, rawG[key] / gSum).toFixed(4);
             }
           }
         }
@@ -2287,23 +2293,32 @@ export function generateZoneSystem(
             };
           }
         } else if (b.iceFrac >= 0.015 && Tsurf >= 265 && effMuMin <= 28) {
-          // Ensure atmosphere is in thermodynamic equilibrium with the liquid water ocean!
-          if (pW < 0.01 || pBar < 1.0) {
-            pN = Math.max(pN, clamp(Math.pow(b.massEarth, 0.7) * rand(1.2, 3.8), 1.0, 6.5));
-            const pSatW = 1.013 * Math.exp(13.7 * (1 - 373.15 / Math.min(640, Tsurf)));
-            pW = +clamp(pSatW * rand(0.5, 0.85), 0.015, 220.6).toFixed(4);
-            ghK = +ghDelta(pC, pN, pH, pM, pW, pNH3, pS, Teq, grav).toFixed(1);
-            Tsurf = +(Tatm + ghK).toFixed(1);
-            // If saturation vapor pressure at the new Tsurf exceeds 45% of total pressure, iterate steam feedback
-            const pSatW2 = Tsurf >= 647.1 ? 220.6 : 1.013 * Math.exp(13.7 * (1 - 373.15 / Tsurf));
-            if (pSatW2 > (pC + pN + pH + pO) * 0.45) {
-              pW = +clamp(pSatW2, 0.05, 220.6).toFixed(3);
-              ghK = +ghDelta(pC, pN, pH, pM, pW, pNH3, pS, Teq, grav).toFixed(1);
-              Tsurf = +(Tatm + ghK).toFixed(1);
-            }
-            gSum = rebuildGases();
-            pBar = gSum;
+          // Ocean worlds ALWAYS have an atmosphere saturated with water vapor (H2O) in equilibrium with the global ocean!
+          pN = clamp(pN > 0 ? pN : Math.pow(b.massEarth, 0.65) * rand(0.5, 1.8), 0.35, 3.2);
+          if (pC > 5.5) {
+            // Deep ocean carbonate & clathrate sequestration buffers excess gaseous CO2
+            pC = +clamp(pC * 0.16, 0.35, 5.5).toFixed(3);
           }
+          for (let iter = 0; iter < 6; iter++) {
+            const effT = Math.max(275.0, Tsurf);
+            const pSatW =
+              effT >= 647.1
+                ? 220.6
+                : 1.013 * Math.exp(13.7 * (1 - 373.15 / effT));
+            const drySum = Math.max(0.35, pC + pN + pH + pO + pM);
+            pW = +clamp(Math.max(pSatW, drySum * 0.045), 0.02, 220.6).toFixed(4);
+            ghK = +ghDelta(pC, pN, pH, pM, pW, pNH3, pS, Teq, grav).toFixed(1);
+            Tsurf = +Math.max(275.0, 0.5 * effT + 0.5 * (Tatm + ghK)).toFixed(1);
+          }
+          const finalPSatW =
+            Tsurf >= 647.1
+              ? 220.6
+              : 1.013 * Math.exp(13.7 * (1 - 373.15 / Math.max(275.0, Tsurf)));
+          pW = +clamp(Math.max(finalPSatW, (pC + pN + pH + pO + pM) * 0.045), 0.02, 220.6).toFixed(4);
+          ghK = +ghDelta(pC, pN, pH, pM, pW, pNH3, pS, Teq, grav).toFixed(1);
+          Tsurf = +Math.max(275.0, Tatm + ghK).toFixed(1);
+          gSum = rebuildGases();
+          pBar = gSum;
 
           const totW = Math.round(rE * 6371 * (1 - Math.pow(1 - b.iceFrac, 0.42)));
           if (Tsurf >= 647.1 || pW >= 220.6) {
@@ -2717,9 +2732,10 @@ export function generateZoneSystem(
           mGases.CO2 = +(pC_m / mPBar).toFixed(3);
           mGases.N2 = +(pN_m / mPBar).toFixed(3);
         } else {
-          const pN = +clamp(Math.pow(mE, 0.7) * rand(0.6, 1.8), 0.2, 3.5).toFixed(3);
-          const pW = +rand(0.01, 0.028).toFixed(3);
-          const targetT = rand(280, 305);
+          const pN = +clamp(Math.pow(mE, 0.7) * rand(0.5, 1.5), 0.2, 2.5).toFixed(3);
+          const targetT = rand(282, 315);
+          const pSatW = 1.013 * Math.exp(13.7 * (1 - 373.15 / targetT));
+          const pW = +Math.max(pSatW, pN * (iceF >= 0.08 ? 0.05 : 0.025)).toFixed(3);
           const pC = solveCO2ForTargetTemp(targetT, mTatm, pN, 0, 0, pW, 0, 0, mGrav, 0.0005, 2.5);
           const pO = z.age >= 1.5 && pC < 1.2 && random() < 0.65 ? +(pN * rand(0.15, 0.28)).toFixed(3) : 0;
           if (pO > 0) {
@@ -2827,6 +2843,16 @@ export function generateZoneSystem(
         };
       } else if (mc.includes('Habitable') || (mPBar !== null && mPBar >= 0.05 && mTsurf >= 268 && mTsurf < 647)) {
         const isMarineH2O = iceF < 0.08 || random() < 0.65;
+        const pSatW_m = 1.013 * Math.exp(13.7 * (1 - 373.15 / Math.max(273.15, mTsurf)));
+        const minH2OFrac = isMarineH2O ? 0.025 : 0.05;
+        const satFrac = clamp(pSatW_m / Math.max(0.05, (mPBar || 1.0) + pSatW_m), minH2OFrac, 0.85);
+        if (!mGases.H2O || mGases.H2O < satFrac) {
+          const scaleOther = (1 - satFrac) / Math.max(0.01, 1 - (mGases.H2O || 0));
+          for (const gk of Object.keys(mGases)) {
+            if (gk !== 'H2O') mGases[gk] = +(mGases[gk] * scaleOther).toFixed(3);
+          }
+          mGases.H2O = +satFrac.toFixed(3);
+        }
         if (!isMarineH2O) {
           const totW = Math.max(6, Math.round(rKm * (1 - Math.pow(1 - iceF, 0.42))));
           const lKm = Math.min(totW, Math.round(110 / Math.max(0.05, mGrav)));
