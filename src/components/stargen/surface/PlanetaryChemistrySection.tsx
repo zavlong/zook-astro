@@ -747,7 +747,7 @@ export const PlanetaryChemistrySection: React.FC<PlanetaryChemistrySectionProps>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
         <span className="text-xs font-bold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
           <FlaskConical className="w-3.5 h-3.5 text-cyan-400" />
-          Surface &amp; Internal Composition
+          Geology
         </span>
 
         <div className="flex items-center gap-2 text-[10.5px]">
