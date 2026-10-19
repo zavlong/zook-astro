@@ -83,6 +83,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       seaLevelNormalized,
       isGasGiant,
       isIcyWorld,
+      isMoltenWorld,
       hasLiquid,
       seaPalette,
     } = surfaceModel;
@@ -146,7 +147,21 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             b = parseInt(hex.slice(5, 7), 16);
 
             const crackVal = fractureGrid[idx];
-            if (isIcyWorld && crackVal > 0.08) {
+            if (isMoltenWorld && crackVal > 0.08) {
+              // Incandescent yellow-orange lava fissures cutting across dark basalt crust
+              const t = Math.min(1.0, crackVal / 0.8);
+              if (t < 0.45) {
+                const m = t / 0.45;
+                r = r * (1 - m * 0.85) + 235 * (m * 0.85);
+                g = g * (1 - m * 0.85) + 98 * (m * 0.85);
+                b = b * (1 - m * 0.85) + 12 * (m * 0.85);
+              } else {
+                const c = (t - 0.45) / 0.55;
+                r = 235 + (255 - 235) * c;
+                g = 98 + (212 - 98) * c;
+                b = 12 + (42 - 12) * c;
+              }
+            } else if (isIcyWorld && crackVal > 0.08) {
               // Blend Europan mineral-stained double-ridge margins & deep cryo-blue chasm cores
               const t = Math.min(1.0, crackVal / 0.85);
               if (t < 0.4) {
@@ -184,7 +199,9 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             const NdotL = (nx * Lx + ny * Ly + nz * Lz) * invLen;
             // Normal-map illumination relative to flat surface (Lz = 0.62)
             const reliefShade = isWater
-              ? 0.88 + (NdotL - Lz) * 0.65
+              ? isMoltenWorld
+                ? 0.96 + (NdotL - Lz) * 0.45
+                : 0.88 + (NdotL - Lz) * 0.65
               : 0.94 + (NdotL - Lz) * 1.35;
 
             r = Math.max(0, Math.min(255, Math.round(r * reliefShade)));
@@ -480,35 +497,46 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const groundGrad = ctx.createLinearGradient(0, horizonY, 0, h);
     if (currentTelemetry.isOcean) {
       // Liquid Ocean / Sea with Solvent-Specific Palette & Specular Reflections
-      groundGrad.addColorStop(0, isNight ? '#040b17' : surfaceModel.seaPalette.horizonTopHex);
-      groundGrad.addColorStop(1, isNight ? '#02050d' : surfaceModel.seaPalette.horizonBotHex);
+      // Molten lava oceans remain incandescent yellow-orange even at night
+      groundGrad.addColorStop(
+        0,
+        surfaceModel.isMoltenWorld ? '#fbbf24' : isNight ? '#040b17' : surfaceModel.seaPalette.horizonTopHex
+      );
+      groundGrad.addColorStop(
+        1,
+        surfaceModel.isMoltenWorld ? '#ea580c' : isNight ? '#02050d' : surfaceModel.seaPalette.horizonBotHex
+      );
       ctx.fillStyle = groundGrad;
       ctx.fillRect(0, horizonY, w, h - horizonY);
 
-      // Specular Sun Trail on Water
-      if (!isNight) {
+      // Specular Sun Trail on Water / Glowing Lava Ripples
+      if (!isNight || surfaceModel.isMoltenWorld) {
         const sunTrailX = w * 0.5 + Math.cos(radTOD) * (w * 0.4);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+        ctx.fillStyle = surfaceModel.isMoltenWorld ? 'rgba(254, 240, 138, 0.45)' : 'rgba(255, 255, 255, 0.25)';
         for (let y = horizonY + 5; y < h; y += 8) {
           const waveW = ((y - horizonY) / (h - horizonY)) * 80;
           ctx.fillRect(sunTrailX - waveW / 2 + Math.sin(y * 0.2) * 5, y, waveW, 2);
         }
       }
     } else {
-      // Solid Land / Ice Shell Ground
+      // Solid Land / Ice Shell / Basalt Crust Ground
       const bColor = currentTelemetry.biomeColor || '#3d6738';
-      groundGrad.addColorStop(0, isNight ? '#060a12' : bColor);
-      groundGrad.addColorStop(1, isNight ? '#020408' : '#101724');
+      groundGrad.addColorStop(0, isNight && !surfaceModel.isMoltenWorld ? '#060a12' : bColor);
+      groundGrad.addColorStop(1, isNight && !surfaceModel.isMoltenWorld ? '#020408' : '#101724');
       ctx.fillStyle = groundGrad;
       ctx.fillRect(0, horizonY, w, h - horizonY);
 
-      // Cryotectonic Ice Cracks / Crevasses on Icy Worlds
-      if (surfaceModel.isIcyWorld) {
+      // Tectonic Fissures: Glowing Yellow-Orange Lava Cracks on Molten Worlds, or Cryo-Blue Crevasses on Icy Worlds
+      if (surfaceModel.isMoltenWorld || surfaceModel.isIcyWorld) {
         ctx.save();
         for (let c = 0; c < 6; c++) {
           const baseStartX = (((c * 135 + cameraPanDeg * 3.5 + selectedCoords.lon * 4) % w) + w) % w;
-          // Flanking double-ridge highlight
-          ctx.strokeStyle = isNight ? 'rgba(125, 211, 252, 0.18)' : 'rgba(224, 242, 254, 0.55)';
+          // Flanking margin glow / double-ridge highlight
+          ctx.strokeStyle = surfaceModel.isMoltenWorld
+            ? 'rgba(234, 88, 12, 0.75)'
+            : isNight
+            ? 'rgba(125, 211, 252, 0.18)'
+            : 'rgba(224, 242, 254, 0.55)';
           ctx.lineWidth = 4.5;
           ctx.beginPath();
           let cx = baseStartX;
@@ -521,8 +549,8 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
           }
           ctx.stroke();
 
-          // Deep cryo-cyan chasm core
-          ctx.strokeStyle = isNight ? '#082f49' : '#0369a1';
+          // Fissure core (incandescent yellow-orange lava or deep cryo-cyan ice chasm)
+          ctx.strokeStyle = surfaceModel.isMoltenWorld ? '#facc15' : isNight ? '#082f49' : '#0369a1';
           ctx.lineWidth = 2.2;
           ctx.stroke();
         }
@@ -545,7 +573,14 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     // 9. Horizon Atmospheric Haze Blend
     const hazeGrad = ctx.createLinearGradient(0, horizonY - 20, 0, horizonY + 20);
     hazeGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    hazeGrad.addColorStop(0.5, isNight ? 'rgba(10, 16, 30, 0.4)' : 'rgba(255, 255, 255, 0.15)');
+    hazeGrad.addColorStop(
+      0.5,
+      surfaceModel.isMoltenWorld
+        ? 'rgba(251, 146, 60, 0.28)'
+        : isNight
+        ? 'rgba(10, 16, 30, 0.4)'
+        : 'rgba(255, 255, 255, 0.15)'
+    );
     hazeGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = hazeGrad;
     ctx.fillRect(0, horizonY - 20, w, 40);
@@ -755,13 +790,25 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
         <div>
           <span className="text-slate-400 block text-[10px]">ELEVATION</span>
-          <b className={currentTelemetry.isOcean ? 'text-sky-300' : 'text-emerald-300'}>
+          <b
+            className={
+              currentTelemetry.isOcean
+                ? surfaceModel.isMoltenWorld
+                  ? 'text-amber-400'
+                  : 'text-sky-300'
+                : 'text-emerald-300'
+            }
+          >
             {currentTelemetry.elevationMeters > 0
               ? `+${currentTelemetry.elevationMeters.toLocaleString()} m`
               : `${currentTelemetry.elevationMeters.toLocaleString()} m`}
           </b>
           <span className="text-[9px] text-slate-400 block">
-            {currentTelemetry.isOcean ? 'Abyssal Depth' : `${currentTelemetry.elevationKm} km alt`}
+            {currentTelemetry.isOcean
+              ? surfaceModel.isMoltenWorld
+                ? 'Magma Depth'
+                : 'Abyssal Depth'
+              : `${currentTelemetry.elevationKm} km alt`}
           </span>
         </div>
 
