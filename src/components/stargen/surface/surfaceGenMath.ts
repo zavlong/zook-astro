@@ -1515,9 +1515,12 @@ export function generatePlanetarySurfaceModel(
       tidalW >= 0.1 ||
       (activeBody.massEarth >= 0.35 && (activeBody.rockFrac ?? 0) >= 0.45));
 
-  // Maximum elevation depends inversely on gravity
+  // Maximum elevation depends inversely on gravity (scaled 2.5x up for telemetry numbers while preserving thermalRefElevKm for visual presentation)
   const gClamped = Math.max(0.05, activeBody.gravityG);
-  const maxElevKm = isNoSurface ? 0 : +(Math.min(28, 7.5 / Math.sqrt(gClamped)) * (0.8 + prng() * 0.4)).toFixed(1);
+  const thermalRefElevKm = isNoSurface
+    ? 0
+    : +(Math.min(28, 7.5 / Math.sqrt(gClamped)) * (0.8 + prng() * 0.4)).toFixed(1);
+  const maxElevKm = isNoSurface ? 0 : +(thermalRefElevKm * 2.5).toFixed(1);
   const minElevKm = isNoSurface ? 0 : +(-maxElevKm * 0.75).toFixed(1);
 
   // Hypsometry resolution: 360 lon x 180 lat
@@ -1863,7 +1866,7 @@ export function generatePlanetarySurfaceModel(
       let altitudeKm = 0;
       if (!isBelowSeaLevel && !isNoSurface) {
         const altitudeRatio = Math.max(-0.08, (hNorm - seaLevelNormalized) / (1 - seaLevelNormalized));
-        altitudeKm = altitudeRatio * maxElevKm;
+        altitudeKm = altitudeRatio * thermalRefElevKm;
         const lapse = 5.4 * activeBody.gravityG * atmoLapseFactor; // K per km
         Tlocal -= altitudeKm * lapse;
       }
@@ -3465,7 +3468,7 @@ export function sampleSurfacePoint(
   // Barometric pressure at altitude: P(h) = P0 * exp(-h / H)
   const P0 = model.isNoSurface ? 100 : (activeBody.pressureBar ?? 0);
   const scaleHeightKm = Math.max(2, (8.314 * T_K) / (0.029 * activeBody.gravityG * 9.81 * 1000));
-  const pressureBar = +(P0 * Math.exp(-Math.max(0, elevationKm) / scaleHeightKm)).toFixed(3);
+  const pressureBar = +(P0 * Math.exp(-Math.max(0, elevationKm / 2.5) / scaleHeightKm)).toFixed(3);
 
   // Generate plausible procedural name for geographical feature
   const hemisphere = clampedLat >= 0 ? 'Northern' : 'Southern';
@@ -3481,9 +3484,9 @@ export function sampleSurfacePoint(
       : 'Linea'
     : model.craterGrid[idx] > 0.35
     ? 'Crater'
-    : elevationKm > 3
+    : elevationKm > 7.5
     ? 'Mons'
-    : elevationKm > 1
+    : elevationKm > 2.5
     ? 'Planum'
     : 'Vallis';
   const featureName = `${prefix} ${hemisphere} (Lat ${Math.round(clampedLat)}°, Lon ${Math.round(normalizedLon)}°)`;
