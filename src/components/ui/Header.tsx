@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Compass, Rocket, Wrench, Home, Atom, Hexagon, Disc } from 'lucide-react';
+import { Sparkles, Compass, Rocket, Wrench, Home, Atom, Hexagon, Disc, Globe } from 'lucide-react';
 import { FilterCategory, StarSystem, ActiveAppMode } from '../../types/astrophysics';
 
 interface HeaderProps {
@@ -139,6 +139,19 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <Atom className="w-3.5 h-3.5" />
           <span>StarGen Lab</span>
+        </button>
+
+        <button
+          onClick={() => onSelectApp('surface-gen')}
+          className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition text-[11px] cursor-pointer ${
+            activeApp === 'surface-gen'
+              ? 'bg-gradient-to-r from-amber-600 via-orange-600 to-rose-600 text-white font-bold shadow-md shadow-amber-500/20'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+          }`}
+          title="Planetary Surface Generator (View Level 0 • Double-click planet / zoom into orrery)"
+        >
+          <Globe className="w-3.5 h-3.5" />
+          <span>Planetary Surface</span>
         </button>
 
         <button

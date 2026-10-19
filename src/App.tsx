@@ -23,6 +23,7 @@ import { GalaxyGenApp } from './components/galaxy/GalaxyGenApp';
 import { StarGenParams } from './core/generation/realisticStarGen';
 import { GalaxySectorHex } from './core/generation/galaxyGen';
 import { SectorHexConfig } from './core/generation/sectorHex';
+import { PlanetarySurfaceApp, PlanetarySurfaceTarget } from './components/surface/PlanetarySurfaceApp';
 
 export const App: React.FC = () => {
   // Global HUD UI toggle state (Off by default for full-screen edge-to-edge immersion)
@@ -65,6 +66,29 @@ export const App: React.FC = () => {
 
   const [lastSectorSystemCoord, setLastSectorSystemCoord] = useState<string | null>(null);
   const [returnToSectorTransition, setReturnToSectorTransition] = useState<boolean>(false);
+
+  const [surfaceInitialTarget, setSurfaceInitialTarget] = useState<PlanetarySurfaceTarget | null>(null);
+
+  const handleLaunchSurfaceGen = (target: PlanetarySurfaceTarget) => {
+    setSurfaceInitialTarget(target);
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      (document as unknown as { startViewTransition: (cb: () => void) => void }).startViewTransition(() => {
+        setActiveApp('surface-gen');
+      });
+    } else {
+      setActiveApp('surface-gen');
+    }
+  };
+
+  const handleBackToStarGen = () => {
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      (document as unknown as { startViewTransition: (cb: () => void) => void }).startViewTransition(() => {
+        setActiveApp('stargen-lab');
+      });
+    } else {
+      setActiveApp('stargen-lab');
+    }
+  };
 
   const handleSelectGalaxySector = (sector: GalaxySectorHex) => {
     setLastGalaxySector(sector);
@@ -161,7 +185,10 @@ export const App: React.FC = () => {
       }
 
       if (e.key === 'PageUp' || e.code === 'PageUp') {
-        if (activeApp === 'stargen-lab') {
+        if (activeApp === 'surface-gen') {
+          e.preventDefault();
+          handleBackToStarGen();
+        } else if (activeApp === 'stargen-lab') {
           e.preventDefault();
           handleBackToSectorHex();
         } else if (activeApp === 'sector-3d') {
@@ -444,6 +471,14 @@ export const App: React.FC = () => {
               setActiveApp('sector-3d');
             }}
             showUI={showUI}
+            onOpenSurfaceGen={handleLaunchSurfaceGen}
+          />
+        </main>
+      ) : activeApp === 'surface-gen' ? (
+        <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
+          <PlanetarySurfaceApp
+            initialTarget={surfaceInitialTarget}
+            onBackToStarGen={handleBackToStarGen}
           />
         </main>
       ) : (

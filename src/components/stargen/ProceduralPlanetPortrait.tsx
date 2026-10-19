@@ -14,6 +14,7 @@ interface ProceduralPlanetPortraitProps {
   stars: RealisticStarNode[];
   bodyIndex: number;
   moonIndex?: number;
+  onOpenSurfaceGen?: () => void;
 }
 
 // Fast deterministic hash & 3D gradient/value noise for procedural planetary rendering
@@ -1170,6 +1171,7 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
   stars,
   bodyIndex: _bodyIndex,
   moonIndex = 0,
+  onOpenSurfaceGen,
 }) => {
   const globeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const interiorCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1732,6 +1734,11 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
         {/* Left: Interactive 3D-Rotatable Procedural Orbital Globe */}
         {(expandedMode === 'split' || expandedMode === 'globe') && (
           <div
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              onOpenSurfaceGen?.();
+            }}
+            title="Drag to rotate • Double-click to open Planetary Surface Generator"
             className={`${
               expandedMode === 'split' ? 'md:col-span-4' : 'w-full'
             } relative bg-[#050810] rounded-lg border border-slate-800/90 overflow-hidden flex items-center justify-center p-2 select-none ${
@@ -1901,9 +1908,14 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
         {/* Right: Panoramic Surface Horizon / Atmospheric Cloud-Top Vista */}
         {(expandedMode === 'split' || expandedMode === 'vista') && (
           <div
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              onOpenSurfaceGen?.();
+            }}
+            title="Double-click to open Planetary Surface Generator"
             className={`${
               expandedMode === 'split' ? 'md:col-span-5' : 'w-full'
-            } relative bg-[#050810] rounded-lg border border-slate-800/90 overflow-hidden flex items-center justify-center`}
+            } relative bg-[#050810] rounded-lg border border-slate-800/90 overflow-hidden flex items-center justify-center cursor-pointer`}
           >
             <canvas
               ref={vistaCanvasRef}

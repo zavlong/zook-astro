@@ -70,6 +70,7 @@ import {
   ColonyDesignation,
 } from '../../core/generation/empireGen';
 import { universeCache } from '../../core/storage/universeCache';
+import { PlanetarySurfaceTarget } from '../surface/PlanetarySurfaceApp';
 
 interface RealisticStarGenAppProps {
   onOpenInArchitect: (archSystem: ArchitectSystem) => void;
@@ -77,6 +78,7 @@ interface RealisticStarGenAppProps {
   initialParams?: StarGenParams | null;
   onBackToSectorHex?: () => void;
   showUI?: boolean;
+  onOpenSurfaceGen?: (target: PlanetarySurfaceTarget) => void;
 }
 
 export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
@@ -85,6 +87,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   initialParams,
   onBackToSectorHex,
   showUI = false,
+  onOpenSurfaceGen,
 }) => {
   // Step 1-2 Controls
   const [logMass, setLogMass] = useState<number>(0.02);
@@ -342,8 +345,27 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         z: prev.z ?? 0,
       }));
     }
+
+    if (e.deltaY < 0 && newPxPerAU >= 160000 && onOpenSurfaceGen && systemResult) {
+      const active = trackedTarget || selectedEntity;
+      if (active && (active.kind === 'planet' || active.kind === 'moon')) {
+        const z = systemResult.zones[active.zoneIdx];
+        const pb = z?.bodies[active.bodyIdx];
+        if (pb && pb.kind === 'planet') {
+          const m = active.kind === 'moon' ? pb.moons[active.moonIdx] : null;
+          onOpenSurfaceGen({
+            planet: pb,
+            moon: m,
+            zone: z,
+            stars: systemResult.hierarchy.stars,
+          });
+          return;
+        }
+      }
+    }
+
     setOrreryPxPerAU(newPxPerAU);
-  }, []);
+  }, [onOpenSurfaceGen, systemResult, trackedTarget, selectedEntity]);
 
   const setOrreryContainer = useCallback(
     (node: HTMLDivElement | null) => {
@@ -3975,12 +3997,21 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                     }}
                                     onDoubleClick={(e) => {
                                       e.stopPropagation();
-                                      setSelectedEntity({
-                                        kind: 'moon',
-                                        zoneIdx: zIdx,
-                                        bodyIdx: bIdx,
-                                        moonIdx: mIdx,
-                                      });
+                                      if (onOpenSurfaceGen && systemResult) {
+                                        onOpenSurfaceGen({
+                                          planet: b,
+                                          moon: m,
+                                          zone: systemResult.zones[zIdx],
+                                          stars: systemResult.hierarchy.stars,
+                                        });
+                                      } else {
+                                        setSelectedEntity({
+                                          kind: 'moon',
+                                          zoneIdx: zIdx,
+                                          bodyIdx: bIdx,
+                                          moonIdx: mIdx,
+                                        });
+                                      }
                                     }}
                                   >
                                     <title>{`${m.name} (${m.moonClass})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}</title>
@@ -4061,14 +4092,23 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                               }}
                               onDoubleClick={(e) => {
                                 e.stopPropagation();
-                                setSelectedEntity({
-                                  kind: 'planet',
-                                  zoneIdx: zIdx,
-                                  bodyIdx: bIdx,
-                                });
+                                if (onOpenSurfaceGen && systemResult) {
+                                  onOpenSurfaceGen({
+                                    planet: b,
+                                    moon: null,
+                                    zone: systemResult.zones[zIdx],
+                                    stars: systemResult.hierarchy.stars,
+                                  });
+                                } else {
+                                  setSelectedEntity({
+                                    kind: 'planet',
+                                    zoneIdx: zIdx,
+                                    bodyIdx: bIdx,
+                                  });
+                                }
                               }}
                             >
-                              <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}${b.ringSystem ? `\nRing System: ${b.ringSystem.ringClass} (${b.ringSystem.innerRadiusKm.toLocaleString()}–${b.ringSystem.outerRadiusKm.toLocaleString()} km, ${b.ringSystem.compositionLabel})` : ''}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}</title>
+                              <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}${b.ringSystem ? `\nRing System: ${b.ringSystem.ringClass} (${b.ringSystem.innerRadiusKm.toLocaleString()}–${b.ringSystem.outerRadiusKm.toLocaleString()} km, ${b.ringSystem.compositionLabel})` : ''}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Planetary Surface Generator`}</title>
                               {/* Invisible click target for easy selection */}
                               <circle
                                 cx={pProj.x}
@@ -4702,6 +4742,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               handleToggleClaimPlanet(hostPlanet, selectedEntity.zoneIdx, selectedEntity.bodyIdx, des, empId);
             }
           }}
+          onOpenSurfaceGen={onOpenSurfaceGen}
         />
       );
     }

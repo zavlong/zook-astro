@@ -49,6 +49,8 @@ export const COLONY_DESIGNATIONS: { id: ColonyDesignation; label: string; icon: 
   { id: 'Agri-World', label: 'Agri-World', icon: '🌾', desc: 'Hydroponics, vast planetary farms, and biosphere harvests' },
 ];
 
+import { PlanetarySurfaceTarget } from '../../surface/PlanetarySurfaceApp';
+
 interface PlanetDossierModalProps {
   selectedEntity: Extract<SelectedMapEntity, { kind: 'planet' | 'moon' }>;
   systemResult: RealisticStarSystemResult;
@@ -63,6 +65,7 @@ interface PlanetDossierModalProps {
     designation: ColonyDesignation;
   } | null;
   onToggleClaimPlanet?: (designation?: ColonyDesignation, empireId?: string) => void;
+  onOpenSurfaceGen?: (target: PlanetarySurfaceTarget) => void;
 }
 
 export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
@@ -75,6 +78,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
   sectorEmpires = [],
   planetClaimInfo,
   onToggleClaimPlanet,
+  onOpenSurfaceGen,
 }) => {
   const [selectedDesignation, setSelectedDesignation] = useState<ColonyDesignation>(
     planetClaimInfo?.designation || 'Colony'
@@ -404,7 +408,21 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
             <img
               src={activeIconUrl}
               alt=""
-              className="w-16 h-16 object-contain flex-shrink-0 drop-shadow-[0_0_14px_rgba(56,189,248,0.3)]"
+              onDoubleClick={() => {
+                if (onOpenSurfaceGen) {
+                  onClose();
+                  onOpenSurfaceGen({
+                    planet: hostPlanet,
+                    moon: activeMoon,
+                    zone,
+                    stars: systemResult.hierarchy.stars,
+                  });
+                } else {
+                  setActiveTab('surface');
+                }
+              }}
+              title="Double-click to open full Planetary Surface Generator"
+              className="w-16 h-16 object-contain flex-shrink-0 drop-shadow-[0_0_14px_rgba(56,189,248,0.3)] cursor-pointer hover:scale-105 transition-transform"
             />
             <div>
               <div className="flex items-center gap-2 flex-wrap">
@@ -488,6 +506,19 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
           stars={systemResult.hierarchy.stars}
           bodyIndex={selectedEntity.bodyIdx}
           moonIndex={isMoon ? selectedEntity.moonIdx : 0}
+          onOpenSurfaceGen={() => {
+            if (onOpenSurfaceGen) {
+              onClose();
+              onOpenSurfaceGen({
+                planet: hostPlanet,
+                moon: activeMoon,
+                zone,
+                stars: systemResult.hierarchy.stars,
+              });
+            } else {
+              setActiveTab('surface');
+            }
+          }}
         />
 
         {/* Primary Astrophysical Telemetry Grid */}

@@ -239,5 +239,6 @@ export type ActiveAppMode =
   | 'sector-hex'
   | 'stargen-lab'
   | 'astro-architect'
-  | 'sector-3d';
+  | 'sector-3d'
+  | 'surface-gen';
 
