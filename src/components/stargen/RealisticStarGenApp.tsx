@@ -79,6 +79,7 @@ interface RealisticStarGenAppProps {
   onBackToSectorHex?: () => void;
   showUI?: boolean;
   onOpenSurfaceGen?: (target: PlanetarySurfaceTarget) => void;
+  isActive?: boolean;
 }
 
 export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
@@ -88,6 +89,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   onBackToSectorHex,
   showUI = false,
   onOpenSurfaceGen,
+  isActive = true,
 }) => {
   // Step 1-2 Controls
   const [logMass, setLogMass] = useState<number>(0.02);
@@ -353,6 +355,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         const pb = z?.bodies[active.bodyIdx];
         if (pb && pb.kind === 'planet') {
           const m = active.kind === 'moon' ? pb.moons[active.moonIdx] : null;
+          setOrreryPxPerAU(Math.min(pxPerAU, 65000));
           onOpenSurfaceGen({
             planet: pb,
             moon: m,
@@ -617,10 +620,23 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   const [isFromCache, setIsFromCache] = useState<boolean>(false);
 
   const triggerRun = (params: StarGenParams, forceRegenerate = false) => {
-    if (!forceRegenerate && params.id) {
-      const cached = universeCache.getCachedSystem(params.id);
+    const effectiveId =
+      params.id ||
+      `sys_${params.sysMass}_${params.age}_${params.feh}_${params.forcedMult || 'auto'}`;
+
+    if (!forceRegenerate) {
+      const cached = params.id
+        ? universeCache.getCachedSystem(params.id)
+        : universeCache.getLastActiveSystem() || universeCache.getCachedSystem(effectiveId);
       if (cached) {
         setSystemResult(cached);
+        if (cached.step1) {
+          if (typeof cached.step1.sysMass === 'number' && cached.step1.sysMass > 0) {
+            setLogMass(+log10(cached.step1.sysMass).toFixed(3));
+          }
+          if (typeof cached.step1.age === 'number') setAge(cached.step1.age);
+          if (typeof cached.step1.feh === 'number') setFeh(cached.step1.feh);
+        }
         setIsFromCache(true);
         setSelectedEntity(null);
         setTrackedTarget(null);
@@ -629,9 +645,11 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       }
     }
     const res = runRealisticGenerator(params);
-    if (params.id) {
-      universeCache.cacheLoadedSystem(params.id, res);
+    const sysId = params.id || res.step1?.id || effectiveId;
+    if (res.step1 && !res.step1.id) {
+      res.step1.id = sysId;
     }
+    universeCache.cacheLoadedSystem(sysId, res);
     setIsFromCache(false);
     setSystemResult(res);
     setSelectedEntity(null);
@@ -647,20 +665,23 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       setFeh(initialParams.feh);
       setForcedMult(initialParams.forcedMult || 'auto');
       setPresetKey('');
-      triggerRun(initialParams);
+      triggerRun(initialParams, false);
     } else {
-      triggerRun({
-        sysMass: +Math.pow(10, logMass).toFixed(3),
-        age,
-        feh,
-        forcedMult,
-      });
+      triggerRun(
+        {
+          sysMass: +Math.pow(10, logMass).toFixed(3),
+          age,
+          feh,
+          forcedMult,
+        },
+        false
+      );
     }
   }, [initialParams]);
 
   // 3D Orrery live Keplerian orbit animation loop (with dynamic speed & camera tracking)
   useEffect(() => {
-    if (!orreryPlaying || mapMode !== 'orrery2d') return;
+    if (!isActive || !orreryPlaying || mapMode !== 'orrery2d') return;
     let rafId = 0;
     const step = () => {
       setOrreryTimeYr((t) => {
@@ -686,6 +707,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     rafId = requestAnimationFrame(step);
     return () => cancelAnimationFrame(rafId);
   }, [
+    isActive,
     orreryPlaying,
     mapMode,
     orrerySpeed,
@@ -699,6 +721,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
   // Close blow-up modal on Escape
   useEffect(() => {
+    if (!isActive) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (selectedEntity) setSelectedEntity(null);
@@ -707,10 +730,11 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedEntity, showJsonModal]);
+  }, [isActive, selectedEntity, showJsonModal]);
 
   // Keyboard navigation: Page Up for higher view level (Sector Hex Map), Page Down already at System
   useEffect(() => {
+    if (!isActive) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       const isPageKey =
         e.key === 'PageDown' ||
@@ -766,7 +790,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedEntity, showJsonModal, handleBackToSectorWithTransition]);
+  }, [isActive, selectedEntity, showJsonModal, handleBackToSectorWithTransition]);
 
   const handleParamChange = (
     newLogMass: number,
@@ -780,12 +804,15 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     setFeh(newFeh);
     setForcedMult(newMult);
     if (clearPreset) setPresetKey('');
-    triggerRun({
-      sysMass: +Math.pow(10, newLogMass).toFixed(3),
-      age: newAge,
-      feh: newFeh,
-      forcedMult: newMult,
-    });
+    triggerRun(
+      {
+        sysMass: +Math.pow(10, newLogMass).toFixed(3),
+        age: newAge,
+        feh: newFeh,
+        forcedMult: newMult,
+      },
+      true
+    );
   };
 
   const handleRollPureIMF = () => {
@@ -795,22 +822,28 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     setAge(p.age);
     setFeh(p.feh);
     setPresetKey('');
-    triggerRun({
-      sysMass: p.sysMass,
-      age: p.age,
-      feh: p.feh,
-      forcedMult,
-    });
+    triggerRun(
+      {
+        sysMass: p.sysMass,
+        age: p.age,
+        feh: p.feh,
+        forcedMult,
+      },
+      true
+    );
   };
 
   const handleRerollKeepSliders = () => {
-    triggerRun({
-      sysMass,
-      age,
-      feh,
-      forcedMult,
-      id: currentSysId,
-    }, true);
+    triggerRun(
+      {
+        sysMass,
+        age,
+        feh,
+        forcedMult,
+        id: currentSysId,
+      },
+      true
+    );
   };
 
   const handleSelectPreset = (key: string) => {
@@ -5132,6 +5165,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         <SystemJsonManagerModal
           systemResult={systemResult}
           onImportSystem={(imported) => {
+            universeCache.setLastActiveSystem(imported);
             setSystemResult(imported);
             setSelectedEntity(null);
             setTrackedTarget(null);

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   ArrowLeft,
   Globe,
@@ -55,6 +55,12 @@ export const PlanetarySurfaceApp: React.FC<PlanetarySurfaceAppProps> = ({
       stars: defaultSystem.hierarchy.stars,
     };
   });
+
+  useEffect(() => {
+    if (initialTarget) {
+      setCurrentTarget(initialTarget);
+    }
+  }, [initialTarget]);
 
   // Extract all planets and moons from the current zone for quick switching
   const availableBodies = useMemo(() => {

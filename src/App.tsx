@@ -455,31 +455,35 @@ export const App: React.FC = () => {
             </div>
           )}
         </main>
-      ) : activeApp === 'stargen-lab' ? (
+      ) : activeApp === 'stargen-lab' || activeApp === 'surface-gen' ? (
         <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
-          <RealisticStarGenApp
-            initialParams={starGenInitialParams}
-            onBackToSectorHex={handleBackToSectorHex}
-            onOpenInArchitect={(archSys) => {
-              setArchitectInitialSystem(archSys);
-              setActiveApp('astro-architect');
-            }}
-            onInspectInSector3D={(starSys) => {
-              setStars((prev) => [starSys, ...prev.filter((s) => s.id !== starSys.id)]);
-              setSelectedStar(starSys);
-              setSelectedPlanetIndex(0);
-              setActiveApp('sector-3d');
-            }}
-            showUI={showUI}
-            onOpenSurfaceGen={handleLaunchSurfaceGen}
-          />
-        </main>
-      ) : activeApp === 'surface-gen' ? (
-        <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
-          <PlanetarySurfaceApp
-            initialTarget={surfaceInitialTarget}
-            onBackToStarGen={handleBackToStarGen}
-          />
+          <div className={activeApp === 'stargen-lab' ? 'w-full h-full' : 'hidden'}>
+            <RealisticStarGenApp
+              initialParams={starGenInitialParams}
+              onBackToSectorHex={handleBackToSectorHex}
+              onOpenInArchitect={(archSys) => {
+                setArchitectInitialSystem(archSys);
+                setActiveApp('astro-architect');
+              }}
+              onInspectInSector3D={(starSys) => {
+                setStars((prev) => [starSys, ...prev.filter((s) => s.id !== starSys.id)]);
+                setSelectedStar(starSys);
+                setSelectedPlanetIndex(0);
+                setActiveApp('sector-3d');
+              }}
+              showUI={showUI}
+              onOpenSurfaceGen={handleLaunchSurfaceGen}
+              isActive={activeApp === 'stargen-lab'}
+            />
+          </div>
+          {activeApp === 'surface-gen' && (
+            <div className="w-full h-full overflow-y-auto custom-scrollbar">
+              <PlanetarySurfaceApp
+                initialTarget={surfaceInitialTarget}
+                onBackToStarGen={handleBackToStarGen}
+              />
+            </div>
+          )}
         </main>
       ) : (
         <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
