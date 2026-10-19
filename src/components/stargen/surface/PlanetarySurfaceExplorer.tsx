@@ -26,6 +26,7 @@ import {
   SurfacePointTelemetry,
   SurfaceMapLayerType,
 } from './surfaceGenMath';
+import { PlanetaryChemistrySection } from './PlanetaryChemistrySection';
 
 interface PlanetarySurfaceExplorerProps {
   planet: RealisticPlanetBody;
@@ -1018,6 +1019,9 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
           </div>
         </div>
       </div>
+
+      {/* Surface & Internal Geochemistry Composition Tables */}
+      <PlanetaryChemistrySection planet={planet} moon={moon} surfaceModel={surfaceModel} />
     </div>
   );
 };

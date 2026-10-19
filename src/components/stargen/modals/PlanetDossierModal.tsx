@@ -14,6 +14,7 @@ import {
   Map as MapIcon,
 } from 'lucide-react';
 import { PlanetarySurfaceExplorer } from '../surface/PlanetarySurfaceExplorer';
+import { PlanetaryChemistrySection } from '../surface/PlanetaryChemistrySection';
 import {
   RealisticPlanetBody,
   RealisticMoon,
@@ -661,6 +662,9 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
             )}
           </div>
         </div>
+
+        {/* Surface & Internal Geochemistry Composition Tables */}
+        <PlanetaryChemistrySection planet={hostPlanet} moon={activeMoon} />
 
         {/* Dedicated Biosphere Section for bodies with life */}
         {hydro?.biosphere && (
