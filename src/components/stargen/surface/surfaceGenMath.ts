@@ -1730,7 +1730,9 @@ export function generatePlanetarySurfaceModel(
     seaLevelNormalized = allElevations[splitIndex];
   }
 
-  const isTidallyLocked = activeBody.spinState?.toLowerCase().includes('locked') || activeBody.spinState?.includes('1:1');
+  // Tidal locking to the star only applies to planets (!isMoon); moons are tidally locked to their host planet and rotate relative to the star!
+  const isTidallyLocked =
+    !isMoon && (planet.spinState?.toLowerCase().includes('locked') || planet.spinState?.includes('1:1'));
 
   // Compute thermal and biome grid
   const pBarAtmo = activeBody.pressureBar ?? 0;
