@@ -335,12 +335,14 @@ export function deriveCrustCompositionPalette(params: {
   }
 
   // 3. Tholin-Stained Cryo-Organic & Hydrocarbon Worlds (Titan, Pluto, Triton, Kuiper-like)
+  const hasNonMethaneSea = coverageFrac > 0 && solventKey !== 'CH4-C2H6';
   const isTholinCryo =
-    (isIcyWorld || Tbase < 185) &&
-    ((gases.CH4 || 0) >= 0.005 ||
-      solventKey === 'CH4-C2H6' ||
+    !hasNonMethaneSea &&
+    (solventKey === 'CH4-C2H6' ||
       bodyClassLower.includes('titan') ||
-      (Tbase < 115 && iceFrac >= 0.15));
+      bodyClassLower.includes('methane') ||
+      ((isIcyWorld || Tbase < 150) &&
+        ((gases.CH4 || 0) >= 0.01 || (Tbase < 115 && iceFrac >= 0.15))));
 
   if (isTholinCryo) {
     const lowRgb: [number, number, number] = [166, 104, 60];

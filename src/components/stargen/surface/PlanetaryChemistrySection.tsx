@@ -246,12 +246,62 @@ export function derivePlanetaryChemistryProfile(
 
   // 2. SOLID & SUPERCRITICAL WORLDS
   const compLabel = surfModel.compositionPalette.compositionLabel;
+  const solventKey = surfModel.seaPalette.solventKey;
+  const hasSurfaceLiquid = Boolean(
+    !surfModel.isNoSurface &&
+      !surfModel.isMoltenWorld &&
+      hydro &&
+      (hydro.coveragePct ?? 0) > 0 &&
+      hydro.solvent &&
+      hydro.solvent !== 'None' &&
+      !hydro.state?.toLowerCase().includes('subsurface')
+  );
+  const surfaceCovPct = hasSurfaceLiquid ? Math.max(1, Math.min(100, hydro?.coveragePct ?? 0)) : 0;
+
   const isSulfur = compLabel.includes('Sulfur Allotrope') || bodyClassLower.includes('io');
   const isIron = compLabel.includes('Iron-Rich') || bodyClassLower.includes('iron');
   const isCarbon = compLabel.includes('Carbonaceous') || bodyClassLower.includes('carbon');
-  const isTholin = compLabel.includes('Tholin') || surfModel.seaPalette.solventKey === 'CH4-C2H6';
+  const isTholin =
+    (!hasSurfaceLiquid || solventKey === 'CH4-C2H6') &&
+    (compLabel.includes('Tholin') || solventKey === 'CH4-C2H6');
   const isFerric = compLabel.includes('Ferric') || bodyClassLower.includes('mars');
   const isVenusian = compLabel.includes('Sulfur-Weathered') || bodyClassLower.includes('venus');
+
+  const getLiquidRowInfo = (key: string): { name: string; formula: string; color: string; shortName: string } => {
+    switch (key) {
+      case 'NH3-H2O':
+        return { name: 'Liquid Ammonia & Water', formula: 'NH₃ / H₂O', color: '#818cf8', shortName: 'Ammonia' };
+      case 'CH4-C2H6':
+        return { name: 'Liquid Methane & Ethane', formula: 'CH₄ / C₂H₆', color: '#d97706', shortName: 'Methane' };
+      case 'H2SO4':
+        return { name: 'Liquid Sulfuric Acid', formula: 'H₂SO₄', color: '#eab308', shortName: 'Sulfuric Acid' };
+      case 'SO2':
+        return { name: 'Liquid Sulfur Dioxide', formula: 'SO₂', color: '#facc15', shortName: 'Liquid SO₂' };
+      case 'CO2':
+        return { name: 'Liquid Carbon Dioxide', formula: 'CO₂', color: '#38bdf8', shortName: 'Liquid CO₂' };
+      case 'H2O + CO2':
+        return { name: 'Carbonated Liquid Water', formula: 'H₂O / CO₂', color: '#0ea5e9', shortName: 'Water' };
+      default:
+        return { name: 'Liquid Water', formula: 'H₂O', color: '#0ea5e9', shortName: 'Water' };
+    }
+  };
+
+  const liquidInfo = getLiquidRowInfo(solventKey);
+  // Scale surface liquid share by coverage while keeping solid bedrock/minerals visible in the breakdown
+  const liquidShare = hasSurfaceLiquid ? Math.max(4, Math.min(72, surfaceCovPct * 0.65 + 4)) : 0;
+  const solidScale = hasSurfaceLiquid ? Math.max(0.28, (100 - liquidShare) / 100) : 1.0;
+  const withSurfaceLiquid = (solidRows: SurfaceChemicalRow[]): SurfaceChemicalRow[] => {
+    const scaledSolids = solidRows.map((r) => ({ ...r, pct: Math.max(1, r.pct * solidScale) }));
+    if (hasSurfaceLiquid && liquidShare > 0) {
+      scaledSolids.push({
+        name: liquidInfo.name,
+        formula: liquidInfo.formula,
+        pct: liquidShare,
+        color: liquidInfo.color,
+      });
+    }
+    return normalizeRows(scaledSolids);
+  };
 
   let surfaceRows: SurfaceChemicalRow[] = [];
 
@@ -270,81 +320,80 @@ export function derivePlanetaryChemistryProfile(
       { name: 'Volcanic Sulfur & Sulfides', formula: 'FeS / SO₂', pct: 7 + n4, color: '#fbbf24' },
     ]);
   } else if (isSulfur) {
-    surfaceRows = normalizeRows([
+    surfaceRows = withSurfaceLiquid([
       { name: 'Elemental Sulfur', formula: 'S₈', pct: 42 + n1 * 4, color: '#eab308' },
       { name: 'Basalt & Silicate Rock', formula: 'SiO₂ / MgO', pct: 26 + n2 * 3, color: '#78350f' },
       { name: 'Sulfur Dioxide Frost', formula: 'SO₂', pct: 22 + n3 * 3, color: '#fef08a' },
       { name: 'Iron Sulfide (Pyrite)', formula: 'FeS₂', pct: 10 + n4 * 1.5, color: '#57534e' },
     ]);
   } else if (isTholin) {
-    const ch4Cov = (hydro?.coveragePct ?? 0) * 0.35;
-    surfaceRows = normalizeRows([
-      { name: 'Water & Ammonia Ice Bedrock', formula: 'H₂O / NH₃', pct: Math.max(30, 52 - ch4Cov * 0.5 + n1 * 4), color: '#dfd0be' },
-      { name: 'Liquid Methane & Ethane', formula: 'CH₄ / C₂H₆', pct: Math.max(5, 16 + ch4Cov + n2 * 3), color: '#d97706' },
-      { name: 'Organic Hydrocarbon Sand', formula: 'CₓHᵧN₂', pct: 21 + n3 * 2.5, color: '#a6683c' },
+    surfaceRows = withSurfaceLiquid([
+      { name: 'Water & Nitrogen Ice Bedrock', formula: 'H₂O / N₂', pct: 54 + n1 * 4, color: '#dfd0be' },
+      { name: 'Organic Hydrocarbon Sand', formula: 'CₓHᵧN₂', pct: 22 + n3 * 2.5, color: '#a6683c' },
+      { name: 'Frozen Methane Frost', formula: 'CH₄', pct: 13 + n2 * 2, color: '#fde68a' },
       { name: 'Silicate Rock & Dust', formula: 'SiO₂ / MgO', pct: 11 + n4 * 1.5, color: '#78583f' },
     ]);
   } else if (surfModel.isIcyWorld || iceFrac >= 0.15) {
     const icePurity = Math.max(0.25, Math.min(0.9, iceFrac + 0.15));
-    surfaceRows = normalizeRows([
-      { name: 'Water Ice', formula: 'H₂O', pct: icePurity * 72 + n1 * 4, color: '#dbeafe' },
+    const isAmmoniaWorld = solventKey === 'NH3-H2O' || bodyClassLower.includes('ammonia');
+    surfaceRows = withSurfaceLiquid([
+      {
+        name: isAmmoniaWorld ? 'Water & Ammonia Ice' : 'Water Ice',
+        formula: isAmmoniaWorld ? 'H₂O / NH₃' : 'H₂O',
+        pct: icePurity * 72 + n1 * 4,
+        color: '#dbeafe',
+      },
       { name: 'Silicate Rock & Dust', formula: 'SiO₂ / MgO', pct: (1 - icePurity) * 65 + 8 + n2 * 3, color: '#8c7864' },
       { name: 'Frozen Salts (Sulfates)', formula: 'MgSO₄ / NaCl', pct: 11 + n3 * 2, color: '#38bdf8' },
-      { name: 'Ammonia & Carbon Dioxide Ice', formula: 'NH₃ / CO₂', pct: 9 + n4 * 1.5, color: '#93c5fd' },
+      {
+        name: isAmmoniaWorld ? 'Carbonate & Nitrogen Frost' : 'Ammonia & Carbon Dioxide Ice',
+        formula: isAmmoniaWorld ? 'CaCO₃ / N₂' : 'NH₃ / CO₂',
+        pct: 9 + n4 * 1.5,
+        color: '#93c5fd',
+      },
     ]);
   } else if (isIron) {
-    surfaceRows = normalizeRows([
+    surfaceRows = withSurfaceLiquid([
       { name: 'Silicate Rock', formula: 'SiO₂ / MgO', pct: 48 + n1 * 4, color: '#94a3b8' },
       { name: 'Metallic Iron & Nickel', formula: 'Fe / Ni', pct: 28 + (density - 5.2) * 4 + n2 * 3, color: '#64748b' },
       { name: 'Iron & Calcium Sulfides', formula: 'FeS / CaS', pct: 15 + n3 * 2, color: '#475569' },
       { name: 'Carbon (Graphite)', formula: 'C', pct: 9 + n4 * 1.5, color: '#334155' },
     ]);
   } else if (isCarbon) {
-    surfaceRows = normalizeRows([
+    surfaceRows = withSurfaceLiquid([
       { name: 'Silicon & Titanium Carbide', formula: 'SiC / TiC', pct: 36 + n1 * 4, color: '#57534e' },
       { name: 'Carbon (Graphite & Diamond)', formula: 'C', pct: 32 + n2 * 3, color: '#292524' },
       { name: 'Silicate Rock', formula: 'SiO₂ / MgO', pct: 22 + n3 * 2.5, color: '#78716c' },
       { name: 'Hydrocarbon Tar', formula: 'CₙHₘ', pct: 10 + n4 * 1.5, color: '#44403c' },
     ]);
   } else if (isFerric) {
-    surfaceRows = normalizeRows([
+    surfaceRows = withSurfaceLiquid([
       { name: 'Basalt & Silicate Rock', formula: 'SiO₂ / MgO', pct: 58 + n1 * 4, color: '#7c2d12' },
       { name: 'Iron Oxide Dust (Rust)', formula: 'Fe₂O₃', pct: 22 + n2 * 3, color: '#ea580c' },
       { name: 'Sulfate & Chloride Salts', formula: 'MgSO₄ / NaCl', pct: 12 + n3 * 2, color: '#fdba74' },
       { name: 'Clay & Carbonate Minerals', formula: 'CaCO₃', pct: 8 + n4 * 1.2, color: '#b45309' },
     ]);
   } else if (isVenusian) {
-    surfaceRows = normalizeRows([
+    surfaceRows = withSurfaceLiquid([
       { name: 'Basalt Volcanic Rock', formula: 'SiO₂ / MgO', pct: 68 + n1 * 4, color: '#854d0e' },
       { name: 'Sulfate Crust (Anhydrite)', formula: 'CaSO₄ / MgSO₄', pct: 16 + n2 * 2, color: '#ca8a04' },
       { name: 'Iron Oxides', formula: 'Fe₂O₃ / Fe₃O₄', pct: 10 + n3 * 1.5, color: '#713f12' },
       { name: 'Pyrite & Metal Sulfide Frost', formula: 'FeS₂ / PbS', pct: 6 + n4, color: '#fde047' },
     ]);
   } else {
-    const waterCov = (hydro?.coveragePct ?? 0) * 0.22;
-    surfaceRows = normalizeRows([
+    surfaceRows = withSurfaceLiquid([
       {
         name: 'Silicate Rock (Quartz & Feldspar)',
         formula: 'SiO₂ / Al₂O₃',
-        pct: 48 - waterCov * 0.3 + n1 * 4,
+        pct: 48 + n1 * 4,
         color: '#a8a29e',
       },
       {
         name: 'Basalt & Magnesium Rock',
         formula: 'MgSiO₃ / FeO',
-        pct: 32 - waterCov * 0.25 + n2 * 3,
+        pct: 32 + n2 * 3,
         color: '#78716c',
       },
-      ...(waterCov > 0.5
-        ? [
-            {
-              name: `Surface Liquid (${surfModel.seaPalette.displayName})`,
-              formula: surfModel.seaPalette.solventKey === 'H2O' ? 'H₂O' : surfModel.seaPalette.solventKey,
-              pct: Math.min(25, 7 + waterCov + n3 * 1.5),
-              color: '#0ea5e9',
-            },
-          ]
-        : []),
       {
         name: pBar < 0.005 ? 'Titanium & Iron Oxides' : 'Limestone & Clay Minerals',
         formula: pBar < 0.005 ? 'FeTiO₃' : 'CaCO₃',
@@ -360,7 +409,7 @@ export function derivePlanetaryChemistryProfile(
     ]);
   }
 
-  // Compute Simple Interior Layers (Crust -> Subsurface Ocean (if any) -> Mantle -> Core)
+  // Compute Simple Interior Layers
   const rawCmf =
     rockFrac *
     Math.max(
@@ -381,13 +430,16 @@ export function derivePlanetaryChemistryProfile(
   const coreRadiusKm = Math.round(radiusKm * Math.pow(rawCmf, 0.36) * 0.88);
   const coreTopDepthKm = Math.max(crustDepthKm + 40, radiusKm - coreRadiusKm);
 
+  // Only true subsurface oceans (under an ice shell, with no surface seas) count as Subsurface Ocean
   const hasSubOcean = Boolean(
-    hydro &&
+    !hasSurfaceLiquid &&
+      hydro &&
       (((hydro.iceKm ?? 0) > 0 && (hydro.liqKm ?? 0) > 0) ||
         hydro.state?.toLowerCase().includes('subsurface'))
   );
 
   const interiorRows: InteriorLayerRow[] = [];
+  let mantleStartKm = crustDepthKm;
 
   if (surfModel.isSupercritical) {
     interiorRows.push({
@@ -399,21 +451,50 @@ export function derivePlanetaryChemistryProfile(
       color: '#3b82f6',
     });
   } else if (iceFrac >= 0.15) {
-    const iceShellKm = Math.max(5, Math.round(hydro?.iceKm || crustDepthKm * 0.45));
-    interiorRows.push({
-      layerName: 'Outer Ice Crust',
-      depthRangeKm: `0 – ${iceShellKm.toLocaleString()} km`,
-      massPct: hasSubOcean ? +(shellMassPct * 0.45).toFixed(1) : shellMassPct,
-      composition: isTholin ? 'Water Ice & Frozen Methane (H₂O, CH₄)' : 'Solid Water Ice & Salts (H₂O, MgSO₄)',
-      state: 'Solid Ice',
-      color: '#bae6fd',
-    });
+    if (hasSurfaceLiquid) {
+      const seaDepthKm = Math.max(1, Math.round(hydro?.liqKm || 5));
+      const iceBottomKm = Math.max(seaDepthKm + 15, crustDepthKm);
+      mantleStartKm = iceBottomKm;
+      const seaMassPct = +(Math.max(0.2, Math.min(shellMassPct * 0.25, (seaDepthKm / radiusKm) * 120))).toFixed(1);
+      const iceMassPct = +(Math.max(0.5, shellMassPct - seaMassPct)).toFixed(1);
 
-    if (hasSubOcean || (hydro?.liqKm ?? 0) > 0) {
+      interiorRows.push({
+        layerName: `Surface ${liquidInfo.shortName} Ocean`,
+        depthRangeKm: `0 – ${seaDepthKm.toLocaleString()} km`,
+        massPct: seaMassPct,
+        composition: `${liquidInfo.name} (${liquidInfo.formula})`,
+        state: `${surfaceCovPct}% Surface Seas`,
+        color: liquidInfo.color,
+      });
+      interiorRows.push({
+        layerName: 'Ice Shell',
+        depthRangeKm: `${seaDepthKm.toLocaleString()} – ${iceBottomKm.toLocaleString()} km`,
+        massPct: iceMassPct,
+        composition:
+          solventKey === 'NH3-H2O'
+            ? 'Solid Water & Ammonia Ice (H₂O, NH₃)'
+            : isTholin
+            ? 'Water Ice & Frozen Methane (H₂O, CH₄)'
+            : 'Solid Water Ice & Salts (H₂O, MgSO₄)',
+        state: 'Solid Ice',
+        color: '#bae6fd',
+      });
+    } else if (hasSubOcean) {
+      const iceShellKm = Math.max(5, Math.round(hydro?.iceKm || crustDepthKm * 0.45));
       const ocDepth = Math.max(
         iceShellKm + 10,
         Math.min(coreTopDepthKm - 20, iceShellKm + Math.round(hydro?.liqKm || 65))
       );
+      mantleStartKm = ocDepth;
+
+      interiorRows.push({
+        layerName: 'Outer Ice Crust',
+        depthRangeKm: `0 – ${iceShellKm.toLocaleString()} km`,
+        massPct: +(shellMassPct * 0.45).toFixed(1),
+        composition: isTholin ? 'Water Ice & Frozen Methane (H₂O, CH₄)' : 'Solid Water Ice & Salts (H₂O, MgSO₄)',
+        state: 'Solid Ice',
+        color: '#bae6fd',
+      });
       interiorRows.push({
         layerName: 'Subsurface Ocean',
         depthRangeKm: `${iceShellKm.toLocaleString()} – ${ocDepth.toLocaleString()} km`,
@@ -422,30 +503,34 @@ export function derivePlanetaryChemistryProfile(
         state: 'Liquid Water',
         color: '#0284c7',
       });
+    } else {
+      interiorRows.push({
+        layerName: 'Outer Ice Crust',
+        depthRangeKm: `0 – ${crustDepthKm.toLocaleString()} km`,
+        massPct: shellMassPct,
+        composition: isTholin ? 'Water Ice & Frozen Methane (H₂O, CH₄)' : 'Solid Water Ice & Salts (H₂O, MgSO₄)',
+        state: 'Solid Ice',
+        color: '#bae6fd',
+      });
     }
   } else {
     interiorRows.push({
-      layerName: surfModel.isMoltenWorld ? 'Molten Lava Crust' : 'Outer Crust',
+      layerName: surfModel.isMoltenWorld
+        ? 'Molten Lava Crust'
+        : hasSurfaceLiquid && surfaceCovPct >= 20
+        ? 'Outer Crust & Surface Seas'
+        : 'Outer Crust',
       depthRangeKm: `0 – ${crustDepthKm.toLocaleString()} km`,
       massPct: shellMassPct,
       composition: isCarbon
         ? 'Graphite & Silicon Carbide (C, SiC)'
+        : hasSurfaceLiquid && surfaceCovPct >= 20
+        ? `Silicate Rock & ${liquidInfo.name} (SiO₂, ${liquidInfo.formula})`
         : 'Silicate Rock & Basalt (SiO₂, Al₂O₃)',
       state: surfModel.isMoltenWorld ? 'Molten Lava & Rock' : 'Solid Rock',
       color: '#a8a29e',
     });
   }
-
-  const mantleStartKm =
-    iceFrac >= 0.15 && (hasSubOcean || (hydro?.liqKm ?? 0) > 0)
-      ? Math.max(
-          Math.max(5, Math.round(hydro?.iceKm || crustDepthKm * 0.45)) + 10,
-          Math.min(
-            coreTopDepthKm - 20,
-            Math.max(5, Math.round(hydro?.iceKm || crustDepthKm * 0.45)) + Math.round(hydro?.liqKm || 65)
-          )
-        )
-      : crustDepthKm;
 
   interiorRows.push({
     layerName: iceFrac >= 0.15 ? 'Rock & Deep Ice Mantle' : 'Mantle',
