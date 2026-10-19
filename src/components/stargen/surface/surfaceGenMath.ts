@@ -1793,8 +1793,13 @@ export function generatePlanetarySurfaceModel(
   // Compute thermal and biome grid
   const pBarAtmo = activeBody.pressureBar ?? 0;
   const baseScaleHeightKm = Math.max(2, (8.314 * Tbase) / (0.029 * Math.max(0.05, activeBody.gravityG) * 9.81 * 1000));
-  // Thicker atmospheres transport heat more efficiently from equator to poles / dayside to nightside
-  const thermalDiffFactor = Math.max(0.12, Math.min(0.42, 0.34 / Math.pow(1 + pBarAtmo * 0.35, 0.35)));
+  // Atmospheric heat redistribution strongly suppresses surface temperature extremes:
+  // - At P = 0 bar (vacuum), thermalDiffFactor = 0.72 (severe equator-to-pole / day-to-night extremes)
+  // - At P = 1 bar (Earth, Tbase = 288 K), thermalDiffFactor = 0.31 -> yearly local averages span ~220 K to ~320 K
+  // - At P >= 10-90 bar (thick greenhouse / Venusian), thermalDiffFactor -> 0.08..0.016 (nearly isothermal horizontally)
+  const thermalDiffFactor = 0.72 / (1.0 + 1.32 * Math.pow(Math.max(0, pBarAtmo), 0.78));
+  const waveAtmoScale = Math.max(0.12, Math.min(1.4, thermalDiffFactor / 0.31));
+  const atmoLapseFactor = Math.min(1.0, Math.pow(Math.max(0, pBarAtmo) / 0.15, 0.45));
   // On water-ice-dominated worlds, ice sublimates/ablates to expose bare rock above ~250 K!
   const freezingPointK = isWaterIceDominated
     ? 250.0
@@ -1834,10 +1839,11 @@ export function generatePlanetarySurfaceModel(
       const effLatCos = Math.cos((effAbsLat * Math.PI) / 180);
       const blendedLatCos = latCos * 0.62 + effLatCos * 0.38;
 
-      // Solar insolation & atmospheric heat transport gradient + multi-scale organic climatic wave
+      // Solar insolation & atmospheric heat transport gradient + pressure-damped climatic wave
       const climateWave =
-        (sphericalFbm(lat * 1.25, lon * 1.25, seed + 313, 4) - 0.5) * 14.0 +
-        (sphericalFbm(lat * 2.6, lon * 2.6, seed + 353, 3) - 0.5) * 5.0;
+        ((sphericalFbm(lat * 1.25, lon * 1.25, seed + 313, 4) - 0.5) * 8.0 +
+          (sphericalFbm(lat * 2.6, lon * 2.6, seed + 353, 3) - 0.5) * 3.0) *
+        waveAtmoScale;
       let Tlocal = Tbase;
       if (isTidallyLocked) {
         const wLatRad = ((lat + warpLat * 0.45) * Math.PI) / 180;
@@ -1847,17 +1853,18 @@ export function generatePlanetarySurfaceModel(
           Math.min(1, Math.cos(latRad) * Math.cos((lon * Math.PI) / 180) * 0.72 + Math.cos(wLatRad) * Math.cos(wLonRad) * 0.28)
         );
         const distFromSubstellar = Math.acos(cosPsi) / Math.PI; // 0 at substellar (0,0), 0.5 at terminator, 1.0 at antistellar
-        Tlocal = Tbase * (1.0 + thermalDiffFactor * 0.65 - distFromSubstellar * thermalDiffFactor * 1.45) + climateWave;
+        Tlocal = Tbase * (1.0 + (0.34 - distFromSubstellar * 1.08) * thermalDiffFactor) + climateWave;
       } else {
-        Tlocal = Tbase * (1.0 + (Math.pow(blendedLatCos, 1.15) - 0.65) * thermalDiffFactor * 1.28) + climateWave;
+        // Spherical mean of cos^1.15(lat) is ~0.69 -> +0.31 at equator, -0.69 at poles (yielding ~220 K to 320 K at 1 bar, 288 K)
+        Tlocal = Tbase * (1.0 + (Math.pow(blendedLatCos, 1.15) - 0.69) * thermalDiffFactor) + climateWave;
       }
 
-      // Altitude lapse cooling above datum & adiabatic basin warming in deep depressions
+      // Convective altitude lapse cooling above datum (requires atmosphere for adiabatic expansion)
       let altitudeKm = 0;
       if (!isBelowSeaLevel && !isNoSurface) {
-        const altitudeRatio = Math.max(-0.32, (hNorm - seaLevelNormalized) / (1 - seaLevelNormalized));
+        const altitudeRatio = Math.max(-0.08, (hNorm - seaLevelNormalized) / (1 - seaLevelNormalized));
         altitudeKm = altitudeRatio * maxElevKm;
-        const lapse = 6.2 * activeBody.gravityG; // K per km
+        const lapse = 5.4 * activeBody.gravityG * atmoLapseFactor; // K per km
         Tlocal -= altitudeKm * lapse;
       }
 
