@@ -793,6 +793,32 @@ export function getSolventSeaPalette(solventRaw: string | undefined | null): Sol
       horizonBotHex: '#1d4ed8',
     };
   }
+  if (sLower.includes('perchlorate')) {
+    return {
+      solventKey: 'H2O',
+      displayName: 'Brine Water (H2O + Perchlorates)',
+      freezingPointK: 222.0,
+      iceBiomeName: 'Saline Perchlorate-Hydrate Sea Ice',
+      trenchRgb: [4, 22, 52],
+      deepRgb: [10, 56, 114],
+      shallowRgb: [28, 138, 198],
+      horizonTopHex: '#0ea5e9',
+      horizonBotHex: '#0369a1',
+    };
+  }
+  if (sLower.includes('brine') || sLower.includes('nacl') || sLower.includes('mgso4')) {
+    return {
+      solventKey: 'H2O',
+      displayName: 'Brine Water (H2O + Salts)',
+      freezingPointK: 250.0,
+      iceBiomeName: 'Saline Brine Sea Ice (H2O + NaCl/MgSO4)',
+      trenchRgb: [4, 20, 50],
+      deepRgb: [10, 52, 112],
+      shallowRgb: [26, 134, 198],
+      horizonTopHex: '#0ea5e9',
+      horizonBotHex: '#0369a1',
+    };
+  }
   // Default H2O marine ocean
   return {
     solventKey: 'H2O',
@@ -2160,14 +2186,19 @@ export function generatePlanetarySurfaceModel(
   const lockedThermalFactor = 1.0 / (1.0 + 0.36 * Math.pow(Math.max(0, pBarAtmo), 0.66));
   const waveAtmoScale = Math.max(0.12, Math.min(1.4, thermalDiffFactor / 0.31));
   const atmoLapseFactor = Math.min(1.0, Math.pow(Math.max(0, pBarAtmo) / 0.15, 0.45));
-  // On deep water/ice shell worlds with atmosphere, the freezing/melting transition between ice and liquid water is 273.15 K;
+  // On deep water/ice shell worlds with atmosphere, the freezing/melting transition between ice and liquid water is 273.15 K
+  // (or depressed below 273.15 K by dissolved salt/perchlorate brines on colder water ocean worlds);
   // on thin-atmosphere / rock-rich icy worlds (isWaterIceDominated), ice sublimates/ablates to expose bare rock above ~250 K!
+  const waterBrineFreezingK =
+    seaPalette.solventKey === 'H2O' && hasLiquid && Tbase < 280 && Tbase >= 210
+      ? Math.min(seaPalette.freezingPointK, Math.max(204, Math.round(Tbase - (Tbase < 252 ? 18 : 15))))
+      : seaPalette.freezingPointK;
   const freezingPointK = isDeepWaterOrIceShell
-    ? seaPalette.freezingPointK
+    ? waterBrineFreezingK
     : isWaterIceDominated
     ? 250.0
     : hasLiquid
-    ? seaPalette.freezingPointK
+    ? waterBrineFreezingK
     : isIcyWorld
     ? 250.0
     : (activeBody.gases?.CO2 || 0) >= 0.25 && pBarAtmo >= 0.001 && pBarAtmo < 1.5

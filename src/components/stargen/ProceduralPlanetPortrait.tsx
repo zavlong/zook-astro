@@ -783,6 +783,8 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
         // Foreground Ground / Liquid Sea Basin
         const seaColors: Record<string, [string, string]> = {
           H2O: ['#0ea5e9', '#0369a1'],
+          'H2O + NaCl-MgSO4 Brine': ['#0284c7', '#0c4a6e'],
+          'H2O + Perchlorate-Cl Brine': ['#06b6d4', '#164e63'],
           'H2O + CO2': ['#0ea5e9', '#0f766e'],
           'NH3-H2O': ['#818cf8', '#3730a3'],
           'CH4-C2H6': ['#d97706', '#451a03'],

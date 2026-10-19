@@ -2292,31 +2292,32 @@ export function generateZoneSystem(
               siKm: siK2,
             };
           }
-        } else if (b.iceFrac >= 0.015 && Tsurf >= 265 && effMuMin <= 28) {
+        } else if (b.iceFrac >= 0.015 && Tsurf >= 218 && effMuMin <= 28) {
           // Ocean worlds ALWAYS have an atmosphere saturated with water vapor (H2O) in equilibrium with the global ocean!
+          // Colder ocean worlds (218 K <= Tsurf < 280 K) dissolve salt/perchlorate antifreeze impurities into their hydrosphere to depress the freezing point below 273.15 K.
           pN = clamp(pN > 0 ? pN : Math.pow(b.massEarth, 0.65) * rand(0.5, 1.8), 0.35, 3.2);
           if (pC > 5.5) {
             // Deep ocean carbonate & clathrate sequestration buffers excess gaseous CO2
             pC = +clamp(pC * 0.16, 0.35, 5.5).toFixed(3);
           }
           for (let iter = 0; iter < 6; iter++) {
-            const effT = Math.max(275.0, Tsurf);
+            const effT = Math.max(222.0, Tsurf);
             const pSatW =
               effT >= 647.1
                 ? 220.6
                 : 1.013 * Math.exp(13.7 * (1 - 373.15 / effT));
             const drySum = Math.max(0.35, pC + pN + pH + pO + pM);
-            pW = +clamp(Math.max(pSatW, drySum * 0.045), 0.02, 220.6).toFixed(4);
+            pW = +clamp(Math.max(pSatW, drySum * 0.045), 0.015, 220.6).toFixed(4);
             ghK = +ghDelta(pC, pN, pH, pM, pW, pNH3, pS, Teq, grav).toFixed(1);
-            Tsurf = +Math.max(275.0, 0.5 * effT + 0.5 * (Tatm + ghK)).toFixed(1);
+            Tsurf = +Math.max(222.0, 0.5 * effT + 0.5 * (Tatm + ghK)).toFixed(1);
           }
           const finalPSatW =
             Tsurf >= 647.1
               ? 220.6
-              : 1.013 * Math.exp(13.7 * (1 - 373.15 / Math.max(275.0, Tsurf)));
-          pW = +clamp(Math.max(finalPSatW, (pC + pN + pH + pO + pM) * 0.045), 0.02, 220.6).toFixed(4);
+              : 1.013 * Math.exp(13.7 * (1 - 373.15 / Math.max(222.0, Tsurf)));
+          pW = +clamp(Math.max(finalPSatW, (pC + pN + pH + pO + pM) * 0.045), 0.015, 220.6).toFixed(4);
           ghK = +ghDelta(pC, pN, pH, pM, pW, pNH3, pS, Teq, grav).toFixed(1);
-          Tsurf = +Math.max(275.0, Tatm + ghK).toFixed(1);
+          Tsurf = +Math.max(222.0, Tatm + ghK).toFixed(1);
           gSum = rebuildGases();
           pBar = gSum;
 
@@ -2344,16 +2345,34 @@ export function generateZoneSystem(
               siKm: siK,
             };
           } else {
-            const fGPa = clamp(1.1 + 0.006 * (Tsurf - 273), 1.0, 2.2);
+            const fGPa = clamp(1.1 + 0.006 * (Tsurf - 273), 0.85, 2.2);
             const lKm = Math.min(totW, Math.round((fGPa * 100) / grav));
             const rem = Math.max(0, totW - lKm);
             const siK2 = b.massEarth >= 2 ? Math.round(rem * 0.42) : 0;
             const hasLiquidCO2Sublayer = pC >= 18 && Tsurf <= 304.1;
+            const isPerchlorateBrine = Tsurf < 252;
+            const isSalineBrine = Tsurf >= 252 && Tsurf < 280;
+            const oceanSolvent = hasLiquidCO2Sublayer
+              ? 'H2O + CO2'
+              : isPerchlorateBrine
+              ? 'H2O + Perchlorate-Cl Brine'
+              : isSalineBrine
+              ? 'H2O + NaCl-MgSO4 Brine'
+              : 'H2O';
+            const depressedTf = isPerchlorateBrine
+              ? Math.max(204, Math.round(Tsurf - 18))
+              : isSalineBrine
+              ? Math.max(244, Math.min(268, Math.round(Tsurf - 15)))
+              : 273;
             hydro = {
               state: hasLiquidCO2Sublayer
                 ? `Stratified Liquid H2O + High-Pressure Liquid CO2 Ocean over Clathrate/Ice VI (100% Coverage)`
+                : isPerchlorateBrine
+                ? `Global Hypersaline Perchlorate-Brine H2O Ocean (Freezing Point Depressed to ${depressedTf} K) over Ice VI (100% Coverage)`
+                : isSalineBrine
+                ? `Global Saline NaCl-MgSO4 Brine H2O Ocean (Freezing Point Depressed to ${depressedTf} K) over Ice VI (100% Coverage)`
                 : `Global Surface Liquid H2O Ocean (${Math.round(fGPa * 10000)} bar floor) over Ice VI/VII (100% Coverage)`,
-              solvent: hasLiquidCO2Sublayer ? 'H2O + CO2' : 'H2O',
+              solvent: oceanSolvent,
               coveragePct: 100,
               biosphere: biosphereDesc,
               liqKm: lKm,
@@ -2365,7 +2384,7 @@ export function generateZoneSystem(
         } else if (
           pClass.includes('Temperate Terrestrial') ||
           pClass.includes('Temperate Super-Earth') ||
-          (b.iceFrac < 0.015 && pBar > 0.35 && Tsurf >= 268 && Tsurf < 647.1 && pW > 0)
+          (b.iceFrac < 0.015 && pBar > 0.35 && Tsurf >= 245 && Tsurf < 647.1 && pW > 0)
         ) {
           // Earth-like / Super-Earth marine oceans with emergent continental crust
           const covPct = randInt(24, 86);
@@ -2374,9 +2393,12 @@ export function generateZoneSystem(
             2,
             14
           );
+          const isColdMarineBrine = Tsurf < 278;
           hydro = {
-            state: `Surface Liquid H2O Marine Oceans & Continental Landmasses (${covPct}% Liquid Coverage)`,
-            solvent: 'H2O',
+            state: isColdMarineBrine
+              ? `Saline NaCl-MgSO4 Brine H2O Seas & Continental Landmasses (${covPct}% Liquid Coverage)`
+              : `Surface Liquid H2O Marine Oceans & Continental Landmasses (${covPct}% Liquid Coverage)`,
+            solvent: isColdMarineBrine ? 'H2O + NaCl-MgSO4 Brine' : 'H2O',
             coveragePct: covPct,
             biosphere: biosphereDesc,
             liqKm: marineDepthKm,
@@ -2841,9 +2863,9 @@ export function generateZoneSystem(
           iceKm: Math.max(0, totW - lKm),
           siKm: 0,
         };
-      } else if (mc.includes('Habitable') || (mPBar !== null && mPBar >= 0.05 && mTsurf >= 268 && mTsurf < 647)) {
+      } else if (mc.includes('Habitable') || (mPBar !== null && mPBar >= 0.05 && mTsurf >= 220 && mTsurf < 647)) {
         const isMarineH2O = iceF < 0.08 || random() < 0.65;
-        const pSatW_m = 1.013 * Math.exp(13.7 * (1 - 373.15 / Math.max(273.15, mTsurf)));
+        const pSatW_m = 1.013 * Math.exp(13.7 * (1 - 373.15 / Math.max(222.0, mTsurf)));
         const minH2OFrac = isMarineH2O ? 0.025 : 0.05;
         const satFrac = clamp(pSatW_m / Math.max(0.05, (mPBar || 1.0) + pSatW_m), minH2OFrac, 0.85);
         if (!mGases.H2O || mGases.H2O < satFrac) {
@@ -2853,12 +2875,21 @@ export function generateZoneSystem(
           }
           mGases.H2O = +satFrac.toFixed(3);
         }
+        const mSolvent =
+          mTsurf < 252
+            ? 'H2O + Perchlorate-Cl Brine'
+            : mTsurf < 280
+            ? 'H2O + NaCl-MgSO4 Brine'
+            : 'H2O';
         if (!isMarineH2O) {
           const totW = Math.max(6, Math.round(rKm * (1 - Math.pow(1 - iceF, 0.42))));
           const lKm = Math.min(totW, Math.round(110 / Math.max(0.05, mGrav)));
           mHydro = {
-            state: 'Global Surface Liquid H2O Exomoon Ocean (100% Coverage)',
-            solvent: 'H2O',
+            state:
+              mTsurf < 280
+                ? `Global Saline/Perchlorate Brine H2O Exomoon Ocean (100% Coverage)`
+                : 'Global Surface Liquid H2O Exomoon Ocean (100% Coverage)',
+            solvent: mSolvent,
             coveragePct: 100,
             biosphere: mBioDesc,
             liqKm: lKm,
@@ -2870,8 +2901,11 @@ export function generateZoneSystem(
           const covPct = randInt(22, 84);
           const marineKm = clamp(Math.round(rKm * Math.max(0.0006, iceF * 0.45)), 1, 9);
           mHydro = {
-            state: `Surface Liquid H2O Marine Seas & Continental Crust (${covPct}% Coverage)`,
-            solvent: 'H2O',
+            state:
+              mTsurf < 280
+                ? `Saline Brine H2O Marine Seas & Continental Crust (${covPct}% Coverage)`
+                : `Surface Liquid H2O Marine Seas & Continental Crust (${covPct}% Coverage)`,
+            solvent: mSolvent,
             coveragePct: covPct,
             biosphere: mBioDesc,
             liqKm: marineKm,

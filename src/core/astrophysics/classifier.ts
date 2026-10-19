@@ -138,6 +138,7 @@ export function getOceanChemicalName(solvent?: string | null): string {
   if (!solvent) return 'Aqueous';
   const s = solvent.toLowerCase();
   if (s.includes('supercritical')) return 'Supercritical Aqueous';
+  if (s.includes('brine') || s.includes('perchlorate') || s.includes('nacl')) return 'Aqueous';
   if (s.includes('nh3') || s.includes('ammonia')) return 'Ammonia';
   if (s.includes('ch4') || s.includes('c2h6') || s.includes('hydrocarbon') || s.includes('methane')) return 'Methane';
   if (s.includes('h2so4') || s.includes('sulfuric')) return 'Sulfuric Acid';
@@ -151,6 +152,8 @@ export function getOceanChemicalName(solvent?: string | null): string {
 export function formatSolventName(solvent?: string | null): string {
   if (!solvent) return 'None';
   const s = solvent.toLowerCase();
+  if (s.includes('perchlorate')) return 'Brine Water (H2O + Perchlorates)';
+  if (s.includes('brine') || s.includes('nacl') || s.includes('mgso4')) return 'Brine Water (H2O + Salts)';
   if (s.includes('nh3') || s.includes('ammonia')) return 'Ammonia';
   if (s.includes('ch4') || s.includes('c2h6') || s.includes('hydrocarbon') || s.includes('methane')) return 'Methane';
   if (s.includes('h2so4') || s.includes('sulfuric')) return 'Sulfuric Acid';

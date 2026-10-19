@@ -295,6 +295,14 @@ export function derivePlanetaryChemistryProfile(
   const isFerric = compLabel.includes('Ferric') || bodyClassLower.includes('mars');
   const isVenusian = compLabel.includes('Sulfur-Weathered') || bodyClassLower.includes('venus');
 
+  const hydroSolventLower = (hydro?.solvent || '').toLowerCase();
+  const isPerchlorateBrineWorld =
+    solventKey === 'H2O' && (hydroSolventLower.includes('perchlorate') || (hasSurfaceLiquid && Tsurf < 252));
+  const isSalineBrineWorld =
+    solventKey === 'H2O' &&
+    !isPerchlorateBrineWorld &&
+    (hydroSolventLower.includes('brine') || (hasSurfaceLiquid && Tsurf < 280));
+
   const getLiquidRowInfo = (key: string): { name: string; formula: string; color: string; shortName: string } => {
     switch (key) {
       case 'NH3-H2O':
@@ -310,6 +318,22 @@ export function derivePlanetaryChemistryProfile(
       case 'H2O + CO2':
         return { name: 'Carbonated Liquid Water', formula: 'H₂O / CO₂', color: '#0ea5e9', shortName: 'Water' };
       default:
+        if (isPerchlorateBrineWorld) {
+          return {
+            name: 'Perchlorate-Brine Liquid Water',
+            formula: 'H₂O / Mg(ClO₄)₂ / CaCl₂',
+            color: '#0ea5e9',
+            shortName: 'Brine Water',
+          };
+        }
+        if (isSalineBrineWorld) {
+          return {
+            name: 'Saline Brine Liquid Water',
+            formula: 'H₂O / NaCl / MgSO₄',
+            color: '#0ea5e9',
+            shortName: 'Brine Water',
+          };
+        }
         return { name: 'Liquid Water', formula: 'H₂O', color: '#0ea5e9', shortName: 'Water' };
     }
   };
@@ -369,10 +393,19 @@ export function derivePlanetaryChemistryProfile(
         {
           name: isAmmoniaWorld ? 'Water & Ammonia Ice' : 'Water Ice',
           formula: isAmmoniaWorld ? 'H₂O / NH₃' : 'H₂O',
-          pct: 78 + n1 * 4,
+          pct: (isPerchlorateBrineWorld || isSalineBrineWorld ? 64 : 78) + n1 * 4,
           color: '#dbeafe',
         },
-        { name: 'Dissolved & Frozen Salts', formula: 'MgSO₄ / NaCl', pct: 13 + n3 * 2, color: '#38bdf8' },
+        {
+          name: isPerchlorateBrineWorld
+            ? 'Dissolved Perchlorate & Chloride Antifreeze Salts'
+            : isSalineBrineWorld
+            ? 'Dissolved Antifreeze Brine Salts'
+            : 'Dissolved & Frozen Salts',
+          formula: isPerchlorateBrineWorld ? 'Mg(ClO₄)₂ / CaCl₂' : 'NaCl / MgSO₄',
+          pct: (isPerchlorateBrineWorld ? 27 : isSalineBrineWorld ? 24 : 13) + n3 * 2,
+          color: '#38bdf8',
+        },
         {
           name: isAmmoniaWorld ? 'Carbonate & Nitrogen Frost' : 'Carbon Dioxide & Gas Hydrate Ice',
           formula: isAmmoniaWorld ? 'CaCO₃ / N₂' : 'CO₂ / CH₄·nH₂O',
