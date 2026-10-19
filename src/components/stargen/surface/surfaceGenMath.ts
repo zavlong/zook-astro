@@ -1417,6 +1417,7 @@ export function generatePlanetarySurfaceModel(
   const hasSubsurfaceOcean = Boolean(
     !isNoSurface &&
       !isMoltenWorld &&
+      !hasLiquid &&
       Tbase < 273.15 &&
       hydro &&
       (((hydro.iceKm ?? 0) > 0 && (hydro.liqKm ?? 0) > 0) ||

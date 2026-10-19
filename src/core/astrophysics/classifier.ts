@@ -342,12 +342,16 @@ export function formatRockyBodyClass(
   }
 
   // 3. Hydrosphere detection
+  const stateLower = hydro?.state?.toLowerCase() ?? '';
+  const solventLower = hydro?.solvent?.toLowerCase() ?? '';
   const hasLiquid = Boolean(
     hydro &&
     hydro.solvent &&
+    hydro.solvent !== 'None' &&
+    !solventLower.includes('subsurface') &&
     (hydro.coveragePct === undefined || hydro.coveragePct > 0) &&
-    !hydro.state?.toLowerCase().includes('subsurface') &&
-    !hydro.state?.toLowerCase().includes('no surface')
+    !(stateLower.includes('subsurface') && !stateLower.startsWith('surface')) &&
+    !stateLower.includes('no surface')
   );
 
   const is100Pct = Boolean(
@@ -420,9 +424,13 @@ export function formatRockyBodyClass(
     compClass = '';
   }
 
-  // 4. methane and ammonia implies icy too, so icy is redundant
+  // 4. methane and ammonia implies icy too, so icy is redundant;
+  //    methane also implies frozen (< 150K), so "Methane Moon" / "Methane World" instead of "Frozen Methane Moon"
   if ((hydroClass === 'Methane' || hydroClass === 'Ammonia') && compClass === 'Icy') {
     compClass = '';
+  }
+  if (hydroClass === 'Methane' && tempClass === 'Frozen') {
+    tempClass = '';
   }
 
   // Build the template: <temperature class> [Greenhouse] <hydrosphere class> <composition class> <suffix>
