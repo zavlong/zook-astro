@@ -1,8 +1,10 @@
 import React from 'react';
-import { Layers, FlaskConical, Flame } from 'lucide-react';
+import { Layers, FlaskConical, Flame, Mountain, Activity } from 'lucide-react';
 import { RealisticPlanetBody } from '../../../core/generation/realisticStarGen';
 import { RealisticMoon } from '../../../types/astrophysics';
 import { PlanetarySurfaceModel, generatePlanetarySurfaceModel } from './surfaceGenMath';
+
+export type GeoActivityLevel = 'None' | 'Low' | 'Moderate' | 'High' | 'Extreme';
 
 export interface SurfaceChemicalRow {
   name: string;
@@ -31,6 +33,10 @@ export interface PlanetaryChemistryProfile {
   surfaceTitle: string;
   coreMassPct: number;
   coreTempK: number;
+  volcanismLevel: GeoActivityLevel;
+  volcanismDesc: string;
+  tectonicsLevel: GeoActivityLevel;
+  tectonicsDesc: string;
   surfaceRows: SurfaceChemicalRow[];
   interiorRows: InteriorLayerRow[];
   bulkElements: BulkElementItem[];
@@ -228,6 +234,10 @@ export function derivePlanetaryChemistryProfile(
       surfaceTitle: 'Upper Cloud & Atmosphere Composition',
       coreMassPct: corePct,
       coreTempK,
+      volcanismLevel: 'None',
+      volcanismDesc: 'No solid surface (convective gas envelope)',
+      tectonicsLevel: 'None',
+      tectonicsDesc: 'No solid crust (fluid interior)',
       surfaceRows,
       interiorRows,
       bulkElements,
@@ -520,14 +530,114 @@ export function derivePlanetaryChemistryProfile(
     },
   ]);
 
+  // Volcanism & Tectonic Activity Strength
+  let volcanismLevel: GeoActivityLevel = 'None';
+  let volcanismDesc = 'Inactive (no active volcanoes)';
+
+  if (surfModel.isSupercritical) {
+    volcanismLevel = tidalW >= 0.2 || massEarth >= 2.0 ? 'High' : 'Moderate';
+    volcanismDesc = 'Deep seafloor hydrothermal vents';
+  } else if (surfModel.isMoltenWorld || tidalW >= 0.8) {
+    volcanismLevel = 'Extreme';
+    volcanismDesc = 'Global lava flows & constant eruptions';
+  } else if (surfModel.isIcyWorld || iceFrac >= 0.15) {
+    if (tidalW >= 0.25) {
+      volcanismLevel = 'High';
+      volcanismDesc = 'Active ice geysers & water/ammonia plumes';
+    } else if (hasSubOcean || tidalW >= 0.04) {
+      volcanismLevel = 'Moderate';
+      volcanismDesc = 'Subsurface ocean geysers & ice vents';
+    } else if (massEarth >= 0.08 || tidalW >= 0.01) {
+      volcanismLevel = 'Low';
+      volcanismDesc = 'Rare cryovolcanic frost vents';
+    } else {
+      volcanismLevel = 'None';
+      volcanismDesc = 'Frozen & inactive (no active vents)';
+    }
+  } else {
+    if (tidalW >= 0.25 || isSulfur || isVenusian || surfModel.volcanoCount >= 18) {
+      volcanismLevel = 'High';
+      volcanismDesc = 'Frequent eruptions & active lava volcanoes';
+    } else if (surfModel.hasActiveGeology && (surfModel.volcanoCount >= 6 || surfModel.platesCount > 0)) {
+      volcanismLevel = 'Moderate';
+      volcanismDesc = 'Active shield & plate-boundary volcanoes';
+    } else if (surfModel.volcanoCount > 0 || tidalW >= 0.015 || massEarth >= 0.15) {
+      volcanismLevel = 'Low';
+      volcanismDesc = 'Mostly dormant volcanoes & minor vents';
+    } else {
+      volcanismLevel = 'None';
+      volcanismDesc = 'Extinct (no active volcanism)';
+    }
+  }
+
+  let tectonicsLevel: GeoActivityLevel = 'None';
+  let tectonicsDesc = 'Locked, inactive crust';
+
+  if (surfModel.isSupercritical) {
+    tectonicsLevel = massEarth >= 2.0 ? 'Moderate' : 'Low';
+    tectonicsDesc = 'Deep seafloor fault shifting';
+  } else if (surfModel.isMoltenWorld) {
+    tectonicsLevel = 'Extreme';
+    tectonicsDesc = 'Thin crust constantly breaking over magma';
+  } else if (surfModel.platesCount > 0) {
+    if (tidalW >= 0.3 || massEarth >= 1.6) {
+      tectonicsLevel = 'High';
+      tectonicsDesc = `${surfModel.platesCount} fast-moving plates & mountain belts`;
+    } else {
+      tectonicsLevel = 'Moderate';
+      tectonicsDesc = `${surfModel.platesCount} moving crustal plates & fault lines`;
+    }
+  } else if (surfModel.isIcyWorld || iceFrac >= 0.15) {
+    if (tidalW >= 0.2) {
+      tectonicsLevel = 'High';
+      tectonicsDesc = 'Rapidly flexing & cracking ice shell';
+    } else if (hasSubOcean || tidalW >= 0.04) {
+      tectonicsLevel = 'Moderate';
+      tectonicsDesc = 'Shifting ice shell with surface fractures';
+    } else if (massEarth >= 0.08) {
+      tectonicsLevel = 'Low';
+      tectonicsDesc = 'Fixed ice crust with old fault ridges';
+    } else {
+      tectonicsLevel = 'None';
+      tectonicsDesc = 'Rigid, unmoving ice crust';
+    }
+  } else if (surfModel.hasActiveGeology) {
+    if (tidalW >= 0.25 || isVenusian) {
+      tectonicsLevel = 'Moderate';
+      tectonicsDesc = 'Single crust with heavy volcanic faulting';
+    } else {
+      tectonicsLevel = 'Low';
+      tectonicsDesc = 'Single fixed crust with local fault lines';
+    }
+  }
+
   return {
     surfaceTitle: 'Surface Composition',
     coreMassPct,
     coreTempK,
+    volcanismLevel,
+    volcanismDesc,
+    tectonicsLevel,
+    tectonicsDesc,
     surfaceRows,
     interiorRows,
     bulkElements,
   };
+}
+
+function getActivityBadgeStyle(level: GeoActivityLevel): string {
+  switch (level) {
+    case 'Extreme':
+      return 'bg-red-950/90 border-red-500/70 text-red-200';
+    case 'High':
+      return 'bg-orange-950/90 border-orange-500/70 text-orange-200';
+    case 'Moderate':
+      return 'bg-amber-950/90 border-amber-500/70 text-amber-200';
+    case 'Low':
+      return 'bg-sky-950/80 border-sky-600/60 text-sky-200';
+    default:
+      return 'bg-slate-900 border-slate-700 text-slate-400';
+  }
 }
 
 interface PlanetaryChemistrySectionProps {
@@ -561,6 +671,47 @@ export const PlanetaryChemistrySection: React.FC<PlanetaryChemistrySectionProps>
           </span>
           <span className="px-2 py-0.5 rounded bg-[#0c121d] border border-slate-800 text-slate-300">
             Core Temp: <b className="text-rose-300">{profile.coreTempK.toLocaleString()} K</b>
+          </span>
+        </div>
+      </div>
+
+      {/* Volcanism & Tectonic Activity Strength */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        <div className="bg-[#0c121d] p-2.5 rounded-lg border border-slate-800/90 flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider flex items-center gap-1.5">
+              <Mountain className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
+              Volcanism
+            </span>
+            <span className="text-[11px] text-slate-200 truncate" title={profile.volcanismDesc}>
+              {profile.volcanismDesc}
+            </span>
+          </div>
+          <span
+            className={`px-2 py-0.5 rounded border text-[10.5px] font-bold flex-shrink-0 ${getActivityBadgeStyle(
+              profile.volcanismLevel
+            )}`}
+          >
+            {profile.volcanismLevel}
+          </span>
+        </div>
+
+        <div className="bg-[#0c121d] p-2.5 rounded-lg border border-slate-800/90 flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+              Tectonic Activity
+            </span>
+            <span className="text-[11px] text-slate-200 truncate" title={profile.tectonicsDesc}>
+              {profile.tectonicsDesc}
+            </span>
+          </div>
+          <span
+            className={`px-2 py-0.5 rounded border text-[10.5px] font-bold flex-shrink-0 ${getActivityBadgeStyle(
+              profile.tectonicsLevel
+            )}`}
+          >
+            {profile.tectonicsLevel}
           </span>
         </div>
       </div>
