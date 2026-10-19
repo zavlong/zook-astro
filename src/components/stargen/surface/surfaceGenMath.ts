@@ -155,6 +155,74 @@ function lerpHex(hexA: string, hexB: string, t: number): string {
 }
 
 /**
+ * Slightly perturbs an RGB tuple in HSL + warmth space so each solid world or gas giant
+ * has a subtly randomized, distinct color signature while remaining faithful to its physical class.
+ */
+function perturbRgbSlightly(
+  rgb: [number, number, number],
+  hueShiftDeg: number,
+  satScale: number,
+  litScale: number,
+  warmthOffset = 0
+): [number, number, number] {
+  const r0 = rgb[0] / 255;
+  const g0 = rgb[1] / 255;
+  const b0 = rgb[2] / 255;
+  const max = Math.max(r0, g0, b0);
+  const min = Math.min(r0, g0, b0);
+  const l0 = (max + min) * 0.5;
+  let h = 0;
+  let s = 0;
+  const d = max - min;
+  if (d > 1e-5) {
+    s = l0 > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r0) h = ((g0 - b0) / d + (g0 < b0 ? 6 : 0)) / 6;
+    else if (max === g0) h = ((b0 - r0) / d + 2) / 6;
+    else h = ((r0 - g0) / d + 4) / 6;
+  }
+
+  const h1 = (((h + hueShiftDeg / 360) % 1) + 1) % 1;
+  const s1 = Math.max(0, Math.min(1, s * satScale));
+  const l1 = Math.max(0.02, Math.min(0.98, l0 * litScale));
+
+  let r1 = l1;
+  let g1 = l1;
+  let b1 = l1;
+  if (s1 > 1e-5) {
+    const hue2rgb = (p: number, q: number, tVal: number) => {
+      let t = tVal;
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    const q = l1 < 0.5 ? l1 * (1 + s1) : l1 + s1 - l1 * s1;
+    const p = 2 * l1 - q;
+    r1 = hue2rgb(p, q, h1 + 1 / 3);
+    g1 = hue2rgb(p, q, h1);
+    b1 = hue2rgb(p, q, h1 - 1 / 3);
+  }
+
+  return [
+    Math.max(0, Math.min(255, Math.round(r1 * 255 + warmthOffset))),
+    Math.max(0, Math.min(255, Math.round(g1 * 255 + warmthOffset * 0.22))),
+    Math.max(0, Math.min(255, Math.round(b1 * 255 - warmthOffset * 0.82))),
+  ];
+}
+
+function perturbHexSlightly(
+  hex: string,
+  hueShiftDeg: number,
+  satScale: number,
+  litScale: number,
+  warmthOffset = 0
+): string {
+  return rgbToHex(perturbRgbSlightly(hexToRgbTuple(hex), hueShiftDeg, satScale, litScale, warmthOffset));
+}
+
+/**
  * Derives the solid crust/regolith mineral color palette from the planet's or moon's
  * bulk physical composition (rockFrac, iceFrac, densityGcm3, gases, tidal heating, temperature, and class).
  */
@@ -1456,14 +1524,37 @@ export function generatePlanetarySurfaceModel(
   const starRadiusAU = (star.radius || 1.0) * 0.00465047;
   const starAngularDiameterDeg = +(2 * Math.atan(starRadiusAU / (2 * starDistAU)) * (180 / Math.PI)).toFixed(2);
 
-  // Solvent-specific sea color palette (force Silicate Magma palette on molten worlds)
-  const seaPalette = getSolventSeaPalette(isMoltenWorld ? 'Silicate Magma' : hydro?.solvent);
+  // Deterministic seed
+  const bodyKey = isMoon
+    ? `${moon?.id || moon?.name || 'moon'}_${moon?.radiusKm}_${moon?.surfaceTempK}`
+    : `${planet.planetClass}_${planet.a}_${planet.radiusEarth}_${planet.massEarth}_${planet.surfaceTempK}`;
+  let seed = 1337;
+  for (let i = 0; i < bodyKey.length; i++) {
+    seed = (seed * 31 + bodyKey.charCodeAt(i)) >>> 0;
+  }
+  const prng = createPrng(seed);
+  const colorPrng = createPrng(seed ^ 0x6c8e9cf5);
+
+  // Solvent-specific sea color palette (force Silicate Magma palette on molten worlds) with slight per-world randomization
+  const rawSeaPalette = getSolventSeaPalette(isMoltenWorld ? 'Silicate Magma' : hydro?.solvent);
+  const seaHue = (colorPrng() - 0.5) * 11;
+  const seaSat = 0.93 + colorPrng() * 0.14;
+  const seaLit = 0.94 + colorPrng() * 0.12;
+  const seaWarmth = (colorPrng() - 0.5) * 6;
+  const seaPalette: SolventSeaPalette = {
+    ...rawSeaPalette,
+    trenchRgb: perturbRgbSlightly(rawSeaPalette.trenchRgb, seaHue, seaSat, seaLit, seaWarmth * 0.6),
+    deepRgb: perturbRgbSlightly(rawSeaPalette.deepRgb, seaHue, seaSat, seaLit, seaWarmth),
+    shallowRgb: perturbRgbSlightly(rawSeaPalette.shallowRgb, seaHue + (colorPrng() - 0.5) * 4, seaSat, seaLit, seaWarmth),
+    horizonTopHex: perturbHexSlightly(rawSeaPalette.horizonTopHex, seaHue, seaSat, seaLit, seaWarmth),
+    horizonBotHex: perturbHexSlightly(rawSeaPalette.horizonBotHex, seaHue, seaSat, seaLit, seaWarmth * 0.7),
+  };
 
   // Biosphere & planetary composition palette
   const hasBiosphere = Boolean(!isNoSurface && hydro?.biosphere);
   const tidalW = (activeBody as { tidalW?: number }).tidalW ?? 0;
 
-  const compositionPalette = deriveCrustCompositionPalette({
+  const rawCompositionPalette = deriveCrustCompositionPalette({
     rockFrac: activeBody.rockFrac ?? 1.0,
     iceFrac: activeBody.iceFrac ?? 0.0,
     densityGcm3: activeBody.densityGcm3 ?? 5.0,
@@ -1480,19 +1571,67 @@ export function generatePlanetarySurfaceModel(
     hasBiosphere,
   });
 
-  // Biosphere & star-specific flora pigments (Green ONLY on water-life worlds around F & G stars; sterile worlds use compositionPalette)
-  const floraPalette = getFloraPigmentPalette(hasBiosphere, seaPalette.solventKey, starTeff, compositionPalette);
-  const hasWaterLife = floraPalette.hasWaterLife;
+  // Slightly randomize solid crust colors per world + subtle micro-variation per biome
+  const crustHue = (colorPrng() - 0.5) * 13;
+  const crustSat = 0.92 + colorPrng() * 0.16;
+  const crustLit = 0.94 + colorPrng() * 0.12;
+  const crustWarm = (colorPrng() - 0.5) * 8;
+  const pHex = (hex: string, mult = 1.0) =>
+    perturbHexSlightly(
+      hex,
+      (crustHue + (colorPrng() - 0.5) * 4) * mult,
+      1 + (crustSat - 1) * mult,
+      (crustLit + (colorPrng() - 0.5) * 0.04) * mult + (1 - mult),
+      crustWarm * mult
+    );
+  const pRgb = (rgb: [number, number, number], mult = 1.0) =>
+    perturbRgbSlightly(
+      rgb,
+      (crustHue + (colorPrng() - 0.5) * 4) * mult,
+      1 + (crustSat - 1) * mult,
+      (crustLit + (colorPrng() - 0.5) * 0.04) * mult + (1 - mult),
+      crustWarm * mult
+    );
 
-  // Deterministic seed
-  const bodyKey = isMoon
-    ? (moon?.id || moon?.name || 'moon')
-    : `${planet.planetClass}_${planet.a}_${planet.radiusEarth}`;
-  let seed = 1337;
-  for (let i = 0; i < bodyKey.length; i++) {
-    seed = (seed * 31 + bodyKey.charCodeAt(i)) >>> 0;
-  }
-  const prng = createPrng(seed);
+  const compositionPalette: CrustCompositionPalette = {
+    ...rawCompositionPalette,
+    craterlandHex: pHex(rawCompositionPalette.craterlandHex),
+    alluvialHex: pHex(rawCompositionPalette.alluvialHex),
+    lowlandHex: pHex(rawCompositionPalette.lowlandHex),
+    basinHex: pHex(rawCompositionPalette.basinHex),
+    steppeHex: pHex(rawCompositionPalette.steppeHex),
+    aridHex: pHex(rawCompositionPalette.aridHex),
+    duneHex: pHex(rawCompositionPalette.duneHex),
+    plateauHex: pHex(rawCompositionPalette.plateauHex),
+    mountainHex: pHex(rawCompositionPalette.mountainHex),
+    peakHex: pHex(rawCompositionPalette.peakHex, 0.45),
+    tundraHex: pHex(rawCompositionPalette.tundraHex),
+    iceHex: pHex(rawCompositionPalette.iceHex, 0.45),
+    cryoPlainsHex: pHex(rawCompositionPalette.cryoPlainsHex, 0.5),
+    basaltHex: pHex(rawCompositionPalette.basaltHex, 0.8),
+    lowlandRgb: pRgb(rawCompositionPalette.lowlandRgb),
+    plateauRgb: pRgb(rawCompositionPalette.plateauRgb),
+    mountainRgb: pRgb(rawCompositionPalette.mountainRgb),
+    peakRgb: pRgb(rawCompositionPalette.peakRgb, 0.45),
+  };
+
+  // Biosphere & star-specific flora pigments (Green ONLY on water-life worlds around F & G stars; sterile worlds use compositionPalette)
+  const rawFloraPalette = getFloraPigmentPalette(hasBiosphere, seaPalette.solventKey, starTeff, compositionPalette);
+  const floraHue = (colorPrng() - 0.5) * 12;
+  const floraSat = 0.92 + colorPrng() * 0.16;
+  const floraLit = 0.94 + colorPrng() * 0.12;
+  const floraPalette: FloraPigmentPalette = rawFloraPalette.hasAnyLife
+    ? {
+        ...rawFloraPalette,
+        plainsHex: perturbHexSlightly(rawFloraPalette.plainsHex, floraHue, floraSat, floraLit),
+        woodlandHex: perturbHexSlightly(rawFloraPalette.woodlandHex, floraHue + (colorPrng() - 0.5) * 4, floraSat, floraLit),
+        taigaHex: perturbHexSlightly(rawFloraPalette.taigaHex, floraHue + (colorPrng() - 0.5) * 4, floraSat, floraLit),
+        marshHex: perturbHexSlightly(rawFloraPalette.marshHex, floraHue + (colorPrng() - 0.5) * 4, floraSat, floraLit),
+        lowRgb: perturbRgbSlightly(rawFloraPalette.lowRgb, floraHue, floraSat, floraLit),
+        highRgb: perturbRgbSlightly(rawFloraPalette.highRgb, floraHue, floraSat, floraLit),
+      }
+    : rawFloraPalette;
+  const hasWaterLife = floraPalette.hasWaterLife;
 
   // Plate tectonics & active geology parameters
   const platesCount = isNoSurface
@@ -1565,9 +1704,9 @@ export function generatePlanetarySurfaceModel(
   // Pre-generate discrete 3D volcanoes for worlds with active geology (Earth, Venus, Io, etc.)
   const volcanoes = generateSphericalVolcanoes(seed, hasActiveGeology, isExtremeVolcanic);
 
-  // Derive cloud/atmosphere palette & opacity proportional to atmospheric density
+  // Derive cloud/atmosphere palette & opacity proportional to atmospheric density, with slight per-world randomization
   const sudarskyClass = !isMoon ? planet.sudarskyClass : null;
-  const { palette: atmospherePalette, opacity: cloudOpacity } = deriveAtmosphereAndCloudPalette(
+  const { palette: rawAtmoPalette, opacity: cloudOpacity } = deriveAtmosphereAndCloudPalette(
     activeBody.pressureBar,
     activeBody.gases || {},
     isGasGiant,
@@ -1577,6 +1716,36 @@ export function generatePlanetarySurfaceModel(
     sudarskyClass,
     Tbase
   );
+  const atmoMult = isNoSurface ? 1.0 : 0.4;
+  const ggHue = (colorPrng() - 0.5) * 15 * atmoMult;
+  const ggSat = 1.0 + (colorPrng() - 0.5) * 0.18 * atmoMult;
+  const ggLit = 1.0 + (colorPrng() - 0.5) * 0.12 * atmoMult;
+  const ggWarm = (colorPrng() - 0.5) * 10 * atmoMult;
+  const atmospherePalette: AtmosphereCloudPalette = {
+    ...rawAtmoPalette,
+    atmoRgb: perturbRgbSlightly(rawAtmoPalette.atmoRgb, ggHue, ggSat, ggLit, ggWarm),
+    bandLightRgb: perturbRgbSlightly(
+      rawAtmoPalette.bandLightRgb,
+      ggHue + (colorPrng() - 0.5) * 6 * atmoMult,
+      ggSat,
+      ggLit + (colorPrng() - 0.5) * 0.05 * atmoMult,
+      ggWarm * 0.8
+    ),
+    bandDarkRgb: perturbRgbSlightly(
+      rawAtmoPalette.bandDarkRgb,
+      ggHue + (colorPrng() - 0.5) * 6 * atmoMult,
+      ggSat * (0.96 + colorPrng() * 0.08),
+      ggLit + (colorPrng() - 0.5) * 0.06 * atmoMult,
+      ggWarm
+    ),
+    cloudRgb: perturbRgbSlightly(rawAtmoPalette.cloudRgb, ggHue * 0.6, ggSat, ggLit, ggWarm * 0.5),
+  };
+
+  // Slightly randomized zonal band parameters & storm vortex coordinates for Gas Giants / Ice Giants
+  const ggBandFreqScale = 0.88 + colorPrng() * 0.24;
+  const ggBandPhase = colorPrng() * Math.PI * 2;
+  const ggVortexLat = (colorPrng() < 0.5 ? -1 : 1) * (14 + colorPrng() * 20);
+  const ggVortexLon = (colorPrng() - 0.5) * 280;
 
   // Generate elevation & cloud samples
   const allElevations: number[] = [];
@@ -1594,11 +1763,14 @@ export function generatePlanetarySurfaceModel(
       // 1. Compute swirling atmospheric / cloud field for all worlds with an atmosphere
       if (isNoSurface) {
         // Zonal banded jet streams + cyclonic storms for Gas Giants, Ice Giants, & Supercritical Water Worlds
-        const bandFreq = isSupercritical ? 9 : isIceGiant ? 8 : 14;
+        const bandFreq = (isSupercritical ? 9 : isIceGiant ? 8 : 14) * ggBandFreqScale;
         const swirl = sphericalFbm(lat * 1.4, lon * 0.9, seed + 701, 4);
-        const jetWave = Math.sin(latRad * bandFreq + (swirl - 0.5) * 3.6) * 0.5 + 0.5;
-        const fineBands = Math.cos(latRad * bandFreq * 2.1 - swirl * 2.4) * 0.22;
-        const vortex = Math.max(0, 1.0 - Math.hypot((lat + 22) * 0.08, ((lon - 35 + 540) % 360 - 180) * 0.045));
+        const jetWave = Math.sin(latRad * bandFreq + ggBandPhase + (swirl - 0.5) * 3.6) * 0.5 + 0.5;
+        const fineBands = Math.cos(latRad * bandFreq * 2.1 - ggBandPhase * 0.6 - swirl * 2.4) * 0.22;
+        const vortex = Math.max(
+          0,
+          1.0 - Math.hypot((lat - ggVortexLat) * 0.08, ((lon - ggVortexLon + 540) % 360 - 180) * 0.045)
+        );
         cloudGrid[idx] = Math.max(0, Math.min(1, jetWave * 0.72 + fineBands + swirl * 0.28 + vortex * 0.35));
         hypsometry[idx] = 0.5; // Blank solid surface
         continue;
@@ -2172,28 +2344,43 @@ export function generatePlanetarySurfaceModel(
   {
     const rawRgb = new Float32Array(width * height * 3);
     const pingRgb = new Float32Array(width * height * 3);
-    for (let i = 0; i < width * height; i++) {
-      const bId = biomeGrid[i];
-      const Tlocal = temperatureGrid[i];
-      const h = hypsometry[i];
-      if (bId === 15 && volcanoGrid[i] <= 1.1) {
-        const meltHeat = Math.max(0, Math.min(1, (Tlocal - 800) / 420 + (1 - h) * 0.25));
-        if (meltHeat < 0.45) {
-          const t = meltHeat / 0.45;
-          rawRgb[i * 3] = 215 + (248 - 215) * t;
-          rawRgb[i * 3 + 1] = 78 + (138 - 78) * t;
-          rawRgb[i * 3 + 2] = 8 + (14 - 8) * t;
+    for (let y = 0; y < height; y++) {
+      const lat = 90 - y;
+      for (let x = 0; x < width; x++) {
+        const lon = x - 180;
+        const i = y * width + x;
+        const bId = biomeGrid[i];
+        const Tlocal = temperatureGrid[i];
+        const h = hypsometry[i];
+        if (bId === 15 && volcanoGrid[i] <= 1.1) {
+          const meltHeat = Math.max(0, Math.min(1, (Tlocal - 800) / 420 + (1 - h) * 0.25));
+          if (meltHeat < 0.45) {
+            const t = meltHeat / 0.45;
+            rawRgb[i * 3] = 215 + (248 - 215) * t;
+            rawRgb[i * 3 + 1] = 78 + (138 - 78) * t;
+            rawRgb[i * 3 + 2] = 8 + (14 - 8) * t;
+          } else {
+            const t = (meltHeat - 0.45) / 0.55;
+            rawRgb[i * 3] = 248 + (255 - 248) * t;
+            rawRgb[i * 3 + 1] = 138 + (214 - 138) * t;
+            rawRgb[i * 3 + 2] = 14 + (46 - 14) * t;
+          }
         } else {
-          const t = (meltHeat - 0.45) / 0.55;
-          rawRgb[i * 3] = 248 + (255 - 248) * t;
-          rawRgb[i * 3 + 1] = 138 + (214 - 138) * t;
-          rawRgb[i * 3 + 2] = 14 + (46 - 14) * t;
+          const hex = resolveSolidBiomeColorHex(bId, floraPalette, compositionPalette);
+          const baseR = parseInt(hex.slice(1, 3), 16);
+          const baseG = parseInt(hex.slice(3, 5), 16);
+          const baseB = parseInt(hex.slice(5, 7), 16);
+          // Subtle regional mineral/albedo color variation across solid surfaces
+          const regTint = sphericalFbm(lat * 2.1, lon * 2.1, seed + 947, 3) - 0.5;
+          const fineTint = sphericalFbm(lat * 5.2, lon * 5.2, seed + 1319, 2) - 0.5;
+          const isIceBiome = bId === 8 || bId === 13 || bId === 18 || bId === 21;
+          const varMult = isIceBiome ? 0.55 : 1.0;
+          const lScale = 1.0 + (regTint * 0.085 + fineTint * 0.045) * varMult;
+          const warmShift = (regTint * 5.5 - fineTint * 3.0) * varMult;
+          rawRgb[i * 3] = Math.max(0, Math.min(255, baseR * lScale + warmShift));
+          rawRgb[i * 3 + 1] = Math.max(0, Math.min(255, baseG * lScale + warmShift * 0.2));
+          rawRgb[i * 3 + 2] = Math.max(0, Math.min(255, baseB * lScale - warmShift * 0.75));
         }
-      } else {
-        const hex = resolveSolidBiomeColorHex(bId, floraPalette, compositionPalette);
-        rawRgb[i * 3] = parseInt(hex.slice(1, 3), 16);
-        rawRgb[i * 3 + 1] = parseInt(hex.slice(3, 5), 16);
-        rawRgb[i * 3 + 2] = parseInt(hex.slice(5, 7), 16);
       }
     }
 
@@ -2449,20 +2636,38 @@ export function evaluateSurfaceMapTexel(
     let b = 0;
 
     if (isNoSurface) {
+      const bandHarmonic = Math.sin((gy / height) * Math.PI * 9.5 + (surfaceModel.seed % 23) * 0.35 + cVal * 2.1);
+      const bandScale = 1.0 + bandHarmonic * 0.045;
+      const bandWarmth = Math.cos((gy / height) * Math.PI * 6.5 + (surfaceModel.seed % 17) * 0.5) * 4.5;
       if (surfaceModel.isSupercritical) {
         const cloudCover = Math.max(0, Math.min(1, (cVal - 0.18) / 0.78));
         const greyShade = 0.76 + 0.24 * Math.sin(cVal * Math.PI);
         const cr = atmospherePalette.bandLightRgb[0] * greyShade;
         const cg = atmospherePalette.bandLightRgb[1] * greyShade;
         const cb = atmospherePalette.bandLightRgb[2] * greyShade;
-        r = atmospherePalette.atmoRgb[0] * (1 - cloudCover * 0.88) + cr * (cloudCover * 0.88);
-        g = atmospherePalette.atmoRgb[1] * (1 - cloudCover * 0.88) + cg * (cloudCover * 0.88);
-        b = atmospherePalette.atmoRgb[2] * (1 - cloudCover * 0.88) + cb * (cloudCover * 0.88);
+        r = (atmospherePalette.atmoRgb[0] * (1 - cloudCover * 0.88) + cr * (cloudCover * 0.88)) * bandScale;
+        g = (atmospherePalette.atmoRgb[1] * (1 - cloudCover * 0.88) + cg * (cloudCover * 0.88)) * bandScale;
+        b = (atmospherePalette.atmoRgb[2] * (1 - cloudCover * 0.88) + cb * (cloudCover * 0.88)) * bandScale;
       } else {
-        r = atmospherePalette.bandDarkRgb[0] + (atmospherePalette.bandLightRgb[0] - atmospherePalette.bandDarkRgb[0]) * cVal;
-        g = atmospherePalette.bandDarkRgb[1] + (atmospherePalette.bandLightRgb[1] - atmospherePalette.bandDarkRgb[1]) * cVal;
-        b = atmospherePalette.bandDarkRgb[2] + (atmospherePalette.bandLightRgb[2] - atmospherePalette.bandDarkRgb[2]) * cVal;
+        r =
+          (atmospherePalette.bandDarkRgb[0] +
+            (atmospherePalette.bandLightRgb[0] - atmospherePalette.bandDarkRgb[0]) * cVal) *
+            bandScale +
+          bandWarmth;
+        g =
+          (atmospherePalette.bandDarkRgb[1] +
+            (atmospherePalette.bandLightRgb[1] - atmospherePalette.bandDarkRgb[1]) * cVal) *
+            bandScale +
+          bandWarmth * 0.2;
+        b =
+          (atmospherePalette.bandDarkRgb[2] +
+            (atmospherePalette.bandLightRgb[2] - atmospherePalette.bandDarkRgb[2]) * cVal) *
+            bandScale -
+          bandWarmth * 0.75;
       }
+      r = Math.max(0, Math.min(255, r));
+      g = Math.max(0, Math.min(255, g));
+      b = Math.max(0, Math.min(255, b));
 
       if (applyReliefInSatellite) {
         const cnx = -dcdx * 14;
