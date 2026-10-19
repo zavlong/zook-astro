@@ -893,9 +893,11 @@ function generateSphericalCraters(
 
   const craterPrng = createPrng(seed ^ 0x9e3779b9);
   const retentionFactor = pBar < 0.01 ? 1.0 : Math.max(0.25, 1.0 - (pBar / 0.6) * 0.72);
-  const count = Math.round((38 + 92 * craterProminence) * retentionFactor);
-  const angularScale = Math.max(0.52, Math.min(1.7, 0.42 + 0.58 * craterProminence));
-  const depthScale = Math.pow(craterProminence, 0.92);
+  const count = Math.round((52 + 108 * craterProminence) * retentionFactor);
+  // Scale angular size so small worlds (craterProminence ~ 2.0) have the old mid-size scale (~0.52),
+  // mid-sized worlds (craterProminence ~ 1.0) are ~0.30, and large worlds (craterProminence ~ 0.45) are ~0.16!
+  const angularScale = Math.max(0.14, Math.min(0.56, 0.06 + 0.24 * craterProminence));
+  const depthScale = Math.pow(craterProminence, 0.88);
   const craters: SphericalCrater[] = [];
 
   for (let i = 0; i < count; i++) {
@@ -907,19 +909,22 @@ function generateSphericalCraters(
     const cy = u;
     const cz = rxy * Math.sin(theta);
 
-    // Power-law size distribution: many small/medium craters, few giant impact basins
-    const sizeRoll = Math.pow(craterPrng(), 2.2);
-    // In thin atmospheres, tiny meteoroids burn up so minimum crater size is slightly larger
-    const minRad = (pBar < 0.01 ? 0.022 : 0.03) * Math.max(0.68, Math.min(1.3, angularScale));
+    // Steep power-law size distribution: many small craters, very few larger basins
+    const sizeRoll = Math.pow(craterPrng(), 2.65);
+    // Base radii shrunk substantially:
+    // - Small worlds (angularScale ~ 0.52): minRad ~ 0.016 rad (~0.9°), maxRad ~ 0.109 rad (~6.2°)
+    // - Mid-sized worlds (angularScale ~ 0.30): minRad ~ 0.012 rad (~0.7°), maxRad ~ 0.063 rad (~3.6°)
+    // - Large worlds (angularScale ~ 0.16): minRad ~ 0.009 rad (~0.5°), maxRad ~ 0.034 rad (~1.9°)
+    const minRad = (pBar < 0.01 ? 0.007 : 0.010) + 0.017 * angularScale;
     const maxRad = 0.21 * angularScale;
     const radiusRad = minRad + sizeRoll * (maxRad - minRad);
-    const maxEffectRad = radiusRad * 1.45;
+    const maxEffectRad = radiusRad * 1.28;
     const cosMaxRadius = Math.cos(maxEffectRad);
 
     // Depth scales with crater size, atmospheric erosion, and inverse body size/gravity (craterProminence)
     const erosionScale = pBar < 0.01 ? 1.0 : 0.78;
-    const depth = (0.078 + sizeRoll * 0.18) * erosionScale * depthScale;
-    const hasCentralPeak = radiusRad > 0.072;
+    const depth = (0.068 + sizeRoll * 0.15) * erosionScale * depthScale;
+    const hasCentralPeak = radiusRad > 0.042;
 
     craters.push({
       cx,
@@ -1655,13 +1660,13 @@ export function generatePlanetarySurfaceModel(
                 );
               }
               craterDelta += delta;
-            } else if (u < 1.45) {
-              // Raised circular crater rim & outer ejecta ramp
+            } else if (u < 1.28) {
+              // Raised circular crater rim & compact outer ejecta ramp
               let rimFactor = 0;
               if (u <= 1.0) {
                 rimFactor = (u - 0.85) / 0.15; // steeply rises to rim crest at u = 1.0
               } else {
-                const ejectaNorm = 1.0 - (u - 1.0) / 0.45;
+                const ejectaNorm = 1.0 - (u - 1.0) / 0.28;
                 rimFactor = ejectaNorm * ejectaNorm;
               }
               craterDelta += c.depth * 0.52 * rimFactor;
