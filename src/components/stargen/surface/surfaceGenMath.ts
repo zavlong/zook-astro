@@ -1212,75 +1212,66 @@ export function deriveAtmosphereAndCloudPalette(
   // ~0.95 at 90+ bar (Venusian nearly opaque cloud deck)
   const opacity = Math.min(0.96, Math.max(0.04, 1.0 - Math.exp(-0.55 * Math.pow(pBar, 0.58))));
 
-  const hasSO2 = (gases.SO2 || 0) > 0.01;
-  const hasCH4 = (gases.CH4 || 0) > 0.02;
-  const hasCO2 = (gases.CO2 || 0) > 0.4;
+  const hasSO2 = (gases.SO2 || 0) > 0.03;
+  const hasCO2 = (gases.CO2 || 0) > 0.45;
+  const hasH2O = (gases.H2O || 0) > 0.002;
+  const hasN2O2 = (gases.N2 || 0) + (gases.O2 || 0) > 0.35;
 
   if (isMoltenWorld) {
     return {
-      opacity: Math.min(0.75, opacity),
+      opacity: Math.min(0.68, opacity),
       palette: {
-        classLabel: 'Volcanic Silicate & Sulfur Ash Plumes',
-        atmoRgb: [120, 42, 12],
-        bandLightRgb: [235, 135, 48],
-        bandDarkRgb: [68, 32, 22],
-        cloudRgb: [195, 98, 38],
+        classLabel: 'Volcanic Silicate & Ash Haze (Grey)',
+        atmoRgb: [122, 130, 142],
+        bandLightRgb: [198, 204, 214],
+        bandDarkRgb: [96, 104, 116],
+        cloudRgb: [182, 188, 198],
       },
     };
   }
-  if (hasCO2 && pBar >= 3.0) {
+  if ((hasCO2 && pBar >= 2.5) || hasSO2) {
+    // Dense CO2 or sulfurous overcast: cool silver-grey / slate-grey cloud deck & atmosphere
     return {
-      opacity: Math.max(0.82, opacity),
+      opacity: Math.max(0.78, opacity),
       palette: {
-        classLabel: 'Dense Sulfuric Acid & CO2 Overcast',
-        atmoRgb: [188, 158, 82],
-        bandLightRgb: [238, 214, 138],
-        bandDarkRgb: [168, 138, 68],
-        cloudRgb: [232, 208, 132],
+        classLabel: hasSO2 ? 'Dense Sulfurous Aerosol Overcast (Grey)' : 'Dense CO2 & Aerosol Overcast (Grey)',
+        atmoRgb: [154, 164, 178],
+        bandLightRgb: [228, 234, 242],
+        bandDarkRgb: [136, 146, 160],
+        cloudRgb: [222, 228, 236],
       },
     };
   }
-  if (hasCH4 && pBar >= 0.3) {
-    return {
-      opacity: Math.max(0.68, opacity),
-      palette: {
-        classLabel: 'Hydrocarbon Tholin Smog & Methane Clouds',
-        atmoRgb: [172, 102, 38],
-        bandLightRgb: [224, 154, 72],
-        bandDarkRgb: [138, 78, 24],
-        cloudRgb: [218, 148, 66],
-      },
-    };
-  }
-  if (hasSO2) {
+  if (pBar < 0.15 || (hasCO2 && !hasH2O && !hasN2O2)) {
+    // Thin or dry CO2-dominated atmosphere: pale blue-grey / slate-grey Rayleigh & ice/dust wisps
     return {
       opacity,
       palette: {
-        classLabel: 'Sulfurous Volcanic Haze (SO2)',
-        atmoRgb: [168, 154, 52],
-        bandLightRgb: [232, 218, 98],
-        bandDarkRgb: [136, 122, 38],
-        cloudRgb: [228, 212, 92],
+        classLabel: pBar < 0.15 ? 'Thin Blue-Grey Rayleigh & Ice Wisps' : 'Cool Grey-Blue CO2 Rayleigh Atmosphere',
+        atmoRgb: [126, 148, 178],
+        bandLightRgb: [232, 238, 246],
+        bandDarkRgb: [154, 168, 186],
+        cloudRgb: [224, 232, 242],
       },
     };
   }
 
-  // Standard Water Vapor / Nitrogen-Oxygen / Thin CO2 clouds
+  // Standard N2 / O2 / H2O / H2 Rayleigh-scattering Blue Atmosphere with White-Grey Clouds
   return {
     opacity,
     palette: {
-      classLabel: pBar < 0.1 ? 'Thin Atmospheric Dust & Ice Wisps' : 'Water Vapor Clouds & Rayleigh Atmosphere',
-      atmoRgb: pBar < 0.1 ? [178, 136, 104] : [56, 138, 224],
+      classLabel: 'Rayleigh Blue Atmosphere & Water/Ice Clouds',
+      atmoRgb: [52, 132, 226],
       bandLightRgb: [246, 250, 255],
-      bandDarkRgb: [184, 198, 216],
-      cloudRgb: pBar < 0.1 ? [228, 204, 184] : [244, 248, 254],
+      bandDarkRgb: [176, 190, 208],
+      cloudRgb: [240, 245, 252],
     },
   };
 }
 
 /**
  * Derives realistic sky color and horizon scattering based on atmospheric pressure,
- * dominant gases, and star spectral type.
+ * dominant gases, and star spectral type (predominantly Rayleigh blue or overcast cool grey).
  */
 export function deriveAtmosphericSkyColors(
   pressureBar: number | null,
@@ -1295,56 +1286,44 @@ export function deriveAtmosphericSkyColors(
     return { zenith: '#1d4ed8', horizon: '#cbd5e1', hazeFactor: 0.95 };
   }
   if (isGasGiant) {
-    return { zenith: '#2a4463', horizon: '#8ca8c8', hazeFactor: 0.9 };
-  }
-  if (isMoltenWorld) {
-    // Volcanic silicate/alkali vapor or smoldering lava horizon
-    return { zenith: '#1c0a04', horizon: '#ea580c', hazeFactor: 0.65 };
+    return { zenith: '#2a4463', horizon: '#94aec8', hazeFactor: 0.9 };
   }
   if (pressureBar === null || pressureBar <= 0.001) {
     // Airless / Vacuum: pitch black starry sky with brilliant starlight
     return { zenith: '#020308', horizon: '#080d1a', hazeFactor: 0.02 };
   }
+  if (isMoltenWorld) {
+    // Smoky slate-grey volcanic ash sky
+    return { zenith: '#262c36', horizon: '#788496', hazeFactor: 0.72 };
+  }
 
   const p = Math.min(20, pressureBar);
-  const hasCH4 = (gases.CH4 || 0) > 0.02;
-  const hasCO2 = (gases.CO2 || 0) > 0.4;
-  const hasSO2 = (gases.SO2 || 0) > 0.01;
+  const hasCO2 = (gases.CO2 || 0) > 0.45;
+  const hasSO2 = (gases.SO2 || 0) > 0.03;
 
-  if (hasSO2) {
-    return { zenith: '#4a4218', horizon: '#9c8c38', hazeFactor: 0.85 };
+  if (hasSO2 || (hasCO2 && p >= 2.5)) {
+    // Dense overcast cool slate-grey sky
+    return { zenith: '#4b5868', horizon: '#b8c4d4', hazeFactor: 0.92 };
   }
-  if (hasCH4 && p >= 0.5) {
-    // Titan-like orange-brown hydrocarbon tholin smog
-    return { zenith: '#633918', horizon: '#b86d2d', hazeFactor: 0.9 };
-  }
-  if (hasCO2 && p >= 3.0) {
-    // Venusian dense sulfurous/amber overcast
-    return { zenith: '#574827', horizon: '#ba9a4a', hazeFactor: 0.95 };
+  if (p < 0.15 || (hasCO2 && (gases.N2 || 0) + (gases.O2 || 0) < 0.25)) {
+    // Thin or dry CO2 pale blue-grey sky
+    return { zenith: '#2d425e', horizon: '#9cb0c9', hazeFactor: 0.45 };
   }
 
-  // Earth-like / Nitrogen-Oxygen / Thin atmospheres
-  if (starTeff < 3800) {
-    // Orbiting Red Dwarf: Twilight rose-amber sky
-    return { zenith: '#222942', horizon: '#8b4b45', hazeFactor: 0.4 };
-  } else if (starTeff > 7500) {
-    // Hot A/B Star: Deep violet-cyan Rayleigh sky
-    return { zenith: '#142a5c', horizon: '#4080bf', hazeFactor: 0.35 };
-  }
-
-  // Standard Sol-like G/K star
-  const density = Math.min(1.0, p / 1.0);
-  const r = Math.round(20 + 35 * density);
-  const g = Math.round(50 + 90 * density);
-  const b = Math.round(120 + 130 * density);
-  const hr = Math.round(130 + 80 * density);
-  const hg = Math.round(170 + 60 * density);
-  const hb = Math.round(210 + 40 * density);
+  // Rayleigh-scattering blue sky (modulated subtly by star temperature and density)
+  const coolBlueShift = starTeff > 7000 ? 14 : starTeff < 3900 ? -10 : 0;
+  const density = Math.min(1.0, p / 1.2);
+  const r = Math.max(12, Math.round(22 + 32 * density - coolBlueShift * 0.5));
+  const g = Math.max(38, Math.round(58 + 82 * density));
+  const b = Math.min(255, Math.round(135 + 110 * density + coolBlueShift));
+  const hr = Math.round(138 + 68 * density);
+  const hg = Math.round(176 + 52 * density);
+  const hb = Math.round(216 + 34 * density);
 
   return {
     zenith: `rgb(${r}, ${g}, ${b})`,
     horizon: `rgb(${hr}, ${hg}, ${hb})`,
-    hazeFactor: Math.min(1.0, 0.2 + p * 0.4),
+    hazeFactor: Math.min(1.0, 0.22 + p * 0.35),
   };
 }
 
@@ -2802,15 +2781,13 @@ export function renderSurfaceProjectedGlobeToCanvas(
   const rNormY = cosT * cosPitch + rnaZ * sinPitch;
   const rNormZ = -cosT * sinPitch + rnaZ * cosPitch;
 
-  // Atmospheric glow color & strength
+  // Atmospheric glow color & strength (Rayleigh blue or cool aerosol grey)
   const pBar = activeBody.pressureBar;
   const hasAtmoGlow = surfaceModel.isNoSurface || (pBar !== null && pBar !== undefined && pBar > 0.005);
   const atmoGlowRgb: [number, number, number] = surfaceModel.isSupercritical
     ? [72, 162, 248]
     : surfaceModel.isNoSurface
     ? surfaceModel.atmospherePalette.bandLightRgb
-    : surfaceModel.isMoltenWorld
-    ? [251, 118, 36]
     : surfaceModel.atmospherePalette.atmoRgb[0] +
         surfaceModel.atmospherePalette.atmoRgb[1] +
         surfaceModel.atmospherePalette.atmoRgb[2] >
