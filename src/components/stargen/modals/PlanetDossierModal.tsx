@@ -10,7 +10,10 @@ import {
   Flag,
   Trash2,
   Compass,
+  Globe,
+  Map as MapIcon,
 } from 'lucide-react';
+import { PlanetarySurfaceExplorer } from '../surface/PlanetarySurfaceExplorer';
 import {
   RealisticPlanetBody,
   RealisticMoon,
@@ -79,6 +82,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
   const [targetEmpireId, setTargetEmpireId] = useState<string>(
     planetClaimInfo?.empire?.id || currentEmpire?.id || (sectorEmpires[0]?.id ?? '')
   );
+  const [activeTab, setActiveTab] = useState<'overview' | 'surface'>('overview');
 
   useEffect(() => {
     if (planetClaimInfo?.designation) {
@@ -438,7 +442,45 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
           </div>
         </div>
 
-        {/* Procedural 3D World Portrait & Surface Horizon Vista */}
+        {/* Dossier Navigation Tabs */}
+        <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab('overview')}
+            className={`px-3 py-1.5 rounded-lg border font-mono text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+              activeTab === 'overview'
+                ? 'bg-indigo-950/80 border-indigo-500 text-indigo-200'
+                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            Overview & Telemetry
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('surface')}
+            className={`px-3 py-1.5 rounded-lg border font-mono text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+              activeTab === 'surface'
+                ? 'bg-amber-950/80 border-amber-500 text-amber-200'
+                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <MapIcon className="w-3.5 h-3.5 text-amber-400" />
+            Surface & Topography
+          </button>
+        </div>
+
+        {activeTab === 'surface' ? (
+          <PlanetarySurfaceExplorer
+            planet={hostPlanet}
+            moon={activeMoon}
+            zone={zone}
+            stars={systemResult.hierarchy.stars}
+          />
+        ) : (
+          <>
+            {/* Procedural 3D World Portrait & Surface Horizon Vista */}
         <ProceduralPlanetPortrait
           planet={hostPlanet}
           moon={activeMoon}
@@ -982,6 +1024,8 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
               ))}
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
     </div>
