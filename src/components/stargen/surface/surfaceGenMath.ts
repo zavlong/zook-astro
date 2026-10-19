@@ -1684,15 +1684,17 @@ export function generatePlanetarySurfaceModel(
     (seaPalette.solventKey === 'H2O' ||
       seaPalette.solventKey === 'H2O + CO2' ||
       seaPalette.solventKey === 'NH3-H2O') &&
-    ((hasLiquid && coverageFrac >= 0.85) ||
-      ((activeBody.iceFrac ?? 0) >= 0.25 && (activeBody.pressureBar ?? 0) >= 0.05));
+    ((hasLiquid && (coverageFrac >= 0.85 || (activeBody.iceFrac ?? 0) >= 0.015)) ||
+      (activeBody.iceFrac ?? 0) >= 0.08 ||
+      isIcyWorld);
 
-  // Plate tectonics & active geology parameters
-  const platesCount = isNoSurface
-    ? 0
-    : activeBody.rockFrac > 0.4 && activeBody.gravityG > 0.38
-    ? 7 + Math.floor(prng() * 6)
-    : 0;
+  // Plate tectonics & active geology parameters (never spawn subaerial silicate plates/volcanoes on ice-shell worlds!)
+  const platesCount =
+    isNoSurface || isDeepWaterOrIceShell || isIcyWorld || (activeBody.iceFrac ?? 0) >= 0.08
+      ? 0
+      : activeBody.rockFrac > 0.4 && activeBody.gravityG > 0.38
+      ? 7 + Math.floor(prng() * 6)
+      : 0;
 
   const isExtremeVolcanic =
     isMoltenWorld ||
@@ -1705,6 +1707,8 @@ export function generatePlanetarySurfaceModel(
   const hasActiveGeology =
     !isNoSurface &&
     !isDeepWaterOrIceShell &&
+    !isIcyWorld &&
+    (activeBody.iceFrac ?? 0) < 0.08 &&
     (isExtremeVolcanic ||
       platesCount > 0 ||
       tidalW >= 0.1 ||
@@ -1759,7 +1763,7 @@ export function generatePlanetarySurfaceModel(
   // Pre-generate 3D spherical impact craters for airless and thin-atmosphere worlds
   const craters = generateSphericalCraters(
     seed,
-    hasSubsurfaceOcean || isMoltenWorld || isDeepWaterOrIceShell
+    hasSubsurfaceOcean || isMoltenWorld || (isDeepWaterOrIceShell && hasLiquid)
       ? Math.max(0.42, activeBody.pressureBar ?? 0)
       : activeBody.pressureBar,
     isNoSurface,
@@ -2194,7 +2198,7 @@ export function generatePlanetarySurfaceModel(
   // (or depressed below 273.15 K by dissolved salt/perchlorate brines on colder water ocean worlds);
   // on thin-atmosphere / rock-rich icy worlds (isWaterIceDominated), ice sublimates/ablates to expose bare rock above ~250 K!
   const waterBrineFreezingK =
-    seaPalette.solventKey === 'H2O' && hasLiquid && Tbase < 280 && Tbase >= 210
+    seaPalette.solventKey === 'H2O' && hasLiquid && Tbase < 280 && Tbase >= 175
       ? Math.min(seaPalette.freezingPointK, Math.max(204, Math.round(Tbase - (Tbase < 252 ? 18 : 15))))
       : seaPalette.freezingPointK;
   const freezingPointK = isDeepWaterOrIceShell
@@ -2219,7 +2223,7 @@ export function generatePlanetarySurfaceModel(
     Tbase * (1.0 - (isTidallyLocked ? 0.82 * lockedThermalFactor : 0.69 * thermalDiffFactor)) - 4 * waveAtmoScale;
   const approxTmaxOnGlobe =
     Tbase * (1.0 + (isTidallyLocked ? 0.50 * lockedThermalFactor : 0.31 * thermalDiffFactor)) + 4 * waveAtmoScale;
-  const hasIceBoundaryOnDeepWaterWorld = isDeepWaterOrIceShell && approxTminOnGlobe <= freezingPointK;
+  const hasIceBoundaryOnDeepWaterWorld = isDeepWaterOrIceShell && hasLiquid && approxTminOnGlobe <= freezingPointK;
 
   for (let y = 0; y < height; y++) {
     const lat = 90 - y;
@@ -2387,46 +2391,59 @@ export function generatePlanetarySurfaceModel(
           biomeGrid[idx] = 14; // Solidified Basalt Volcanic Rock Crust
         }
       } else if (isDeepWaterOrIceShell) {
-        // Deep water/ice shell world with sufficient atmosphere (seaLevelNormalized = 0.50):
-        // - Zero exposed rock!
-        // - Liquid water (Tlocal > 273.15 K) has ZERO ice cracks, starts as a shallow shelf at the melting ice margin,
-        //   and deepens smoothly toward the interior of the ocean basin (stored in hypsometry as 0.01..0.49).
-        // - Frozen ice (Tlocal <= 273.15 K) rises smoothly from coastal sea-ice level (+15 m) up to glacial domes (+1.5..2.5 km),
-        //   incised by cryotectonic lineae troughs (stored in hypsometry as 0.51..0.99).
+        // Deep water/ice shell world:
+        // - Zero exposed silicate rock! The rocky mantle is buried hundreds/thousands of km below the water-ice shell.
+        // - If hasLiquid && pBarAtmo >= 0.0061 && !isBelowFreezing: Liquid ocean (0.01..0.49) with zero ice cracks.
+        // - Otherwise: Frozen ice shell (glacial ice sheet, cryo-ice plains, alpine glacial peaks, or cryotectonic lineae).
         const bathyNorm = rawBaseElevGrid[idx]; // 0..1 smooth normalized glacial/seafloor field
-        if (isBelowFreezing) {
-          // Taper ice cracks to 0 as temperature approaches 273.15 K so cracks never touch or bleed into liquid water
-          const crackTaper = hasIceBoundaryOnDeepWaterWorld
-            ? Math.min(1.0, Math.max(0.0, (freezingPointK - Tlocal) / 5.5))
-            : 1.0;
-          fractureGrid[idx] *= crackTaper;
-          const crackVal = fractureGrid[idx];
+        const canHaveLiquidHere = hasLiquid && pBarAtmo >= 0.0061 && !isBelowFreezing;
+        if (!canHaveLiquidHere) {
+          if (hasLiquid) {
+            // Taper ice cracks to 0 as temperature approaches freezingPointK so cracks never touch or bleed into liquid water
+            const crackTaper = hasIceBoundaryOnDeepWaterWorld
+              ? Math.min(1.0, Math.max(0.0, (freezingPointK - Tlocal) / 5.5))
+              : 1.0;
+            fractureGrid[idx] *= crackTaper;
+            const crackVal = fractureGrid[idx];
 
-          const freezeSpan = Math.max(8.0, freezingPointK - approxTminOnGlobe);
-          const freezeProgress = hasIceBoundaryOnDeepWaterWorld
-            ? Math.min(1.0, Math.pow(Math.max(0.02, (freezingPointK - Tlocal) / freezeSpan), 0.62))
-            : 1.0;
-          const iceAltRatio = Math.max(
-            0.01,
-            Math.min(
-              0.98,
-              (0.04 + 0.96 * freezeProgress) * (0.22 + 0.78 * bathyNorm) - Math.min(0.28, crackVal * 0.26)
-            )
-          );
-          hNorm = Math.min(0.99, 0.5 + 0.5 * iceAltRatio);
-          hypsometry[idx] = hNorm;
+            const freezeSpan = Math.max(8.0, freezingPointK - approxTminOnGlobe);
+            const freezeProgress = hasIceBoundaryOnDeepWaterWorld
+              ? Math.min(1.0, Math.pow(Math.max(0.02, (freezingPointK - Tlocal) / freezeSpan), 0.62))
+              : 1.0;
+            const iceAltRatio = Math.max(
+              0.01,
+              Math.min(
+                0.98,
+                (0.04 + 0.96 * freezeProgress) * (0.22 + 0.78 * bathyNorm) - Math.min(0.28, crackVal * 0.26)
+              )
+            );
+            hNorm = Math.min(0.99, 0.5 + 0.5 * iceAltRatio);
+            hypsometry[idx] = hNorm;
 
-          if (crackVal > 0.28) {
-            biomeGrid[idx] = 21; // Cryotectonic Ice Fissure (Linea)
-          } else if (iceAltRatio < 0.25 + topoVar * 0.5) {
-            biomeGrid[idx] = 18; // Lowland Cryo-Ice Plains
-          } else if (iceAltRatio > 0.76 + topoVar * 0.5) {
-            biomeGrid[idx] = 13; // Alpine Glacial Ice Peaks
+            if (crackVal > 0.28) {
+              biomeGrid[idx] = 21; // Cryotectonic Ice Fissure (Linea)
+            } else if (iceAltRatio < 0.25 + topoVar * 0.5) {
+              biomeGrid[idx] = 18; // Lowland Cryo-Ice Plains
+            } else if (iceAltRatio > 0.76 + topoVar * 0.5) {
+              biomeGrid[idx] = 13; // Alpine Glacial Ice Peaks
+            } else {
+              biomeGrid[idx] = 8; // Polar / Sea Glacial Ice Sheet
+            }
           } else {
-            biomeGrid[idx] = 8; // Polar / Sea Glacial Ice Sheet
+            // 100% Frozen Ice Shell World (no surface liquid): preserve full icy relief & craters, zero exposed rock!
+            const crackVal = fractureGrid[idx];
+            if (crackVal > 0.28) {
+              biomeGrid[idx] = 21; // Cryotectonic Ice Fissure (Linea)
+            } else if (Tlocal < 95 || hNorm < 0.28 + topoVar * 0.5) {
+              biomeGrid[idx] = 18; // Lowland Cryo-Ice Plains
+            } else if (hNorm > 0.74 + topoVar * 0.5) {
+              biomeGrid[idx] = 13; // Alpine Glacial Ice Peaks
+            } else {
+              biomeGrid[idx] = 8; // Polar / Glacial Water-Ice Sheet
+            }
           }
         } else {
-          // Liquid water ocean: completely remove ice cracks and craters!
+          // Liquid water/brine/ammonia-water ocean: completely remove ice cracks and craters!
           fractureGrid[idx] = 0;
           craterGrid[idx] = 0;
 

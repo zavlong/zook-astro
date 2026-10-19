@@ -1522,8 +1522,8 @@ export function generateZoneSystem(
           0.14 * Math.pow(Math.max(0.02, z.age) / 0.2, -0.3) +
           (Seff > 150 ? 0.12 * Math.pow(log10(Seff / 150), 1.3) : 0));
     }
-    const dens = (5.514 * b.massEarth) / Math.pow(rE, 3);
-    const grav = b.massEarth / (rE * rE);
+    let dens = (5.514 * b.massEarth) / Math.pow(rE, 3);
+    let grav = b.massEarth / (rE * rE);
     const T0 = 278.5 * Math.pow(Seff, 0.25);
     const Tint =
       b.massEarth >= 25
@@ -2424,8 +2424,176 @@ export function generateZoneSystem(
       }
     }
 
-    const effT = Tsurf ?? Tatm ?? Teq;
+    // Post-Surface Atmosphere & Hydrosphere Recalculation:
+    // Evaluate the actual 2D surface temperature distribution (including 1:1 tidal locking substellar heating and equatorial warming)
+    // so atmosphere, ice fraction, and hydrosphere liquid coverage are 100% self-consistent with the generated surface!
     const hasEnv = b.gasFrac >= 0.015 || b.massEarth >= 12;
+    if (!hasEnv && pBar !== null) {
+      const isLockedPlanet = spinSt.includes('1:1') || spinSt.toLowerCase().includes('locked');
+      const getSurfThermalFactors = (pAtmo: number) => ({
+        thermalDiffFactor: 0.72 / (1.0 + 1.32 * Math.pow(Math.max(0, pAtmo), 0.78)),
+        lockedThermalFactor: 1.0 / (1.0 + 0.36 * Math.pow(Math.max(0, pAtmo), 0.66)),
+      });
+      const getSurfTempBounds = (tBase: number, pAtmo: number) => {
+        const { thermalDiffFactor, lockedThermalFactor } = getSurfThermalFactors(pAtmo);
+        return {
+          tMin: tBase * (1.0 - (isLockedPlanet ? 0.82 * lockedThermalFactor : 0.69 * thermalDiffFactor)),
+          tMax: tBase * (1.0 + (isLockedPlanet ? 0.50 * lockedThermalFactor : 0.31 * thermalDiffFactor)),
+        };
+      };
+      const getSurfMeltFraction = (tBase: number, pAtmo: number, tFreeze: number): number => {
+        const { thermalDiffFactor, lockedThermalFactor } = getSurfThermalFactors(pAtmo);
+        let meltArea = 0;
+        let totArea = 0;
+        for (let step = 0; step < 60; step++) {
+          const u = (step + 0.5) / 60;
+          const weight = isLockedPlanet ? Math.sin(u * Math.PI) : Math.cos((u * Math.PI) / 2);
+          const tLoc = isLockedPlanet
+            ? tBase *
+              (1.0 +
+                (u <= 0.5
+                  ? 0.50 * Math.pow(1.0 - u * 2.0, 0.82) - 0.16 * (u * 2.0)
+                  : -0.16 - 0.66 * Math.pow((u - 0.5) * 2.0, 0.85)) *
+                  lockedThermalFactor)
+            : tBase * (1.0 + (Math.pow(Math.cos((u * Math.PI) / 2), 1.15) - 0.69) * thermalDiffFactor);
+          totArea += weight;
+          if (tLoc > tFreeze) meltArea += weight;
+        }
+        return totArea > 0 ? meltArea / totArea : 0;
+      };
+
+      let { tMin: surfTmin, tMax: surfTmax } = getSurfTempBounds(Tsurf, pBar);
+
+      // 1. If an icy planet (b.iceFrac >= 0.015) has a warm dayside/equator (surfTmax >= 230 K) where ice sublimates/melts,
+      // it cannot remain a 0-bar vacuum with an intact ice shell!
+      if (b.iceFrac >= 0.015 && surfTmax >= 230 && pBar < 0.05) {
+        if (b.massEarth >= 0.12 && b.iceFrac >= 0.05 && muMin <= 85) {
+          // Massive volatile reservoir sublimates/outgasses a self-sustaining N2-CO2-H2O atmosphere in equilibrium with the warm dayside/equatorial ocean
+          const pN_sub = +clamp(Math.pow(b.massEarth, 0.65) * rand(0.35, 1.35), 0.18, 2.2).toFixed(3);
+          const pC_sub = +clamp(Math.pow(b.massEarth, 0.75) * rand(0.12, 1.4), 0.08, 2.8).toFixed(3);
+          let pW_sub = 0.02;
+          for (let it = 0; it < 4; it++) {
+            const effT = Math.max(222.0, Tsurf, surfTmax * 0.86);
+            const pSatW = 1.013 * Math.exp(13.7 * (1 - 373.15 / effT));
+            pW_sub = +clamp(Math.max(pSatW, (pN_sub + pC_sub) * 0.045), 0.015, 25.0).toFixed(4);
+            ghK = +ghDelta(pC_sub, pN_sub, 0, 0, pW_sub, 0, 0, Teq, grav).toFixed(1);
+            Tsurf = +(Tatm + ghK).toFixed(1);
+            ({ tMin: surfTmin, tMax: surfTmax } = getSurfTempBounds(Tsurf, pN_sub + pC_sub + pW_sub));
+          }
+          pBar = +(pN_sub + pC_sub + pW_sub).toFixed(3);
+          for (const k of Object.keys(gases)) delete gases[k];
+          gases.N2 = +(pN_sub / pBar).toFixed(4);
+          gases.CO2 = +(pC_sub / pBar).toFixed(4);
+          gases.H2O = +(pW_sub / pBar).toFixed(4);
+          ({ tMin: surfTmin, tMax: surfTmax } = getSurfTempBounds(Tsurf, pBar));
+        } else {
+          // Low-gravity or heavily XUV-stripped body loses its sublimating ice reservoir to space, becoming a dry rocky world!
+          b.iceFrac = 0;
+          b.rockFrac = +(1 - b.gasFrac).toFixed(4);
+          rE = +Math.max(0.08, Math.pow(b.coreMassEarth, 0.279) * 0.98).toFixed(3);
+          dens = +(5.51 * (b.massEarth / Math.pow(rE, 3))).toFixed(2);
+          grav = +(b.massEarth / Math.pow(rE, 2)).toFixed(2);
+          if (pClass.includes('Frozen') || pClass.includes('Icy')) {
+            pClass = pBar >= 0.005 ? 'Martian World' : 'Barren Rocky World';
+          }
+        }
+      }
+
+      // 2. If an icy planet (b.iceFrac >= 0.015) with atmosphere (pBar >= 0.01) has a dayside/equator warm enough to melt brine/water
+      // (surfTmax >= 222 K), ensure it forms a dayside eyeball or equatorial liquid ocean and saturates its atmosphere with H2O!
+      if (b.iceFrac >= 0.015 && pBar >= 0.01 && surfTmax >= 222 && (!hydro || (hydro.coveragePct ?? 0) === 0)) {
+        const effOceanT = Math.max(222.0, Tsurf, surfTmax * 0.86);
+        const pSatW = 1.013 * Math.exp(13.7 * (1 - 373.15 / effOceanT));
+        const satFrac = clamp(pSatW / Math.max(0.05, pBar + pSatW), 0.045, 0.85);
+        if (!gases.H2O || gases.H2O < satFrac) {
+          const scaleOther = (1 - satFrac) / Math.max(0.01, 1 - (gases.H2O || 0));
+          for (const gk of Object.keys(gases)) {
+            if (gk !== 'H2O') gases[gk] = +(gases[gk] * scaleOther).toFixed(4);
+          }
+          gases.H2O = +satFrac.toFixed(4);
+          pBar = +(pBar + pSatW).toFixed(3);
+        }
+        const isPerchlorateBrine = Tsurf < 252;
+        const isSalineBrine = Tsurf >= 252 && Tsurf < 280;
+        const oceanSolvent = isPerchlorateBrine
+          ? 'H2O + Perchlorate-Cl Brine'
+          : isSalineBrine
+          ? 'H2O + NaCl-MgSO4 Brine'
+          : 'H2O';
+        const depressedTf = isPerchlorateBrine
+          ? Math.min(222, Math.max(204, Math.round(Tsurf - 18)))
+          : isSalineBrine
+          ? Math.min(250, Math.max(244, Math.round(Tsurf - 15)))
+          : 273.15;
+        const totW = Math.max(15, Math.round(rE * 6371 * (1 - Math.pow(1 - b.iceFrac, 0.42))));
+        const lKm = Math.min(totW, Math.max(6, Math.round(95 / Math.max(0.05, grav))));
+        const rem = Math.max(0, totW - lKm);
+        const siK2 = b.massEarth >= 2 ? Math.round(rem * 0.42) : 0;
+        const surfLiqPct = clamp(Math.round(getSurfMeltFraction(Tsurf, pBar, depressedTf) * 100), 8, 100);
+        const regionLabel = isLockedPlanet ? 'Substellar Eyeball' : 'Equatorial';
+        const iceLabel = isLockedPlanet ? 'Nightside Glacial Ice Sheet' : 'Polar Glacial Ice Sheets';
+        hydro = {
+          state:
+            surfLiqPct < 96
+              ? `${regionLabel} ${isPerchlorateBrine ? 'Perchlorate-Brine H2O' : isSalineBrine ? 'Saline Brine H2O' : 'Liquid H2O'} Ocean & ${iceLabel} over Ice VI (${surfLiqPct}% Liquid Coverage)`
+              : `Global ${isPerchlorateBrine ? 'Hypersaline Perchlorate-Brine H2O' : isSalineBrine ? 'Saline NaCl-MgSO4 Brine H2O' : 'Surface Liquid H2O'} Ocean over Ice VI (100% Coverage)`,
+          solvent: oceanSolvent,
+          coveragePct: surfLiqPct < 96 ? surfLiqPct : 100,
+          biosphere: null,
+          liqKm: lKm,
+          scKm: 0,
+          iceKm: Math.max(0, rem - siK2),
+          siKm: siK2,
+        };
+      }
+
+      // 3. Reconcile hydro.coveragePct and hydro.state with actual surface freezing/melting on all deep water/ammonia-water ocean worlds!
+      if (hydro && (hydro.coveragePct ?? 0) > 0 && b.iceFrac >= 0.015) {
+        const solv = hydro.solvent || '';
+        const isAqOrNH3 =
+          solv === 'H2O' ||
+          solv === 'H2O + CO2' ||
+          solv.includes('Brine') ||
+          solv === 'NH3-H2O';
+        if (isAqOrNH3) {
+          const baseTf =
+            solv === 'NH3-H2O'
+              ? 176.0
+              : solv === 'H2O + CO2'
+              ? 270.0
+              : solv.includes('Perchlorate')
+              ? 222.0
+              : solv.includes('Brine')
+              ? 250.0
+              : 273.15;
+          const effTf =
+            solv !== 'NH3-H2O' && solv !== 'H2O + CO2' && Tsurf < 280 && Tsurf >= 175
+              ? Math.min(baseTf, Math.max(204, Math.round(Tsurf - (Tsurf < 252 ? 18 : 15))))
+              : baseTf;
+          if (surfTmin <= effTf && surfTmax > effTf) {
+            const actualLiqPct = clamp(Math.round(getSurfMeltFraction(Tsurf, pBar, effTf) * 100), 8, 98);
+            if (actualLiqPct < 96) {
+              hydro.coveragePct = actualLiqPct;
+              const regionLabel = isLockedPlanet ? 'Substellar Eyeball' : 'Equatorial';
+              const iceLabel = isLockedPlanet ? 'Nightside Glacial Ice Sheet' : 'Polar Glacial Ice Sheets';
+              const solvLabel =
+                solv === 'NH3-H2O'
+                  ? 'Liquid NH3-H2O (Ammonia-Water)'
+                  : solv === 'H2O + CO2'
+                  ? 'Liquid H2O + CO2'
+                  : solv.includes('Perchlorate')
+                  ? 'Perchlorate-Brine H2O'
+                  : solv.includes('Brine')
+                  ? 'Saline Brine H2O'
+                  : 'Liquid H2O';
+              hydro.state = `${regionLabel} ${solvLabel} Ocean & ${iceLabel} over Ice VI (${actualLiqPct}% Liquid Coverage)`;
+            }
+          }
+        }
+      }
+    }
+
+    const effT = Tsurf ?? Tatm ?? Teq;
     pClass = resolvePlanetClass(
       pClass,
       effT,
