@@ -910,34 +910,20 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
               <div>
                 <span className="text-slate-400 block text-[10px]">INNER RADIUS</span>
                 <b className="text-white">{formatDistanceKm(hostPlanet.ringSystem.innerRadiusKm)}</b>
-                <span className="text-[9px] text-slate-400 block">Inner edge</span>
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px]">OUTER RADIUS</span>
                 <b className="text-amber-300">{formatDistanceKm(hostPlanet.ringSystem.outerRadiusKm)}</b>
-                <span className="text-[9px] text-slate-400 block">
-                  Width: {(hostPlanet.ringSystem.outerRadiusKm - hostPlanet.ringSystem.innerRadiusKm).toLocaleString()} km
-                </span>
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px]">RING MASS</span>
                 <b className="text-sky-300">
-                  {hostPlanet.ringSystem.massLunar >= 0.0001
-                    ? `${hostPlanet.ringSystem.massLunar} M☾`
-                    : `${hostPlanet.ringSystem.massTt.toLocaleString()} Tt`}
+                  {hostPlanet.ringSystem.massLunar} M☾
                 </b>
-                <span className="text-[9px] text-slate-400 block">
-                  {hostPlanet.ringSystem.massLunar >= 0.0001
-                    ? `${hostPlanet.ringSystem.massTt.toLocaleString()} Tt`
-                    : '< 0.0001 M☾'}
-                </span>
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px]">COMPOSITION</span>
                 <b className="text-emerald-300">{hostPlanet.ringSystem.compositionLabel}</b>
-                <span className="text-[9px] text-slate-400 block">
-                  τ = {hostPlanet.ringSystem.opticalDepth}
-                </span>
               </div>
             </div>
           </div>
