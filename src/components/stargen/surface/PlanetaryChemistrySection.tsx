@@ -248,16 +248,43 @@ export function derivePlanetaryChemistryProfile(
   // 2. SOLID & SUPERCRITICAL WORLDS
   const compLabel = surfModel.compositionPalette.compositionLabel;
   const solventKey = surfModel.seaPalette.solventKey;
+  // Measure actual liquid vs ice vs exposed rock coverage directly from the generated surface biomeGrid
+  let gridLiquidWeight = 0;
+  let gridIceWeight = 0;
+  let gridRockWeight = 0;
+  if (!surfModel.isNoSurface && surfModel.biomeGrid && surfModel.biomeGrid.length === 360 * 180) {
+    for (let y = 0; y < 180; y++) {
+      const cosLat = Math.max(0.05, Math.cos(((90 - y) * Math.PI) / 180));
+      const rowOffset = y * 360;
+      for (let x = 0; x < 360; x++) {
+        const b = surfModel.biomeGrid[rowOffset + x];
+        if (b <= 2) {
+          gridLiquidWeight += cosLat;
+        } else if (b === 8 || b === 13 || b === 18 || b === 21) {
+          gridIceWeight += cosLat;
+        } else {
+          gridRockWeight += cosLat;
+        }
+      }
+    }
+  }
+  const totalGridWeight = Math.max(1e-5, gridLiquidWeight + gridIceWeight + gridRockWeight);
+  const gridLiquidPct = (gridLiquidWeight / totalGridWeight) * 100;
+  const hasNoExposedRock = !surfModel.isNoSurface && !surfModel.isMoltenWorld && gridRockWeight / totalGridWeight < 0.01;
+
   const hasSurfaceLiquid = Boolean(
     !surfModel.isNoSurface &&
       !surfModel.isMoltenWorld &&
-      hydro &&
-      (hydro.coveragePct ?? 0) > 0 &&
-      hydro.solvent &&
-      hydro.solvent !== 'None' &&
-      !hydro.state?.toLowerCase().includes('subsurface')
+      (gridLiquidPct >= 0.5 ||
+        (hydro &&
+          (hydro.coveragePct ?? 0) > 0 &&
+          hydro.solvent &&
+          hydro.solvent !== 'None' &&
+          !hydro.state?.toLowerCase().includes('subsurface')))
   );
-  const surfaceCovPct = hasSurfaceLiquid ? Math.max(1, Math.min(100, hydro?.coveragePct ?? 0)) : 0;
+  const surfaceCovPct = hasSurfaceLiquid
+    ? Math.max(1, Math.min(100, Math.round(gridLiquidPct >= 0.5 ? gridLiquidPct : hydro?.coveragePct ?? 0)))
+    : 0;
 
   const isSulfur = compLabel.includes('Sulfur Allotrope') || bodyClassLower.includes('io');
   const isIron = compLabel.includes('Iron-Rich') || bodyClassLower.includes('iron');
@@ -289,8 +316,8 @@ export function derivePlanetaryChemistryProfile(
 
   const liquidInfo = getLiquidRowInfo(solventKey);
   // Scale surface liquid share by coverage while keeping solid bedrock/minerals visible in the breakdown
-  const liquidShare = hasSurfaceLiquid ? Math.max(4, Math.min(72, surfaceCovPct * 0.65 + 4)) : 0;
-  const solidScale = hasSurfaceLiquid ? Math.max(0.28, (100 - liquidShare) / 100) : 1.0;
+  const liquidShare = hasSurfaceLiquid ? Math.max(4, Math.min(82, surfaceCovPct * 0.78 + 3)) : 0;
+  const solidScale = hasSurfaceLiquid ? Math.max(0.18, (100 - liquidShare) / 100) : 1.0;
   const withSurfaceLiquid = (solidRows: SurfaceChemicalRow[]): SurfaceChemicalRow[] => {
     const scaledSolids = solidRows.map((r) => ({ ...r, pct: Math.max(1, r.pct * solidScale) }));
     if (hasSurfaceLiquid && liquidShare > 0) {
@@ -334,25 +361,43 @@ export function derivePlanetaryChemistryProfile(
       { name: 'Frozen Methane Frost', formula: 'CH₄', pct: 13 + n2 * 2, color: '#fde68a' },
       { name: 'Silicate Rock & Dust', formula: 'SiO₂ / MgO', pct: 11 + n4 * 1.5, color: '#78583f' },
     ]);
-  } else if (surfModel.isIcyWorld || iceFrac >= 0.15) {
+  } else if (hasNoExposedRock || surfModel.isIcyWorld || iceFrac >= 0.15) {
     const icePurity = Math.max(0.25, Math.min(0.9, iceFrac + 0.15));
     const isAmmoniaWorld = solventKey === 'NH3-H2O' || bodyClassLower.includes('ammonia');
-    surfaceRows = withSurfaceLiquid([
-      {
-        name: isAmmoniaWorld ? 'Water & Ammonia Ice' : 'Water Ice',
-        formula: isAmmoniaWorld ? 'H₂O / NH₃' : 'H₂O',
-        pct: icePurity * 72 + n1 * 4,
-        color: '#dbeafe',
-      },
-      { name: 'Silicate Rock & Dust', formula: 'SiO₂ / MgO', pct: (1 - icePurity) * 65 + 8 + n2 * 3, color: '#8c7864' },
-      { name: 'Frozen Salts (Sulfates)', formula: 'MgSO₄ / NaCl', pct: 11 + n3 * 2, color: '#38bdf8' },
-      {
-        name: isAmmoniaWorld ? 'Carbonate & Nitrogen Frost' : 'Ammonia & Carbon Dioxide Ice',
-        formula: isAmmoniaWorld ? 'CaCO₃ / N₂' : 'NH₃ / CO₂',
-        pct: 9 + n4 * 1.5,
-        color: '#93c5fd',
-      },
-    ]);
+    if (hasNoExposedRock) {
+      surfaceRows = withSurfaceLiquid([
+        {
+          name: isAmmoniaWorld ? 'Water & Ammonia Ice' : 'Water Ice',
+          formula: isAmmoniaWorld ? 'H₂O / NH₃' : 'H₂O',
+          pct: 78 + n1 * 4,
+          color: '#dbeafe',
+        },
+        { name: 'Dissolved & Frozen Salts', formula: 'MgSO₄ / NaCl', pct: 13 + n3 * 2, color: '#38bdf8' },
+        {
+          name: isAmmoniaWorld ? 'Carbonate & Nitrogen Frost' : 'Carbon Dioxide & Gas Hydrate Ice',
+          formula: isAmmoniaWorld ? 'CaCO₃ / N₂' : 'CO₂ / CH₄·nH₂O',
+          pct: 9 + n4 * 1.5,
+          color: '#93c5fd',
+        },
+      ]);
+    } else {
+      surfaceRows = withSurfaceLiquid([
+        {
+          name: isAmmoniaWorld ? 'Water & Ammonia Ice' : 'Water Ice',
+          formula: isAmmoniaWorld ? 'H₂O / NH₃' : 'H₂O',
+          pct: icePurity * 72 + n1 * 4,
+          color: '#dbeafe',
+        },
+        { name: 'Silicate Rock & Dust', formula: 'SiO₂ / MgO', pct: (1 - icePurity) * 65 + 8 + n2 * 3, color: '#8c7864' },
+        { name: 'Frozen Salts (Sulfates)', formula: 'MgSO₄ / NaCl', pct: 11 + n3 * 2, color: '#38bdf8' },
+        {
+          name: isAmmoniaWorld ? 'Carbonate & Nitrogen Frost' : 'Ammonia & Carbon Dioxide Ice',
+          formula: isAmmoniaWorld ? 'CaCO₃ / N₂' : 'NH₃ / CO₂',
+          pct: 9 + n4 * 1.5,
+          color: '#93c5fd',
+        },
+      ]);
+    }
   } else if (isIron) {
     surfaceRows = withSurfaceLiquid([
       { name: 'Silicate Rock', formula: 'SiO₂ / MgO', pct: 48 + n1 * 4, color: '#94a3b8' },

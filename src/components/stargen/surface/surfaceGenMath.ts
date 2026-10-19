@@ -1635,6 +1635,15 @@ export function generatePlanetarySurfaceModel(
     : rawFloraPalette;
   const hasWaterLife = floraPalette.hasWaterLife;
 
+  // Deep global water oceans and deep water-ice shells with atmosphere bury the rocky silicate mantle beneath H2O,
+  // preventing subaerial silicate volcanic cones from poking through the surface and eliminating exposed rock.
+  const isDeepWaterOrIceShell =
+    !isNoSurface &&
+    !isMoltenWorld &&
+    (seaPalette.solventKey === 'H2O' || seaPalette.solventKey === 'H2O + CO2') &&
+    ((hasLiquid && coverageFrac >= 0.85) ||
+      ((activeBody.iceFrac ?? 0) >= 0.25 && (activeBody.pressureBar ?? 0) >= 0.05));
+
   // Plate tectonics & active geology parameters
   const platesCount = isNoSurface
     ? 0
@@ -1652,6 +1661,7 @@ export function generatePlanetarySurfaceModel(
 
   const hasActiveGeology =
     !isNoSurface &&
+    !isDeepWaterOrIceShell &&
     (isExtremeVolcanic ||
       platesCount > 0 ||
       tidalW >= 0.1 ||
@@ -1691,7 +1701,9 @@ export function generatePlanetarySurfaceModel(
   // Pre-generate 3D spherical impact craters for airless and thin-atmosphere worlds
   const craters = generateSphericalCraters(
     seed,
-    hasSubsurfaceOcean || isMoltenWorld ? 0.42 : activeBody.pressureBar,
+    hasSubsurfaceOcean || isMoltenWorld || isDeepWaterOrIceShell
+      ? Math.max(0.42, activeBody.pressureBar ?? 0)
+      : activeBody.pressureBar,
     isNoSurface,
     craterProminence
   );
@@ -1699,8 +1711,8 @@ export function generatePlanetarySurfaceModel(
   // Pre-generate 3D spherical cracks (cryotectonic ice lineae on icy worlds, or glowing magma fissures on molten worlds)
   const surfaceCracks = generateSphericalSurfaceCracks(
     seed,
-    isIcyWorld || isMoltenWorld,
-    hasSubsurfaceOcean || isMoltenWorld
+    isIcyWorld || isMoltenWorld || isDeepWaterOrIceShell,
+    hasSubsurfaceOcean || isMoltenWorld || isDeepWaterOrIceShell
   );
 
   // Pre-generate discrete 3D volcanoes for worlds with active geology (Earth, Venus, Io, etc.)
@@ -1947,8 +1959,12 @@ export function generatePlanetarySurfaceModel(
     }
   }
 
+  // Only thin-atmosphere (<0.05 bar) or rock-rich (<25% ice without a global ocean) icy worlds expose bare rock above 250 K!
+  // Worlds with a deep water/ice shell and sufficient atmosphere (isDeepWaterOrIceShell) have ZERO exposed rock:
+  // they are frozen ice where T <= 273.15 K and a continuous equatorial band/sea of liquid water where T > 273.15 K.
   const isWaterIceDominated =
     isIcyWorld &&
+    !isDeepWaterOrIceShell &&
     seaPalette.solventKey !== 'CH4-C2H6' &&
     seaPalette.solventKey !== 'NH3-H2O' &&
     seaPalette.solventKey !== 'SO2' &&
@@ -1956,7 +1972,9 @@ export function generatePlanetarySurfaceModel(
 
   // Determine exact sea-level threshold to match coveragePct (for non-ice-dominated marine worlds)
   let seaLevelNormalized = 0.42;
-  if (isWaterIceDominated) {
+  if (isDeepWaterOrIceShell) {
+    seaLevelNormalized = 1.0;
+  } else if (isWaterIceDominated) {
     seaLevelNormalized = 0.38;
   } else if (!isNoSurface && hasLiquid && allElevations.length > 0) {
     allElevations.sort((a, b) => a - b);
@@ -1978,8 +1996,11 @@ export function generatePlanetarySurfaceModel(
   const thermalDiffFactor = 0.72 / (1.0 + 1.32 * Math.pow(Math.max(0, pBarAtmo), 0.78));
   const waveAtmoScale = Math.max(0.12, Math.min(1.4, thermalDiffFactor / 0.31));
   const atmoLapseFactor = Math.min(1.0, Math.pow(Math.max(0, pBarAtmo) / 0.15, 0.45));
-  // On water-ice-dominated worlds, ice sublimates/ablates to expose bare rock above ~250 K!
-  const freezingPointK = isWaterIceDominated
+  // On deep water/ice shell worlds with atmosphere, the freezing/melting transition between ice and liquid water is 273.15 K;
+  // on thin-atmosphere / rock-rich icy worlds (isWaterIceDominated), ice sublimates/ablates to expose bare rock above ~250 K!
+  const freezingPointK = isDeepWaterOrIceShell
+    ? seaPalette.freezingPointK
+    : isWaterIceDominated
     ? 250.0
     : hasLiquid
     ? seaPalette.freezingPointK
@@ -2007,7 +2028,8 @@ export function generatePlanetarySurfaceModel(
       const volcVal = volcanoGrid[idx];
       // Active volcanic cones/calderas breach the surface even if surrounded by ocean
       const isBelowSeaLevel =
-        !isNoSurface && !isWaterIceDominated && hasLiquid && hNorm <= seaLevelNormalized && volcVal < 0.35;
+        !isNoSurface &&
+        (isDeepWaterOrIceShell || (!isWaterIceDominated && hasLiquid && hNorm <= seaLevelNormalized && volcVal < 0.35));
 
       // 3D Spherical Domain Warping for organic, contiguous climate & biome zones (no boxy latitude/sine cutoffs!)
       const warpLat = (sphericalFbm(lat * 1.15, lon * 1.15, seed + 401, 4) - 0.5) * 32.0;
@@ -2068,7 +2090,7 @@ export function generatePlanetarySurfaceModel(
       const coastalBoost = hasLiquid ? Math.max(0, (0.22 - altRatio) * 0.82) : 0;
       const continentalDry = Math.max(0, (altRatio - 0.18) * 0.45);
       const rawMoist =
-        !hasLiquid && !(isWaterIceDominated && Tlocal >= 273.0 && pBarAtmo >= 0.0061)
+        !hasLiquid && !isDeepWaterOrIceShell && !(isWaterIceDominated && Tlocal >= 273.0 && pBarAtmo >= 0.0061)
           ? moistNoise * 0.32
           : (moistNoise - 0.5) * 1.48 + 0.52 + itczBoost - hadleyDip + ferrelBoost + coastalBoost - continentalDry;
       const localMoisture = isBelowSeaLevel ? 1.0 : Math.max(0.02, Math.min(0.98, rawMoist));
@@ -2121,6 +2143,29 @@ export function generatePlanetarySurfaceModel(
           biomeGrid[idx] = 16; // Cratered Basalt Regolith
         } else {
           biomeGrid[idx] = 14; // Solidified Basalt Volcanic Rock Crust
+        }
+      } else if (isDeepWaterOrIceShell) {
+        // Deep water/ice shell world with sufficient atmosphere:
+        // Zero exposed rock! All regions with Tlocal <= 273.15 K are frozen ice,
+        // and all regions with Tlocal > 273.15 K form a continuous equatorial band/sea of liquid water!
+        if (isBelowFreezing) {
+          if (fractureGrid[idx] > 0.28) {
+            biomeGrid[idx] = 21; // Cryotectonic Ice Fissure (Linea)
+          } else if (hNorm < 0.34 + topoVar) {
+            biomeGrid[idx] = 18; // Lowland Cryo-Ice Plains
+          } else {
+            biomeGrid[idx] = 8; // Polar / Sea Glacial Ice Sheet
+          }
+        } else {
+          const waterDepthRatio = 1.0 - hNorm;
+          if (waterDepthRatio > 0.6) {
+            biomeGrid[idx] = 0; // Abyssal Trench
+          } else if (waterDepthRatio > 0.28) {
+            biomeGrid[idx] = 1; // Deep Ocean
+          } else {
+            biomeGrid[idx] = 2; // Shallow Sea
+          }
+          meltwaterPatchCount++;
         }
       } else if (isWaterIceDominated) {
         // Ice-dominated world rule:
@@ -2727,11 +2772,12 @@ export function evaluateSurfaceMapTexel(
   if (activeLayer === 'satellite' || activeLayer === 'biomes') {
     if (isWater) {
       if (isMoltenWorld || seaPalette.solventKey === 'Silicate Magma') isSelfLuminous = true;
-      const depthRatio = isIcyWorld
-        ? biomeId === 1
-          ? 0.42
-          : 0.14
-        : Math.max(0, Math.min(1, (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized)));
+      const depthRatio =
+        isIcyWorld && seaLevelNormalized < 0.99
+          ? biomeId === 1
+            ? 0.42
+            : 0.14
+          : Math.max(0, Math.min(1, (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized)));
       if (activeLayer === 'biomes') {
         const rgb = biomeId === 0 ? seaPalette.trenchRgb : biomeId === 1 ? seaPalette.deepRgb : seaPalette.shallowRgb;
         r = rgb[0];
@@ -2809,7 +2855,7 @@ export function evaluateSurfaceMapTexel(
         r = r * (1 - t) + 24 * t;
         g = g * (1 - t) + 18 * t;
         b = b * (1 - t) + 16 * t;
-      } else if ((isIcyWorld || isFrozenSeaIce) && isIceCell && crackVal > 0.08) {
+      } else if ((isIcyWorld || isFrozenSeaIce || seaLevelNormalized >= 0.99) && isIceCell && crackVal > 0.08) {
         const t = Math.min(1.0, crackVal / 0.85);
         if (t < 0.4) {
           const m = t / 0.4;
@@ -2890,11 +2936,12 @@ export function evaluateSurfaceMapTexel(
     }
   } else if (activeLayer === 'topography') {
     if (isWater) {
-      const depthRatio = isIcyWorld
-        ? biomeId === 1
-          ? 0.42
-          : 0.14
-        : (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized);
+      const depthRatio =
+        isIcyWorld && seaLevelNormalized < 0.99
+          ? biomeId === 1
+            ? 0.42
+            : 0.14
+          : (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized);
       r = Math.round(seaPalette.trenchRgb[0] + (seaPalette.shallowRgb[0] - seaPalette.trenchRgb[0]) * (1 - depthRatio) * 0.75);
       g = Math.round(seaPalette.trenchRgb[1] + (seaPalette.shallowRgb[1] - seaPalette.trenchRgb[1]) * (1 - depthRatio) * 0.75);
       b = Math.round(seaPalette.trenchRgb[2] + (seaPalette.shallowRgb[2] - seaPalette.trenchRgb[2]) * (1 - depthRatio) * 0.75);
