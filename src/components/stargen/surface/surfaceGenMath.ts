@@ -45,6 +45,29 @@ export interface AtmosphereCloudPalette {
   cloudRgb: [number, number, number];
 }
 
+export interface CrustCompositionPalette {
+  compositionLabel: string;
+  craterlandHex: string;
+  alluvialHex: string;
+  lowlandHex: string;
+  basinHex: string;
+  steppeHex: string;
+  aridHex: string;
+  duneHex: string;
+  plateauHex: string;
+  mountainHex: string;
+  peakHex: string;
+  tundraHex: string;
+  iceHex: string;
+  cryoPlainsHex: string;
+  basaltHex: string;
+  lowlandRgb: [number, number, number];
+  plateauRgb: [number, number, number];
+  mountainRgb: [number, number, number];
+  peakRgb: [number, number, number];
+  iceEjectaBoost: number; // Bright icy crater ejecta on ice-silicate worlds
+}
+
 export interface PlanetarySurfaceModel {
   seed: number;
   isGasGiant: boolean;
@@ -57,6 +80,7 @@ export interface PlanetarySurfaceModel {
   hasBiosphere: boolean;
   hasWaterLife: boolean;
   floraPalette: FloraPigmentPalette;
+  compositionPalette: CrustCompositionPalette;
   hasLiquid: boolean;
   seaLevelNormalized: number;
   minElevationKm: number;
@@ -102,15 +126,400 @@ function rgbToHex(rgb: [number, number, number]): string {
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
+function hexToRgbTuple(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '');
+  const num = parseInt(clean, 16) || 0;
+  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+}
+
+function lerpRgbTuple(
+  a: [number, number, number],
+  b: [number, number, number],
+  t: number
+): [number, number, number] {
+  const u = Math.max(0, Math.min(1, t));
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * u),
+    Math.round(a[1] + (b[1] - a[1]) * u),
+    Math.round(a[2] + (b[2] - a[2]) * u),
+  ];
+}
+
+function lerpHex(hexA: string, hexB: string, t: number): string {
+  return rgbToHex(lerpRgbTuple(hexToRgbTuple(hexA), hexToRgbTuple(hexB), t));
+}
+
+/**
+ * Derives the solid crust/regolith mineral color palette from the planet's or moon's
+ * bulk physical composition (rockFrac, iceFrac, densityGcm3, gases, tidal heating, temperature, and class).
+ */
+export function deriveCrustCompositionPalette(params: {
+  rockFrac: number;
+  iceFrac: number;
+  densityGcm3: number;
+  albedo: number;
+  tidalW: number;
+  pressureBar: number | null | undefined;
+  gases: Record<string, number>;
+  solventKey: string;
+  coverageFrac: number;
+  Tbase: number;
+  bodyClassLower: string;
+  isIcyWorld: boolean;
+  isMoltenWorld: boolean;
+  hasBiosphere: boolean;
+}): CrustCompositionPalette {
+  const {
+    rockFrac,
+    iceFrac,
+    densityGcm3,
+    tidalW,
+    pressureBar,
+    gases,
+    solventKey,
+    coverageFrac,
+    Tbase,
+    bodyClassLower,
+    isIcyWorld,
+    isMoltenWorld,
+    hasBiosphere,
+  } = params;
+  const pBar = pressureBar ?? 0;
+
+  // 1. Io-like / Tidally Heated Sulfur-Silicate Allotrope Worlds
+  const isSulfurVolcanic =
+    !isMoltenWorld &&
+    (bodyClassLower.includes('io') ||
+      bodyClassLower.includes('sulfur') ||
+      (tidalW >= 0.22 && iceFrac < 0.14 && Tbase < 680) ||
+      ((gases.SO2 || 0) > 0.025 && pBar < 2.5 && !isIcyWorld));
+
+  if (isSulfurVolcanic) {
+    const lowRgb: [number, number, number] = [214, 165, 38];
+    const platRgb: [number, number, number] = [166, 78, 24];
+    const mtnRgb: [number, number, number] = [78, 60, 42];
+    const peakRgb: [number, number, number] = [242, 222, 96];
+    return {
+      compositionLabel: 'Sulfur Allotrope & Silicate Crust (S8 / SO2 Frost)',
+      craterlandHex: '#b8821e',
+      alluvialHex: '#cfa028',
+      lowlandHex: '#d6a526',
+      basinHex: '#c48c20',
+      steppeHex: '#b5781c',
+      aridHex: '#d9aa2b',
+      duneHex: '#e6c338',
+      plateauHex: '#a64e18',
+      mountainHex: '#4e3c2a',
+      peakHex: '#f2de60',
+      tundraHex: '#c79c30',
+      iceHex: '#f5e884',
+      cryoPlainsHex: '#ebd96a',
+      basaltHex: '#332419',
+      lowlandRgb: lowRgb,
+      plateauRgb: platRgb,
+      mountainRgb: mtnRgb,
+      peakRgb: peakRgb,
+      iceEjectaBoost: 0.15,
+    };
+  }
+
+  // 2. Iron-Rich / Core-Dominated / Mercury-like Metallic Silicate Worlds
+  const isIronRich =
+    bodyClassLower.includes('iron') ||
+    bodyClassLower.includes('core') ||
+    bodyClassLower.includes('mercury') ||
+    (iceFrac < 0.05 && (densityGcm3 >= 6.0 || (densityGcm3 >= 5.25 && pBar < 0.05)));
+
+  if (isIronRich) {
+    // Interpolate metallic sheen by density (5.2 -> 7.8 g/cm3)
+    const metalFactor = Math.max(0, Math.min(1, (densityGcm3 - 5.1) / 2.4));
+    const lowRgb = lerpRgbTuple([88, 92, 102], [72, 78, 90], metalFactor);
+    const platRgb = lerpRgbTuple([66, 70, 79], [54, 59, 69], metalFactor);
+    const mtnRgb = lerpRgbTuple([50, 54, 62], [40, 44, 52], metalFactor);
+    const peakRgb = lerpRgbTuple([124, 132, 145], [142, 152, 168], metalFactor);
+    return {
+      compositionLabel: 'Iron-Rich Metallic Silicate & Graphite Regolith',
+      craterlandHex: rgbToHex(lerpRgbTuple([70, 74, 83], [58, 63, 73], metalFactor)),
+      alluvialHex: rgbToHex(lerpRgbTuple([78, 82, 92], [65, 71, 82], metalFactor)),
+      lowlandHex: rgbToHex(lowRgb),
+      basinHex: rgbToHex(lerpRgbTuple([74, 78, 88], [62, 68, 78], metalFactor)),
+      steppeHex: rgbToHex(lerpRgbTuple([82, 86, 95], [68, 74, 86], metalFactor)),
+      aridHex: rgbToHex(lerpRgbTuple([92, 96, 106], [78, 84, 96], metalFactor)),
+      duneHex: rgbToHex(lerpRgbTuple([102, 107, 118], [88, 95, 108], metalFactor)),
+      plateauHex: rgbToHex(platRgb),
+      mountainHex: rgbToHex(mtnRgb),
+      peakHex: rgbToHex(peakRgb),
+      tundraHex: '#5a606e',
+      iceHex: '#cbd5e1',
+      cryoPlainsHex: '#94a3b8',
+      basaltHex: '#24272e',
+      lowlandRgb: lowRgb,
+      plateauRgb: platRgb,
+      mountainRgb: mtnRgb,
+      peakRgb: peakRgb,
+      iceEjectaBoost: 0.25,
+    };
+  }
+
+  // 3. Tholin-Stained Cryo-Organic & Hydrocarbon Worlds (Titan, Pluto, Triton, Kuiper-like)
+  const isTholinCryo =
+    (isIcyWorld || Tbase < 185) &&
+    ((gases.CH4 || 0) >= 0.005 ||
+      solventKey === 'CH4-C2H6' ||
+      bodyClassLower.includes('titan') ||
+      (Tbase < 115 && iceFrac >= 0.15));
+
+  if (isTholinCryo) {
+    const lowRgb: [number, number, number] = [166, 104, 60];
+    const platRgb: [number, number, number] = [184, 128, 78];
+    const mtnRgb: [number, number, number] = [96, 58, 36];
+    const peakRgb: [number, number, number] = [226, 214, 200];
+    return {
+      compositionLabel: 'Tholin-Stained Cryo-Organic & Water/Nitrogen Ice',
+      craterlandHex: '#7d4b32',
+      alluvialHex: '#8a5230',
+      lowlandHex: '#a6683c',
+      basinHex: '#945a33',
+      steppeHex: '#87502f',
+      aridHex: '#9e6238',
+      duneHex: '#694226', // Dark hydrocarbon coffee-brown sand dunes
+      plateauHex: '#b8804e', // Bright Xanadu-like icy-tholin plateaus
+      mountainHex: '#603a24',
+      peakHex: '#e2d6c8',
+      tundraHex: '#8c5c3e',
+      iceHex: '#dfd0be', // Warm cream nitrogen/water ice (Sputnik Planitia tone)
+      cryoPlainsHex: '#d4c2ae',
+      basaltHex: '#3b2316',
+      lowlandRgb: lowRgb,
+      plateauRgb: platRgb,
+      mountainRgb: mtnRgb,
+      peakRgb: peakRgb,
+      iceEjectaBoost: 0.7,
+    };
+  }
+
+  // 4. Icy Worlds & High Ice-Fraction Worlds (Continuously blended by iceFrac vs rockFrac!)
+  if (isIcyWorld || iceFrac >= 0.15) {
+    // Normalize ice purity from 0 (dirty 15% ice Callisto-like lag) to 1 (pure >= 65% ice Enceladus/Europa shell)
+    const icePurity = Math.max(0, Math.min(1, (iceFrac - 0.12) / 0.52));
+    const lowRgb = lerpRgbTuple([124, 132, 140], [214, 234, 250], icePurity);
+    const platRgb = lerpRgbTuple([98, 104, 112], [164, 196, 224], icePurity);
+    const mtnRgb = lerpRgbTuple([76, 80, 86], [128, 162, 192], icePurity);
+    const peakRgb = lerpRgbTuple([216, 232, 246], [245, 250, 255], icePurity);
+
+    return {
+      compositionLabel:
+        icePurity >= 0.65
+          ? `Pure Crystalline Water-Ice Shell (${Math.round(iceFrac * 100)}% Ice)`
+          : `Silicate-Ice Cryo-Regolith Mix (${Math.round(iceFrac * 100)}% Ice / ${Math.round(rockFrac * 100)}% Rock)`,
+      craterlandHex: lerpHex('#5e646b', '#b8d2eb', icePurity),
+      alluvialHex: lerpHex('#707880', '#cae0f5', icePurity),
+      lowlandHex: rgbToHex(lowRgb),
+      basinHex: lerpHex('#757e87', '#c4dcf2', icePurity),
+      steppeHex: lerpHex('#6c747d', '#bad4ed', icePurity),
+      aridHex: lerpHex('#7e8791', '#cfe4f7', icePurity),
+      duneHex: lerpHex('#8f99a3', '#deeffc', icePurity),
+      plateauHex: rgbToHex(platRgb),
+      mountainHex: rgbToHex(mtnRgb),
+      peakHex: rgbToHex(peakRgb),
+      tundraHex: lerpHex('#737d87', '#b5d0e8', icePurity),
+      iceHex: lerpHex('#c4d8eb', '#eaf4fc', icePurity),
+      cryoPlainsHex: lerpHex('#b0c4d8', '#dfeefb', icePurity),
+      basaltHex: '#333940',
+      lowlandRgb: lowRgb,
+      plateauRgb: platRgb,
+      mountainRgb: mtnRgb,
+      peakRgb: peakRgb,
+      iceEjectaBoost: 0.65 + 0.35 * (1 - icePurity), // Dirty ice worlds show strong bright ice crater rays!
+    };
+  }
+
+  // 5. Oxidized Ferric / Hematite Regolith (Mars-like Arid CO2 or Sub-Earth Red Desert Worlds)
+  const isFerricMarsLike =
+    bodyClassLower.includes('mars') ||
+    bodyClassLower.includes('ferric') ||
+    (!hasBiosphere &&
+      !isMoltenWorld &&
+      iceFrac < 0.12 &&
+      ((gases.CO2 || 0) >= 0.25 && pBar >= 0.001 && pBar < 1.8 && coverageFrac < 0.3));
+
+  if (isFerricMarsLike) {
+    const lowRgb: [number, number, number] = [178, 92, 55];
+    const platRgb: [number, number, number] = [126, 58, 36];
+    const mtnRgb: [number, number, number] = [92, 46, 34];
+    const peakRgb: [number, number, number] = [226, 198, 184];
+    return {
+      compositionLabel: 'Oxidized Ferric Iron-Oxide (Fe2O3 Hematite) Regolith',
+      craterlandHex: '#944a2e',
+      alluvialHex: '#a85534',
+      lowlandHex: '#b25c37',
+      basinHex: '#a35230',
+      steppeHex: '#9c4e2d',
+      aridHex: '#bd653c',
+      duneHex: '#cf7446',
+      plateauHex: '#7e3a24',
+      mountainHex: '#5c2e22',
+      peakHex: '#e2c6b8',
+      tundraHex: '#965840',
+      iceHex: '#eddcd2',
+      cryoPlainsHex: '#d9bfb2',
+      basaltHex: '#381e17',
+      lowlandRgb: lowRgb,
+      plateauRgb: platRgb,
+      mountainRgb: mtnRgb,
+      peakRgb: peakRgb,
+      iceEjectaBoost: 0.2,
+    };
+  }
+
+  // 6. Venusian Dense CO2 Sulfuric-Weathered Basalt Crust
+  const isVenusianBasalt =
+    !isMoltenWorld &&
+    (bodyClassLower.includes('venus') || ((gases.CO2 || 0) >= 0.5 && pBar >= 3.0 && Tbase >= 400));
+
+  if (isVenusianBasalt) {
+    const lowRgb: [number, number, number] = [132, 96, 52];
+    const platRgb: [number, number, number] = [104, 74, 40];
+    const mtnRgb: [number, number, number] = [74, 52, 30];
+    const peakRgb: [number, number, number] = [188, 158, 92]; // Pyrite / ferroelectric lead-sulfide radar-bright frost!
+    return {
+      compositionLabel: 'Sulfur-Weathered Mafic Basalt & Pyrite-Seated Highlands',
+      craterlandHex: '#694b2a',
+      alluvialHex: '#7a5832',
+      lowlandHex: '#846034',
+      basinHex: '#75542e',
+      steppeHex: '#6e4e2b',
+      aridHex: '#8f6939',
+      duneHex: '#9e7640',
+      plateauHex: '#684a28',
+      mountainHex: '#4a341e',
+      peakHex: '#bc9e5c',
+      tundraHex: '#785832',
+      iceHex: '#cbb278',
+      cryoPlainsHex: '#b59b64',
+      basaltHex: '#2e2012',
+      lowlandRgb: lowRgb,
+      plateauRgb: platRgb,
+      mountainRgb: mtnRgb,
+      peakRgb: peakRgb,
+      iceEjectaBoost: 0.1,
+    };
+  }
+
+  // 7. Carbonaceous / Graphite-Chondrite / Low-Density Dark Silicate Worlds
+  const isCarbonaceous =
+    bodyClassLower.includes('carbon') ||
+    bodyClassLower.includes('carbide') ||
+    bodyClassLower.includes('chondrit') ||
+    (iceFrac < 0.08 && densityGcm3 < 3.62);
+
+  if (isCarbonaceous) {
+    const lowRgb: [number, number, number] = [84, 76, 70];
+    const platRgb: [number, number, number] = [66, 60, 55];
+    const mtnRgb: [number, number, number] = [50, 45, 42];
+    const peakRgb: [number, number, number] = [138, 128, 120];
+    return {
+      compositionLabel: 'Carbonaceous Chondrite & Graphite-Silicate Regolith',
+      craterlandHex: '#47403b',
+      alluvialHex: '#524a44',
+      lowlandHex: '#544c46',
+      basinHex: '#4d4540',
+      steppeHex: '#59504a',
+      aridHex: '#635952',
+      duneHex: '#6e635b',
+      plateauHex: '#423c37',
+      mountainHex: '#322d2a',
+      peakHex: '#8a8078',
+      tundraHex: '#5e5752',
+      iceHex: '#cbd5e1',
+      cryoPlainsHex: '#94908b',
+      basaltHex: '#211d1b',
+      lowlandRgb: lowRgb,
+      plateauRgb: platRgb,
+      mountainRgb: mtnRgb,
+      peakRgb: peakRgb,
+      iceEjectaBoost: 0.2,
+    };
+  }
+
+  // 8. Airless Lunar Anorthosite-Basalt Regolith (Vacuum Silicate Moons & Planets with moderate density)
+  if (pBar < 0.005 && !isMoltenWorld) {
+    // Modulate between lighter Lunar anorthosite (lower density ~3.3-3.9) and darker basaltic-iron regolith (~4.0-5.1)
+    const feTint = Math.max(0, Math.min(1, (densityGcm3 - 3.3) / 1.8));
+    const lowRgb = lerpRgbTuple([134, 132, 128], [102, 100, 98], feTint);
+    const platRgb = lerpRgbTuple([112, 110, 106], [84, 82, 80], feTint);
+    const mtnRgb = lerpRgbTuple([92, 90, 88], [68, 67, 66], feTint);
+    const peakRgb = lerpRgbTuple([182, 180, 176], [154, 152, 148], feTint);
+    return {
+      compositionLabel: 'Anorthosite Highland & Flood-Basalt Mare Regolith',
+      craterlandHex: rgbToHex(lerpRgbTuple([118, 116, 112], [88, 87, 85], feTint)),
+      alluvialHex: rgbToHex(lerpRgbTuple([96, 95, 92], [74, 73, 72], feTint)),
+      lowlandHex: rgbToHex(lowRgb),
+      basinHex: rgbToHex(lerpRgbTuple([88, 87, 85], [68, 67, 66], feTint)), // Dark flood-basalt mare
+      steppeHex: rgbToHex(lerpRgbTuple([124, 122, 118], [94, 92, 90], feTint)),
+      aridHex: rgbToHex(lerpRgbTuple([138, 136, 130], [106, 104, 100], feTint)),
+      duneHex: rgbToHex(lerpRgbTuple([148, 146, 140], [116, 114, 110], feTint)),
+      plateauHex: rgbToHex(platRgb),
+      mountainHex: rgbToHex(mtnRgb),
+      peakHex: rgbToHex(peakRgb),
+      tundraHex: '#787672',
+      iceHex: '#dce6f2',
+      cryoPlainsHex: '#b8c0c8',
+      basaltHex: '#2b2a29',
+      lowlandRgb: lowRgb,
+      plateauRgb: platRgb,
+      mountainRgb: mtnRgb,
+      peakRgb: peakRgb,
+      iceEjectaBoost: 0.35,
+    };
+  }
+
+  // 9. Standard Terrestrial Silicate Crust (Continuously modulated by bulk density / Fe-Mg mafic fraction & iceFrac)
+  // Higher density (e.g. 5.0-5.2 g/cm3) -> more iron-magnesium mafic/basaltic olive-brown
+  // Moderate density (e.g. 3.8-4.5 g/cm3) -> more felsic/granitic/sandstone warm ochre-tan
+  const maficFactor = Math.max(0, Math.min(1, (densityGcm3 - 4.0) / 1.4));
+  const lowRgb = lerpRgbTuple([152, 124, 90], [126, 104, 82], maficFactor);
+  const platRgb = lerpRgbTuple([142, 92, 54], [114, 78, 52], maficFactor);
+  const mtnRgb = lerpRgbTuple([104, 92, 88], [82, 76, 74], maficFactor);
+  const peakRgb: [number, number, number] = [237, 242, 247];
+
+  return {
+    compositionLabel:
+      maficFactor > 0.65
+        ? `Fe-Mg Mafic Basalt & Silicate Crust (${densityGcm3.toFixed(2)} g/cm³)`
+        : `Felsic-Granitic & Silicate Continental Crust (${densityGcm3.toFixed(2)} g/cm³)`,
+    craterlandHex: rgbToHex(lerpRgbTuple([104, 98, 92], [86, 84, 82], maficFactor)),
+    alluvialHex: rgbToHex(lerpRgbTuple([118, 98, 76], [98, 84, 68], maficFactor)),
+    lowlandHex: rgbToHex(lowRgb),
+    basinHex: rgbToHex(lerpRgbTuple([132, 106, 78], [108, 90, 70], maficFactor)),
+    steppeHex: rgbToHex(lerpRgbTuple([120, 98, 78], [98, 82, 68], maficFactor)),
+    aridHex: rgbToHex(lerpRgbTuple([164, 128, 72], [142, 112, 66], maficFactor)),
+    duneHex: rgbToHex(lerpRgbTuple([202, 158, 82], [176, 138, 76], maficFactor)),
+    plateauHex: rgbToHex(platRgb),
+    mountainHex: rgbToHex(mtnRgb),
+    peakHex: '#edf2f7',
+    tundraHex: '#706b63',
+    iceHex: '#dce8f5',
+    cryoPlainsHex: '#c8d3e0',
+    basaltHex: '#261914',
+    lowlandRgb: lowRgb,
+    plateauRgb: platRgb,
+    mountainRgb: mtnRgb,
+    peakRgb: peakRgb,
+    iceEjectaBoost: iceFrac > 0.05 ? 0.35 : 0.15,
+  };
+}
+
 /**
  * Determines vegetation/flora pigment colors based on biosphere status, solvent, and host star Teff.
  * Green is ONLY used on worlds with water-based life orbiting F and G type stars (5100 K <= Teff <= 6800 K).
- * Sterile worlds use strictly barren rocky/mineral tones (tan, ochre, brown, slate)—never green.
+ * Sterile worlds inherit their lowland/basin colors directly from the planetary CrustCompositionPalette!
  */
 export function getFloraPigmentPalette(
   hasBiosphere: boolean,
   solventKey: string,
-  starTeff: number
+  starTeff: number,
+  compositionPalette?: CrustCompositionPalette
 ): FloraPigmentPalette {
   const isWaterSolvent = solventKey === 'H2O' || solventKey === 'H2O + CO2';
 
@@ -118,13 +527,13 @@ export function getFloraPigmentPalette(
     return {
       hasWaterLife: false,
       hasAnyLife: false,
-      pigmentName: 'None (Sterile Regolith)',
-      plainsHex: '#8c7355',
-      woodlandHex: '#786248',
-      taigaHex: '#6c5a49',
-      marshHex: '#5e5044',
-      lowRgb: [140, 115, 85],
-      highRgb: [120, 98, 72],
+      pigmentName: `None (${compositionPalette?.compositionLabel || 'Sterile Regolith'})`,
+      plainsHex: compositionPalette?.lowlandHex || '#8c7355',
+      woodlandHex: compositionPalette?.basinHex || '#786248',
+      taigaHex: compositionPalette?.steppeHex || '#6c5a49',
+      marshHex: compositionPalette?.alluvialHex || '#5e5044',
+      lowRgb: compositionPalette?.lowlandRgb || [140, 115, 85],
+      highRgb: compositionPalette?.plateauRgb || [120, 98, 72],
     };
   }
 
@@ -902,8 +1311,8 @@ export function generatePlanetarySurfaceModel(
   const activeBody = moon || planet;
   const star = stars?.[0] || { Teff: 5778, colorHex: '#fff4e6', radius: 1.0, lumNum: 1.0 };
   const cacheKey = isMoon
-    ? `moon_${moon?.id || moon?.name}_${moon?.moonClass}_${moon?.surfaceTempK}_${moon?.pressureBar}_${moon?.hydrosphere?.coveragePct}_${star.Teff}`
-    : `planet_${planet.a}_${planet.massEarth}_${planet.radiusEarth}_${planet.planetClass}_${planet.surfaceTempK}_${planet.pressureBar}_${planet.hydrosphere?.coveragePct}_${star.Teff}`;
+    ? `moon_${moon?.id || moon?.name}_${moon?.moonClass}_${moon?.rockFrac}_${moon?.iceFrac}_${moon?.densityGcm3}_${moon?.surfaceTempK}_${moon?.pressureBar}_${moon?.hydrosphere?.coveragePct}_${star.Teff}`
+    : `planet_${planet.a}_${planet.massEarth}_${planet.radiusEarth}_${planet.planetClass}_${planet.rockFrac}_${planet.iceFrac}_${planet.densityGcm3}_${planet.surfaceTempK}_${planet.pressureBar}_${planet.hydrosphere?.coveragePct}_${star.Teff}`;
 
   const cached = surfaceModelCache.get(cacheKey);
   if (cached) return cached;
@@ -981,9 +1390,29 @@ export function generatePlanetarySurfaceModel(
   // Solvent-specific sea color palette (force Silicate Magma palette on molten worlds)
   const seaPalette = getSolventSeaPalette(isMoltenWorld ? 'Silicate Magma' : hydro?.solvent);
 
-  // Biosphere & star-specific flora pigments (Green ONLY on water-life worlds around F & G stars)
+  // Biosphere & planetary composition palette
   const hasBiosphere = Boolean(!isNoSurface && hydro?.biosphere);
-  const floraPalette = getFloraPigmentPalette(hasBiosphere, seaPalette.solventKey, starTeff);
+  const tidalW = (activeBody as { tidalW?: number }).tidalW ?? 0;
+
+  const compositionPalette = deriveCrustCompositionPalette({
+    rockFrac: activeBody.rockFrac ?? 1.0,
+    iceFrac: activeBody.iceFrac ?? 0.0,
+    densityGcm3: activeBody.densityGcm3 ?? 5.0,
+    albedo: activeBody.albedo ?? 0.25,
+    tidalW,
+    pressureBar: activeBody.pressureBar,
+    gases: activeBody.gases || {},
+    solventKey: seaPalette.solventKey,
+    coverageFrac,
+    Tbase,
+    bodyClassLower,
+    isIcyWorld,
+    isMoltenWorld,
+    hasBiosphere,
+  });
+
+  // Biosphere & star-specific flora pigments (Green ONLY on water-life worlds around F & G stars; sterile worlds use compositionPalette)
+  const floraPalette = getFloraPigmentPalette(hasBiosphere, seaPalette.solventKey, starTeff, compositionPalette);
   const hasWaterLife = floraPalette.hasWaterLife;
 
   // Deterministic seed
@@ -1003,7 +1432,6 @@ export function generatePlanetarySurfaceModel(
     ? 7 + Math.floor(prng() * 6)
     : 0;
 
-  const tidalW = (activeBody as { tidalW?: number }).tidalW ?? 0;
   const isExtremeVolcanic =
     isMoltenWorld ||
     tidalW >= 0.4 ||
@@ -1334,31 +1762,45 @@ export function generatePlanetarySurfaceModel(
             biomeGrid[idx] = 18; // Cryovolcanic Nitrogen Plains
           } else if (craterGrid[idx] > 0.45 && (activeBody.iceFrac ?? 0) < 0.45) {
             biomeGrid[idx] = 16; // Dirty dark cratered regolith-ice mix
+          } else if (altRatio > 0.72) {
+            biomeGrid[idx] = 13; // High Cryo-Glacial Peaks
+          } else if (altRatio > 0.44) {
+            biomeGrid[idx] = 11; // Cryo-Tectonic Highland Plateau
           } else {
             biomeGrid[idx] = 8; // Glacial Water-Ice Shell
           }
         } else if (pBar < 0.005) {
           // Vacuum rocky worlds (Moon / Mercury / Io)
           if (Tlocal > 650 || bodyClassLower.includes('volcanic') || bodyClassLower.includes('io')) {
-            biomeGrid[idx] = altRatio > 0.68 ? 15 : 14; // Caldera or Basalt Lava
+            biomeGrid[idx] = altRatio > 0.68 ? 13 : altRatio > 0.36 ? 11 : 4; // Sulfur/Silicate peaks, plateaus, or plains
           } else if (Tlocal < 100) {
             biomeGrid[idx] = 18; // Cryovolcanic / Nitrogen ice
+          } else if (altRatio > 0.74) {
+            biomeGrid[idx] = 13; // High Crater Rim / Massif Peaks
+          } else if (altRatio < 0.28 && craterGrid[idx] < 0.25) {
+            biomeGrid[idx] = 5; // Smooth Flood-Basalt Mare Basin
           } else {
             biomeGrid[idx] = 16; // Regolith Craterlands
           }
         } else if (Tlocal < 260 && Tbase < 380) {
-          if (Tlocal < 235 || altRatio > 0.7) {
+          if (Tlocal < 215 || altRatio > 0.75) {
             biomeGrid[idx] = 8; // Polar Glacial Ice
           } else if (craterGrid[idx] > 0.35 && pBar < 0.3) {
             biomeGrid[idx] = 16; // Cratered highlands in thin atmosphere
+          } else if (altRatio > 0.45) {
+            biomeGrid[idx] = 11; // Cold Highland Plateau / Badlands
           } else {
-            biomeGrid[idx] = 7; // Tundra
+            biomeGrid[idx] = 7; // Tundra / Permafrost Regolith
           }
         } else if (Tlocal > 370 || Tbase > 420) {
-          if (bodyClassLower.includes('volcanic') || bodyClassLower.includes('sulfuric') || bodyClassLower.includes('venusian')) {
-            biomeGrid[idx] = altRatio > 0.65 ? 12 : 11; // Badlands / Mountainous Basalt
+          if (altRatio > 0.76) {
+            biomeGrid[idx] = 13; // High Summit Peaks (e.g. Venusian pyrite frost peaks)
+          } else if (altRatio > 0.52) {
+            biomeGrid[idx] = 12; // Mountain Cordillera
+          } else if (altRatio > 0.32) {
+            biomeGrid[idx] = 11; // High Plateau / Badlands
           } else {
-            biomeGrid[idx] = 10; // Hyper-Arid Desert
+            biomeGrid[idx] = 10; // Hyper-Arid Desert / Basalt Plains
           }
         } else {
           // Temperate ranges
@@ -1382,7 +1824,7 @@ export function generatePlanetarySurfaceModel(
             } else if (hasLiquid && hasBiosphere) {
               biomeGrid[idx] = altRatio < 0.06 ? 3 : 5; // Coastal Marsh or Woodland (colored by floraPalette)
             } else if (hasLiquid) {
-              biomeGrid[idx] = 4; // Lowland Plains (colored by floraPalette: green only if F/G water life, else barren tan)
+              biomeGrid[idx] = 4; // Lowland Plains (colored by floraPalette: green only if F/G water life, else composition lowland)
             } else {
               biomeGrid[idx] = 9; // Arid Steppe
             }
@@ -1435,6 +1877,7 @@ export function generatePlanetarySurfaceModel(
     hasBiosphere,
     hasWaterLife,
     floraPalette,
+    compositionPalette,
     hasLiquid,
     seaLevelNormalized,
     minElevationKm: minElevKm,
@@ -1473,6 +1916,33 @@ export function generatePlanetarySurfaceModel(
   }
   surfaceModelCache.set(cacheKey, model);
   return model;
+}
+
+/**
+ * Resolves the hex color of a solid-surface biome using both the biosphere flora pigment palette
+ * and the planetary crust composition palette (iron-rich, sulfur-volcanic, ferric-oxide, tholin-cryo,
+ * water-ice, carbonaceous, or felsic-mafic silicate).
+ */
+export function resolveSolidBiomeColorHex(
+  biomeId: number,
+  floraPalette: FloraPigmentPalette,
+  comp: CrustCompositionPalette
+): string {
+  if (biomeId === 3) return floraPalette.hasAnyLife ? floraPalette.marshHex : comp.alluvialHex;
+  if (biomeId === 4) return floraPalette.hasAnyLife ? floraPalette.plainsHex : comp.lowlandHex;
+  if (biomeId === 5) return floraPalette.hasAnyLife ? floraPalette.woodlandHex : comp.basinHex;
+  if (biomeId === 6) return floraPalette.hasAnyLife ? floraPalette.taigaHex : comp.steppeHex;
+  if (biomeId === 7) return comp.tundraHex;
+  if (biomeId === 8) return comp.iceHex;
+  if (biomeId === 9) return comp.aridHex;
+  if (biomeId === 10) return comp.duneHex;
+  if (biomeId === 11) return comp.plateauHex;
+  if (biomeId === 12) return comp.mountainHex;
+  if (biomeId === 13) return comp.peakHex;
+  if (biomeId === 14) return comp.basaltHex;
+  if (biomeId === 16) return comp.craterlandHex;
+  if (biomeId === 18) return comp.cryoPlainsHex;
+  return (BIOMES.find((bm) => bm.id === biomeId) || BIOMES[4]).color;
 }
 
 /**
@@ -1518,6 +1988,7 @@ export function evaluateSurfaceMapTexel(
     cloudOpacity,
     atmospherePalette,
     floraPalette,
+    compositionPalette,
     seaLevelNormalized,
     isNoSurface,
     isIcyWorld,
@@ -1631,11 +2102,7 @@ export function evaluateSurfaceMapTexel(
       }
     } else {
       const biomeId = biomeGrid[idx];
-      let hex = (BIOMES.find((bm) => bm.id === biomeId) || BIOMES[4]).color;
-      if (biomeId === 3) hex = floraPalette.marshHex;
-      else if (biomeId === 4) hex = floraPalette.plainsHex;
-      else if (biomeId === 5) hex = floraPalette.woodlandHex;
-      else if (biomeId === 6) hex = floraPalette.taigaHex;
+      const hex = resolveSolidBiomeColorHex(biomeId, floraPalette, compositionPalette);
 
       r = parseInt(hex.slice(1, 3), 16);
       g = parseInt(hex.slice(3, 5), 16);
@@ -1691,10 +2158,10 @@ export function evaluateSurfaceMapTexel(
 
       if (activeLayer === 'satellite' && !isNoSurface && volcVal <= 1.1) {
         const altRatio = Math.max(0, (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized));
-        const craterBoost = craterGrid[idx] * 14;
-        r = Math.min(255, r * (0.92 + altRatio * 0.22) + craterBoost);
-        g = Math.min(255, g * (0.92 + altRatio * 0.22) + craterBoost);
-        b = Math.min(255, b * (0.92 + altRatio * 0.22) + craterBoost * 1.05);
+        const craterBoost = craterGrid[idx] * (12 + compositionPalette.iceEjectaBoost * 24);
+        r = Math.min(255, r * (0.92 + altRatio * 0.22) + craterBoost * 0.94);
+        g = Math.min(255, g * (0.92 + altRatio * 0.22) + craterBoost * 0.98);
+        b = Math.min(255, b * (0.92 + altRatio * 0.22) + craterBoost * 1.08);
       }
     }
 
@@ -1746,24 +2213,25 @@ export function evaluateSurfaceMapTexel(
       b = 36;
     } else {
       const altRatio = (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized);
-      if (altRatio < 0.28) {
-        const t = altRatio / 0.28;
-        r = Math.round(floraPalette.lowRgb[0] * (1 - t * 0.3) + 145 * (t * 0.3));
-        g = Math.round(floraPalette.lowRgb[1] * (1 - t * 0.3) + 145 * (t * 0.3));
-        b = Math.round(floraPalette.lowRgb[2] * (1 - t * 0.3) + 75 * (t * 0.3));
-      } else if (altRatio < 0.6) {
-        const t = (altRatio - 0.28) / 0.32;
-        r = Math.round(145 + t * 40);
-        g = Math.round(112 + t * 25);
-        b = Math.round(68 - t * 12);
-      } else if (altRatio < 0.85) {
-        r = 115;
-        g = 98;
-        b = 90;
+      const lowBase = floraPalette.hasAnyLife ? floraPalette.lowRgb : compositionPalette.lowlandRgb;
+      const platBase = compositionPalette.plateauRgb;
+      const mtnBase = compositionPalette.mountainRgb;
+      const peakBase = compositionPalette.peakRgb;
+      if (altRatio < 0.32) {
+        const t = altRatio / 0.32;
+        r = Math.round(lowBase[0] + (platBase[0] - lowBase[0]) * t);
+        g = Math.round(lowBase[1] + (platBase[1] - lowBase[1]) * t);
+        b = Math.round(lowBase[2] + (platBase[2] - lowBase[2]) * t);
+      } else if (altRatio < 0.68) {
+        const t = (altRatio - 0.32) / 0.36;
+        r = Math.round(platBase[0] + (mtnBase[0] - platBase[0]) * t);
+        g = Math.round(platBase[1] + (mtnBase[1] - platBase[1]) * t);
+        b = Math.round(platBase[2] + (mtnBase[2] - platBase[2]) * t);
       } else {
-        r = 230;
-        g = 238;
-        b = 248;
+        const t = (altRatio - 0.68) / 0.32;
+        r = Math.round(mtnBase[0] + (peakBase[0] - mtnBase[0]) * t);
+        g = Math.round(mtnBase[1] + (peakBase[1] - mtnBase[1]) * t);
+        b = Math.round(mtnBase[2] + (peakBase[2] - mtnBase[2]) * t);
       }
     }
     const nx = -dhdx * 36;
@@ -2312,7 +2780,7 @@ export function sampleSurfacePoint(
   const biomeDef = BIOMES.find((b) => b.id === biomeId) || BIOMES[4];
 
   let biomeName = biomeDef.name;
-  let biomeColor = biomeDef.color;
+  let biomeColor = resolveSolidBiomeColorHex(biomeId, model.floraPalette, model.compositionPalette);
 
   if (model.isNoSurface) {
     biomeName = model.atmospherePalette.classLabel;
@@ -2353,8 +2821,8 @@ export function sampleSurfacePoint(
         biomeColor = fp.taigaHex;
       }
     } else {
-      // Sterile world: barren mineral/rocky plains
-      biomeColor = biomeId === 3 ? fp.marshHex : biomeId === 4 ? fp.plainsHex : biomeId === 5 ? fp.woodlandHex : fp.taigaHex;
+      // Sterile world: barren mineral/rocky plains colored by planetary composition
+      biomeName = `${biomeDef.name} (${model.compositionPalette.compositionLabel})`;
     }
   } else if (model.isMoltenWorld && model.fractureGrid[idx] > 0.22) {
     biomeName = 'Active Lava Fissure (Magma Rift)';
@@ -2363,7 +2831,9 @@ export function sampleSurfacePoint(
     biomeName = 'Cryotectonic Ice Fissure (Linea)';
     biomeColor = '#3b7ea1';
   } else if (model.craterGrid[idx] > 0.35) {
-    biomeName = `${biomeDef.name} (Impact Crater)`;
+    biomeName = `${biomeDef.name} (Impact Crater — ${model.compositionPalette.compositionLabel})`;
+  } else {
+    biomeName = `${biomeDef.name} (${model.compositionPalette.compositionLabel})`;
   }
 
   // Barometric pressure at altitude: P(h) = P0 * exp(-h / H)

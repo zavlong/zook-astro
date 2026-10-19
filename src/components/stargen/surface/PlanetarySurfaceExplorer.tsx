@@ -393,8 +393,8 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       return;
     }
 
-    // 6. Horizon Distant Mountain Ranges & Active Volcano Cones (Backdrop Layer)
-    ctx.fillStyle = isNight ? '#0b1320' : '#1e293b';
+    // 6. Horizon Distant Mountain Ranges & Active Volcano Cones (Backdrop Layer tinted by crust composition)
+    ctx.fillStyle = isNight ? '#0b1320' : surfaceModel.compositionPalette.mountainHex;
     ctx.beginPath();
     ctx.moveTo(0, horizonY);
     for (let x = 0; x <= w; x += 20) {
@@ -424,7 +424,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         ctx.fill();
 
         // Conical volcanic edifice
-        ctx.fillStyle = isNight ? '#090d16' : '#261c1a';
+        ctx.fillStyle = isNight ? '#090d16' : surfaceModel.compositionPalette.basaltHex;
         ctx.beginPath();
         ctx.moveTo(vx - coneHalfW, horizonY);
         ctx.lineTo(vx - calderaHalfW, horizonY - coneH);
@@ -444,12 +444,13 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         ctx.beginPath();
         ctx.moveTo(vx - 2, horizonY - coneH + 3);
         ctx.quadraticCurveTo(vx + 6, horizonY - coneH * 0.5, vx + 14, horizonY - 8);
+        ctx.lineTo(vx + 14, horizonY - 8);
         ctx.stroke();
       });
     }
 
-    // 7. Midground Hills / Ridges
-    ctx.fillStyle = isNight ? '#080d17' : '#141e2e';
+    // 7. Midground Hills / Ridges (tinted by crust plateau composition)
+    ctx.fillStyle = isNight ? '#080d17' : surfaceModel.compositionPalette.plateauHex;
     ctx.beginPath();
     ctx.moveTo(0, horizonY);
     for (let x = 0; x <= w; x += 15) {
@@ -782,8 +783,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             )}
             <div className="w-full flex justify-between items-center text-[10px] text-slate-500 px-2 mt-1 flex-wrap gap-2">
               <span>
-                Equirectangular Projection (360° × 180°) • {surfaceModel.atmospherePalette.classLabel} (Opacity{' '}
-                {Math.round(surfaceModel.cloudOpacity * 100)}%)
+                Equirectangular Projection (360° × 180°) •{' '}
+                {surfaceModel.isNoSurface
+                  ? `${surfaceModel.atmospherePalette.classLabel} (100% Cloud Envelope)`
+                  : `Crust: ${surfaceModel.compositionPalette.compositionLabel} • ${surfaceModel.atmospherePalette.classLabel} (${Math.round(surfaceModel.cloudOpacity * 100)}%)`}
               </span>
               <span>
                 {surfaceModel.hasActiveGeology
@@ -915,7 +918,11 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
             <div className="w-full flex justify-between items-center text-[10px] text-slate-500 px-2 mt-1 flex-wrap gap-2">
               <span>
-                3D Spherical Surface Projection • Drag to rotate globe • Click globe to deploy landing site
+                3D Spherical Projection •{' '}
+                {surfaceModel.isNoSurface
+                  ? 'Fluid/Gas Envelope'
+                  : `Crust: ${surfaceModel.compositionPalette.compositionLabel}`}{' '}
+                • Drag to rotate
               </span>
               <span>
                 {surfaceModel.atmospherePalette.classLabel} (Cloud Opacity {Math.round(surfaceModel.cloudOpacity * 100)}%)
