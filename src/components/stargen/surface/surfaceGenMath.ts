@@ -28,6 +28,7 @@ export interface SolventSeaPalette {
 export interface PlanetarySurfaceModel {
   seed: number;
   isGasGiant: boolean;
+  isIcyWorld: boolean;
   hasLiquid: boolean;
   seaLevelNormalized: number;
   minElevationKm: number;
@@ -36,6 +37,7 @@ export interface PlanetarySurfaceModel {
   temperatureGrid: Float32Array; // Surface temperature in Kelvin
   biomeGrid: Uint8Array; // Biome index grid
   craterGrid: Float32Array; // Impact crater rim/bowl intensity
+  fractureGrid: Float32Array; // Cryotectonic ice crack / linea chasm intensity
   tectonicPlateGrid: Uint8Array; // Plate IDs
   platesCount: number;
   solvent: string;
@@ -193,6 +195,7 @@ export const BIOMES = [
   { id: 18, name: 'Cryovolcanic Nitrogen Plains', color: '#c8d3e0', isWater: false },
   { id: 19, name: 'Supercritical Fluid Abyssal Deck', color: '#264e80', isWater: true },
   { id: 20, name: 'Jovian Cloud Deck / Continuous Envelope', color: '#b88656', isWater: false },
+  { id: 21, name: 'Cryotectonic Ice Fissure (Linea)', color: '#3b7ea1', isWater: false },
 ];
 
 // Fast PRNG
@@ -317,6 +320,110 @@ function generateSphericalCraters(seed: number, pressureBar: number | null | und
   return craters;
 }
 
+interface SphericalIceCrack {
+  // Normal of the great/small circle plane
+  px: number;
+  py: number;
+  pz: number;
+  // Orthonormal basis vectors (U, V) in the fracture plane for measuring along-arc angle
+  ux: number;
+  uy: number;
+  uz: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  planeOffset: number;
+  arcHalfSpanRad: number;
+  halfWidthRad: number;
+  depth: number;
+  warpAmp: number;
+  warpFreq: number;
+  warpPhase: number;
+}
+
+/**
+ * Generates sweeping 3D cryotectonic ice fractures (Europa-like lineae & Enceladus-like tiger stripes)
+ * across worlds with icy surfaces.
+ */
+function generateSphericalIceCracks(
+  seed: number,
+  isIcyWorld: boolean,
+  hasSubsurfaceOcean: boolean
+): SphericalIceCrack[] {
+  if (!isIcyWorld) return [];
+
+  const crackPrng = createPrng(seed ^ 0x517cc1b7);
+  // Worlds with subsurface oceans (e.g. Europa/Enceladus) experience strong tidal flexing -> more lineae
+  const count = hasSubsurfaceOcean ? 26 : 16;
+  const cracks: SphericalIceCrack[] = [];
+
+  for (let i = 0; i < count; i++) {
+    // Random unit normal vector P for the fracture plane
+    const u = crackPrng() * 2 - 1;
+    const theta = crackPrng() * Math.PI * 2;
+    const rxy = Math.sqrt(Math.max(0, 1 - u * u));
+    const px = rxy * Math.cos(theta);
+    const py = u;
+    const pz = rxy * Math.sin(theta);
+
+    // Construct orthonormal basis U, V in the plane perpendicular to P
+    const refX = Math.abs(px) < 0.8 ? 1 : 0;
+    const refY = Math.abs(px) < 0.8 ? 0 : 1;
+    let ux = py * 0 - pz * refY;
+    let uy = pz * refX - px * 0;
+    let uz = px * refY - py * refX;
+    const uLen = Math.sqrt(ux * ux + uy * uy + uz * uz) || 1;
+    ux /= uLen;
+    uy /= uLen;
+    uz /= uLen;
+
+    // Cross product V = P x U
+    const vx = py * uz - pz * uy;
+    const vy = pz * ux - px * uz;
+    const vz = px * uy - py * ux;
+
+    // Rotate (U, V) by random angle around P so the arc center can be anywhere on the circle
+    const rot = crackPrng() * Math.PI * 2;
+    const cosR = Math.cos(rot);
+    const sinR = Math.sin(rot);
+    const rUx = ux * cosR + vx * sinR;
+    const rUy = uy * cosR + vy * sinR;
+    const rUz = uz * cosR + vz * sinR;
+    const rVx = -ux * sinR + vx * cosR;
+    const rVy = -uy * sinR + vy * cosR;
+    const rVz = -uz * sinR + vz * cosR;
+
+    const planeOffset = (crackPrng() - 0.5) * 0.45;
+    const arcHalfSpanRad = 0.45 + crackPrng() * 1.15; // 50 deg to 180 deg total arc span
+    const halfWidthRad = 0.012 + crackPrng() * 0.011; // ~0.7 deg to 1.3 deg half-width
+    const depth = 0.10 + crackPrng() * 0.11;
+    const warpAmp = 0.018 + crackPrng() * 0.032;
+    const warpFreq = 2.5 + crackPrng() * 4.5;
+    const warpPhase = crackPrng() * Math.PI * 2;
+
+    cracks.push({
+      px,
+      py,
+      pz,
+      ux: rUx,
+      uy: rUy,
+      uz: rUz,
+      vx: rVx,
+      vy: rVy,
+      vz: rVz,
+      planeOffset,
+      arcHalfSpanRad,
+      halfWidthRad,
+      depth,
+      warpAmp,
+      warpFreq,
+      warpPhase,
+    });
+  }
+
+  return cracks;
+}
+
 /**
  * Derives realistic sky color and horizon scattering based on atmospheric pressure,
  * dominant gases, and star spectral type.
@@ -399,6 +506,28 @@ export function generatePlanetarySurfaceModel(
   const hasLiquid = Boolean(hydro && (hydro.coveragePct ?? 0) > 0 && hydro.solvent !== 'None');
   const coverageFrac = hasLiquid && hydro && hydro.coveragePct ? hydro.coveragePct / 100 : 0;
 
+  const bodyClass = isMoon ? (moon?.moonClass || '') : planet.planetClass;
+  const bodyClassLower = bodyClass.toLowerCase();
+  const Tbase = activeBody.surfaceTempK || activeBody.T_eq || 288;
+  const hasSubsurfaceOcean = Boolean(
+    hydro &&
+      (((hydro.iceKm ?? 0) > 0 && (hydro.liqKm ?? 0) > 0) ||
+        hydro.state?.toLowerCase().includes('subsurface'))
+  );
+
+  // Determine whether this world has a predominantly icy surface / cryosphere
+  const isIcyWorld =
+    !isGasGiant &&
+    !bodyClassLower.includes('lava') &&
+    !bodyClassLower.includes('volcanic') &&
+    ((activeBody.iceFrac ?? 0) >= 0.15 ||
+      hasSubsurfaceOcean ||
+      (hydro?.iceKm ?? 0) > 0.5 ||
+      bodyClassLower.includes('ice') ||
+      bodyClassLower.includes('cryo') ||
+      bodyClassLower.includes('glacial') ||
+      (Tbase < 235 && (activeBody.rockFrac ?? 1) < 0.85));
+
   // Deterministic seed
   const bodyKey = isMoon
     ? (moon?.id || moon?.name || 'moon')
@@ -430,10 +559,19 @@ export function generatePlanetarySurfaceModel(
   const temperatureGrid = new Float32Array(width * height);
   const biomeGrid = new Uint8Array(width * height);
   const craterGrid = new Float32Array(width * height);
+  const fractureGrid = new Float32Array(width * height);
   const tectonicPlateGrid = new Uint8Array(width * height);
 
   // Pre-generate 3D spherical impact craters for airless and thin-atmosphere worlds
-  const craters = generateSphericalCraters(seed, activeBody.pressureBar, isGasGiant);
+  // Young cryotectonic ice shells with subsurface oceans (like Europa/Enceladus) resurface over old craters
+  const craters = generateSphericalCraters(
+    seed,
+    hasSubsurfaceOcean ? 0.35 : activeBody.pressureBar,
+    isGasGiant
+  );
+
+  // Pre-generate 3D spherical ice cracks / lineae for icy worlds
+  const iceCracks = generateSphericalIceCracks(seed, isIcyWorld, hasSubsurfaceOcean);
 
   // Generate elevation samples
   const allElevations: number[] = [];
@@ -463,13 +601,13 @@ export function generatePlanetarySurfaceModel(
       const ridgeNoise = Math.abs(sphericalFbm(lat * 1.5, lon * 1.5, seed + 499, 4) - 0.5) * 2;
       elev = elev * 0.72 + (1.0 - ridgeNoise) * 0.28;
 
+      const theta = (lon * Math.PI) / 180;
+      const nx = sinPhi * Math.cos(theta);
+      const ny = cosPhi;
+      const nz = sinPhi * Math.sin(theta);
+
       // Apply circular 3D impact craters (bowls, raised rims, central peaks, ejecta blankets)
       if (craters.length > 0) {
-        const theta = (lon * Math.PI) / 180;
-        const nx = sinPhi * Math.cos(theta);
-        const ny = cosPhi;
-        const nz = sinPhi * Math.sin(theta);
-
         let craterDelta = 0;
         let craterIntensity = 0;
 
@@ -510,6 +648,57 @@ export function generatePlanetarySurfaceModel(
         craterGrid[idx] = Math.min(1.5, craterIntensity);
       }
 
+      // Apply 3D cryotectonic ice cracks / lineae & double-ridges on icy worlds
+      if (iceCracks.length > 0) {
+        let crackDelta = 0;
+        let crackIntensity = 0;
+
+        for (let k = 0; k < iceCracks.length; k++) {
+          const ic = iceCracks[k];
+          // Quick bounding check before computing atan2
+          const rawPlaneDist = nx * ic.px + ny * ic.py + nz * ic.pz - ic.planeOffset;
+          if (Math.abs(rawPlaneDist) < ic.halfWidthRad * 2.5 + ic.warpAmp * 1.6) {
+            const projU = nx * ic.ux + ny * ic.uy + nz * ic.uz;
+            const projV = nx * ic.vx + ny * ic.vy + nz * ic.vz;
+            const alpha = Math.atan2(projV, projU);
+            const absAlpha = Math.abs(alpha);
+
+            if (absAlpha < ic.arcHalfSpanRad) {
+              const taper = Math.min(1.0, (ic.arcHalfSpanRad - absAlpha) / 0.20);
+              const warp =
+                ic.warpAmp * Math.sin(alpha * ic.warpFreq + ic.warpPhase) +
+                ic.warpAmp * 0.45 * Math.cos(alpha * ic.warpFreq * 2.3 - ic.warpPhase);
+              const d = Math.abs(rawPlaneDist - warp);
+              const w = d / ic.halfWidthRad;
+
+              if (w < 1.0) {
+                // Deep V-shaped ice fissure chasm
+                const chasm = 1.0 - w;
+                crackDelta -= ic.depth * taper * Math.pow(chasm, 1.5);
+                crackIntensity = Math.max(crackIntensity, chasm * taper);
+              } else if (w < 2.15) {
+                // Flanking Europan double-ridge uplift walls
+                const ridgeNorm = 1.0 - Math.abs(w - 1.38) / 0.77;
+                if (ridgeNorm > 0) {
+                  crackDelta += ic.depth * 0.36 * taper * ridgeNorm * ridgeNorm;
+                }
+              }
+            }
+          }
+        }
+
+        // Fine secondary branching crevasse network across the ice shell
+        const crevasseField = Math.abs(sphericalFbm(lat * 2.4, lon * 2.4, seed + 1319, 3) - 0.5);
+        if (crevasseField < 0.018) {
+          const fineIntensity = (1.0 - crevasseField / 0.018) * 0.65;
+          crackDelta -= 0.065 * fineIntensity;
+          crackIntensity = Math.max(crackIntensity, fineIntensity);
+        }
+
+        elev += crackDelta;
+        fractureGrid[idx] = Math.min(1.5, crackIntensity);
+      }
+
       hypsometry[idx] = Math.max(0.01, Math.min(0.99, elev));
       allElevations.push(hypsometry[idx]);
     }
@@ -526,8 +715,6 @@ export function generatePlanetarySurfaceModel(
   // Solvent-specific sea color palette
   const seaPalette = getSolventSeaPalette(hydro?.solvent);
 
-  // Surface base temperature (Tsurf)
-  const Tbase = activeBody.surfaceTempK || activeBody.T_eq || 288;
   const isTidallyLocked = activeBody.spinState?.toLowerCase().includes('locked') || activeBody.spinState?.includes('1:1');
 
   // Compute thermal and biome grid
@@ -575,13 +762,23 @@ export function generatePlanetarySurfaceModel(
           biomeGrid[idx] = 2; // Continental Shelf / Shallows (colored by seaPalette)
         }
       } else {
-        // Dry Land Biomes
+        // Dry Land / Ice Shell Biomes
         const pBar = activeBody.pressureBar ?? 0;
         const altRatio = (hNorm - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized);
 
-        const bodyClass = isMoon ? (moon?.moonClass || '') : planet.planetClass;
-        if (pBar < 0.005) {
-          // Vacuum / Moon / Mercury
+        if (fractureGrid[idx] > 0.28) {
+          biomeGrid[idx] = 21; // Cryotectonic Ice Fissure (Linea)
+        } else if (isIcyWorld) {
+          // Global Ice Shell (Europa, Enceladus, Ganymede, Callisto, Triton, Ice Worlds)
+          if (Tlocal < 95) {
+            biomeGrid[idx] = 18; // Cryovolcanic Nitrogen Plains
+          } else if (craterGrid[idx] > 0.45 && (activeBody.iceFrac ?? 0) < 0.45) {
+            biomeGrid[idx] = 16; // Dirty dark cratered regolith-ice mix (Callisto-like)
+          } else {
+            biomeGrid[idx] = 8; // Glacial Water-Ice Shell
+          }
+        } else if (pBar < 0.005) {
+          // Vacuum rocky worlds (Moon / Mercury / Io)
           if (Tlocal > 700 || bodyClass.includes('Lava') || bodyClass.includes('Volcanic')) {
             biomeGrid[idx] = altRatio > 0.7 ? 15 : 14; // Caldera or Basalt Lava
           } else if (Tlocal < 100) {
@@ -667,6 +864,7 @@ export function generatePlanetarySurfaceModel(
   return {
     seed,
     isGasGiant,
+    isIcyWorld,
     hasLiquid,
     seaLevelNormalized,
     minElevationKm: minElevKm,
@@ -675,6 +873,7 @@ export function generatePlanetarySurfaceModel(
     temperatureGrid,
     biomeGrid,
     craterGrid,
+    fractureGrid,
     tectonicPlateGrid,
     platesCount,
     solvent: hydro?.solvent || 'None',
@@ -748,6 +947,9 @@ export function sampleSurfacePoint(
       biomeName = `Shallow ${pal.solventKey} Shelf`;
       biomeColor = rgbToHex(pal.shallowRgb);
     }
+  } else if (model.fractureGrid[idx] > 0.28) {
+    biomeName = 'Cryotectonic Ice Fissure (Linea)';
+    biomeColor = '#3b7ea1';
   } else if (model.craterGrid[idx] > 0.35) {
     biomeName = `${biomeDef.name} (Impact Crater)`;
   }
@@ -761,6 +963,8 @@ export function sampleSurfacePoint(
   const hemisphere = clampedLat >= 0 ? 'Northern' : 'Southern';
   const prefix = isOcean
     ? 'Mare'
+    : model.fractureGrid[idx] > 0.28
+    ? 'Linea'
     : model.craterGrid[idx] > 0.35
     ? 'Crater'
     : elevationKm > 3

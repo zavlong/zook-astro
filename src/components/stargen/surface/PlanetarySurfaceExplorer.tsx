@@ -79,8 +79,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       temperatureGrid,
       biomeGrid,
       craterGrid,
+      fractureGrid,
       seaLevelNormalized,
       isGasGiant,
+      isIcyWorld,
       hasLiquid,
       seaPalette,
     } = surfaceModel;
@@ -142,6 +144,25 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             r = parseInt(hex.slice(1, 3), 16);
             g = parseInt(hex.slice(3, 5), 16);
             b = parseInt(hex.slice(5, 7), 16);
+
+            const crackVal = fractureGrid[idx];
+            if (isIcyWorld && crackVal > 0.08) {
+              // Blend Europan mineral-stained double-ridge margins & deep cryo-blue chasm cores
+              const t = Math.min(1.0, crackVal / 0.85);
+              if (t < 0.4) {
+                // Flanking oxidized salt/tholin margin tint
+                const m = t / 0.4;
+                r = r * (1 - m * 0.35) + 155 * (m * 0.35);
+                g = g * (1 - m * 0.35) + 125 * (m * 0.35);
+                b = b * (1 - m * 0.35) + 115 * (m * 0.35);
+              } else {
+                // Deep glacial cyan-blue fissure interior
+                const c = (t - 0.4) / 0.6;
+                r = r * (1 - c * 0.72) + 38 * (c * 0.72);
+                g = g * (1 - c * 0.65) + 108 * (c * 0.65);
+                b = b * (1 - c * 0.55) + 158 * (c * 0.55);
+              }
+            }
 
             if (activeLayer === 'satellite' && !isGasGiant) {
               // Subtle hypsometric tinting + crater ejecta brightening on land
@@ -474,12 +495,39 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         }
       }
     } else {
-      // Solid Land Ground
+      // Solid Land / Ice Shell Ground
       const bColor = currentTelemetry.biomeColor || '#3d6738';
       groundGrad.addColorStop(0, isNight ? '#060a12' : bColor);
       groundGrad.addColorStop(1, isNight ? '#020408' : '#101724');
       ctx.fillStyle = groundGrad;
       ctx.fillRect(0, horizonY, w, h - horizonY);
+
+      // Cryotectonic Ice Cracks / Crevasses on Icy Worlds
+      if (surfaceModel.isIcyWorld) {
+        ctx.save();
+        for (let c = 0; c < 6; c++) {
+          const baseStartX = (((c * 135 + cameraPanDeg * 3.5 + selectedCoords.lon * 4) % w) + w) % w;
+          // Flanking double-ridge highlight
+          ctx.strokeStyle = isNight ? 'rgba(125, 211, 252, 0.18)' : 'rgba(224, 242, 254, 0.55)';
+          ctx.lineWidth = 4.5;
+          ctx.beginPath();
+          let cx = baseStartX;
+          let cy = horizonY + 4;
+          ctx.moveTo(cx, cy);
+          for (let step = 1; step <= 6; step++) {
+            cy = horizonY + ((h - horizonY) * step) / 6;
+            cx += Math.sin(c * 2.1 + step * 1.7) * 28 + (c % 2 === 0 ? 14 : -14);
+            ctx.lineTo(cx, cy);
+          }
+          ctx.stroke();
+
+          // Deep cryo-cyan chasm core
+          ctx.strokeStyle = isNight ? '#082f49' : '#0369a1';
+          ctx.lineWidth = 2.2;
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
 
       // Foreground terrain texture & boulders
       ctx.fillStyle = isNight ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.2)';
