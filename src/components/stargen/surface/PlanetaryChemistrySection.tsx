@@ -227,7 +227,8 @@ export function derivePlanetaryChemistryProfile(
       { symbol: 'O', name: 'Oxygen', pct: iceFrac * 52 + rockFrac * 32, color: '#60a5fa' },
       { symbol: 'C', name: 'Carbon', pct: iceFrac * 18 + gasFrac * 1.1, color: '#a855f7' },
       { symbol: 'N', name: 'Nitrogen', pct: iceFrac * 11 + gasFrac * 0.5, color: '#818cf8' },
-      { symbol: 'Si/Fe', name: 'Rock & Iron', pct: rockFrac * 68 + iceFrac * 8, color: '#94a3b8' },
+      { symbol: 'Fe', name: 'Iron', pct: rockFrac * 36 + iceFrac * 4, color: '#f97316' },
+      { symbol: 'Si', name: 'Silicon', pct: rockFrac * 32 + iceFrac * 4, color: '#94a3b8' },
     ]);
 
     return {
@@ -555,7 +556,7 @@ export function derivePlanetaryChemistryProfile(
     color: '#f59e0b',
   });
 
-  // Bulk Elemental Composition
+  // Bulk Elemental Composition (Individual Elements Only)
   const bulkElements = normalizeElements([
     {
       symbol: 'O',
@@ -584,33 +585,55 @@ export function derivePlanetaryChemistryProfile(
     ...(iceFrac >= 0.04 || surfModel.isSupercritical
       ? [
           {
-            symbol: 'H/C/N',
-            name: 'Water & Ice Elements',
-            pct: Math.max(2.5, iceFrac * 32 + (surfModel.isSupercritical ? 14 : 0)),
+            symbol: 'H',
+            name: 'Hydrogen',
+            pct: Math.max(1.2, iceFrac * 11.5 + (surfModel.isSupercritical ? 8.5 : 0)),
             color: '#60a5fa',
           },
         ]
       : []),
-    ...(isCarbon
+    ...(isCarbon || isTholin || iceFrac >= 0.1
       ? [
           {
             symbol: 'C',
             name: 'Carbon',
-            pct: 28.5,
+            pct: isCarbon ? 28.5 : Math.max(1.2, iceFrac * 12 + (isTholin ? 6.5 : 0)),
             color: '#a855f7',
           },
         ]
       : []),
+    ...(solventKey === 'NH3-H2O' || isTholin || iceFrac >= 0.12
+      ? [
+          {
+            symbol: 'N',
+            name: 'Nitrogen',
+            pct: Math.max(1.0, iceFrac * 7.5 + (solventKey === 'NH3-H2O' ? 4.5 : 0)),
+            color: '#818cf8',
+          },
+        ]
+      : []),
     {
-      symbol: 'S/Ni',
-      name: 'Sulfur & Nickel',
-      pct: coreMassPct * 0.14 + (isSulfur ? 9.5 : 2.4),
+      symbol: 'Ni',
+      name: 'Nickel',
+      pct: Math.max(0.8, coreMassPct * 0.075 + rockFrac * 0.6),
+      color: '#94a3b8',
+    },
+    {
+      symbol: 'S',
+      name: 'Sulfur',
+      pct: Math.max(0.8, coreMassPct * 0.065 + (isSulfur ? 9.5 : 1.6)),
       color: '#eab308',
     },
     {
-      symbol: 'Ca/Al',
-      name: 'Calcium & Aluminum',
-      pct: Math.max(1.2, rockFrac * 3.2),
+      symbol: 'Ca',
+      name: 'Calcium',
+      pct: Math.max(0.7, rockFrac * 1.7),
+      color: '#e2e8f0',
+    },
+    {
+      symbol: 'Al',
+      name: 'Aluminum',
+      pct: Math.max(0.7, rockFrac * 1.5),
       color: '#cbd5e1',
     },
   ]);
