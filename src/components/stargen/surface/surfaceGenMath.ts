@@ -89,7 +89,9 @@ export interface PlanetarySurfaceModel {
   maxElevationKm: number;
   hypsometry: Float32Array; // Normalized [0, 1] elevation grid: 360 x 180 (1 deg resolution)
   temperatureGrid: Float32Array; // Surface temperature in Kelvin
-  biomeGrid: Uint8Array; // Biome index grid
+  moistureGrid: Float32Array; // Continuous [0, 1] surface moisture/precipitation index
+  biomeGrid: Uint8Array; // Contiguous biome index grid
+  blendedLandRgb: Uint8Array; // Smoothly blended RGB (360 * 180 * 3) across biome transitions
   craterGrid: Float32Array; // Impact crater rim/bowl intensity
   fractureGrid: Float32Array; // Cryotectonic ice crack or tectonic lava fissure intensity
   volcanoGrid: Float32Array; // Discrete volcanic cone slope (0..1) and active lava caldera (>1.0)
@@ -1517,7 +1519,9 @@ export function generatePlanetarySurfaceModel(
   const height = 180;
   const hypsometry = new Float32Array(width * height);
   const temperatureGrid = new Float32Array(width * height);
+  const moistureGrid = new Float32Array(width * height);
   const biomeGrid = new Uint8Array(width * height);
+  const blendedLandRgb = new Uint8Array(width * height * 3);
   const craterGrid = new Float32Array(width * height);
   const fractureGrid = new Float32Array(width * height);
   const volcanoGrid = new Float32Array(width * height);
@@ -1778,16 +1782,30 @@ export function generatePlanetarySurfaceModel(
       // Active volcanic cones/calderas breach the surface even if surrounded by ocean
       const isBelowSeaLevel = !isNoSurface && hasLiquid && hNorm <= seaLevelNormalized && volcVal < 0.35;
 
-      // Solar insolation & atmospheric heat transport gradient + natural climatic wave
-      const climateWave = (sphericalFbm(lat * 2.2, lon * 2.2, seed + 313, 3) - 0.5) * 6.0;
+      // 3D Spherical Domain Warping for organic, contiguous climate & biome zones (no boxy latitude/sine cutoffs!)
+      const warpLat = (sphericalFbm(lat * 1.15, lon * 1.15, seed + 401, 4) - 0.5) * 32.0;
+      const warpLon = (sphericalFbm(lat * 1.15 + 37, lon * 1.15 - 53, seed + 419, 4) - 0.5) * 44.0;
+      const effLat = Math.max(-90, Math.min(90, lat + warpLat));
+      const effAbsLat = Math.abs(effLat);
+      const effLatCos = Math.cos((effAbsLat * Math.PI) / 180);
+      const blendedLatCos = latCos * 0.62 + effLatCos * 0.38;
+
+      // Solar insolation & atmospheric heat transport gradient + multi-scale organic climatic wave
+      const climateWave =
+        (sphericalFbm(lat * 1.25, lon * 1.25, seed + 313, 4) - 0.5) * 14.0 +
+        (sphericalFbm(lat * 2.6, lon * 2.6, seed + 353, 3) - 0.5) * 5.0;
       let Tlocal = Tbase;
       if (isTidallyLocked) {
-        const lonRad = (lon * Math.PI) / 180;
-        const cosPsi = Math.max(-1, Math.min(1, Math.cos(latRad) * Math.cos(lonRad)));
+        const wLatRad = ((lat + warpLat * 0.45) * Math.PI) / 180;
+        const wLonRad = ((lon + warpLon * 0.45) * Math.PI) / 180;
+        const cosPsi = Math.max(
+          -1,
+          Math.min(1, Math.cos(latRad) * Math.cos((lon * Math.PI) / 180) * 0.72 + Math.cos(wLatRad) * Math.cos(wLonRad) * 0.28)
+        );
         const distFromSubstellar = Math.acos(cosPsi) / Math.PI; // 0 at substellar (0,0), 0.5 at terminator, 1.0 at antistellar
         Tlocal = Tbase * (1.0 + thermalDiffFactor * 0.65 - distFromSubstellar * thermalDiffFactor * 1.45) + climateWave;
       } else {
-        Tlocal = Tbase * (1.0 + (Math.pow(latCos, 1.15) - 0.74) * thermalDiffFactor * 1.15) + climateWave;
+        Tlocal = Tbase * (1.0 + (Math.pow(blendedLatCos, 1.15) - 0.74) * thermalDiffFactor * 1.15) + climateWave;
       }
 
       // Altitude lapse cooling & barometric pressure above sea level
@@ -1810,6 +1828,23 @@ export function generatePlanetarySurfaceModel(
       const altRatio = isBelowSeaLevel
         ? 0
         : (hNorm - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized);
+
+      // Continuous, domain-warped 3D spherical moisture field (0..1)
+      const moistNoise =
+        sphericalFbm(lat * 1.05 + warpLat * 0.38, lon * 1.05 + warpLon * 0.38, seed + 509, 4) * 0.74 +
+        sphericalFbm(lat * 2.35, lon * 2.35, seed + 547, 3) * 0.26;
+      const itczBoost = Math.exp(-Math.pow(effAbsLat / 14.5, 2)) * 0.26;
+      const hadleyDip = Math.exp(-Math.pow((effAbsLat - 25.0) / 11.5, 2)) * 0.34;
+      const ferrelBoost = Math.exp(-Math.pow((effAbsLat - 52.0) / 14.0, 2)) * 0.18;
+      const coastalBoost = hasLiquid ? Math.max(0, (0.22 - altRatio) * 0.82) : 0;
+      const continentalDry = Math.max(0, (altRatio - 0.18) * 0.45);
+      const rawMoist = !hasLiquid
+        ? moistNoise * 0.32
+        : (moistNoise - 0.5) * 1.48 + 0.52 + itczBoost - hadleyDip + ferrelBoost + coastalBoost - continentalDry;
+      const localMoisture = isBelowSeaLevel ? 1.0 : Math.max(0.02, Math.min(0.98, rawMoist));
+      moistureGrid[idx] = localMoisture;
+
+      const topoVar = (moistNoise - 0.5) * 0.1;
       const localPressureBar = pBarAtmo * Math.exp(-altitudeKm / baseScaleHeightKm);
       const localBoilingPointK = computeLocalBoilingPointK(seaPalette, localPressureBar);
       const isMoltenMagmaTemp = !isNoSurface && Tlocal >= 800;
@@ -1848,9 +1883,9 @@ export function generatePlanetarySurfaceModel(
         // Local temperature < 800 K on a magma/molten world -> Magma solidifies into solid Rock!
         if (isBelowSeaLevel) {
           biomeGrid[idx] = 14; // Solidified Basalt Crust in cooled magma sea basin
-        } else if (altRatio > 0.72) {
+        } else if (altRatio > 0.72 + topoVar) {
           biomeGrid[idx] = 12; // Solidified Mountain Cordillera
-        } else if (altRatio > 0.42) {
+        } else if (altRatio > 0.42 + topoVar) {
           biomeGrid[idx] = 11; // Solidified High Plateau / Badlands
         } else if (craterGrid[idx] > 0.35 && pBarAtmo < 0.3) {
           biomeGrid[idx] = 16; // Cratered Basalt Regolith
@@ -1865,7 +1900,7 @@ export function generatePlanetarySurfaceModel(
           biomeGrid[idx] = 18; // Cryovolcanic Nitrogen Plains
         } else if (isIcyWorld && craterGrid[idx] > 0.45 && (activeBody.iceFrac ?? 0) < 0.45 && !isBelowSeaLevel) {
           biomeGrid[idx] = 16; // Dirty dark cratered regolith-ice mix
-        } else if (!isBelowSeaLevel && altRatio > 0.72) {
+        } else if (!isBelowSeaLevel && altRatio > 0.72 + topoVar) {
           biomeGrid[idx] = 13; // Alpine Glacial Ice Peaks
         } else {
           biomeGrid[idx] = 8; // Polar / Sea Glacial Ice
@@ -1890,12 +1925,12 @@ export function generatePlanetarySurfaceModel(
         if (pBar < 0.005) {
           // Vacuum rocky worlds (Moon / Mercury / Io)
           if (Tlocal > 650 || bodyClassLower.includes('volcanic') || bodyClassLower.includes('io')) {
-            biomeGrid[idx] = altRatio > 0.68 ? 13 : altRatio > 0.36 ? 11 : 4; // Sulfur/Silicate peaks, plateaus, or plains
+            biomeGrid[idx] = altRatio > 0.68 + topoVar ? 13 : altRatio > 0.36 + topoVar ? 11 : 4; // Sulfur/Silicate peaks, plateaus, or plains
           } else if (Tlocal < 100) {
             biomeGrid[idx] = 18; // Cryovolcanic / Nitrogen ice
-          } else if (altRatio > 0.74) {
+          } else if (altRatio > 0.74 + topoVar) {
             biomeGrid[idx] = 13; // High Crater Rim / Massif Peaks
-          } else if (altRatio < 0.28 && craterGrid[idx] < 0.25) {
+          } else if (altRatio < 0.28 + topoVar && craterGrid[idx] < 0.25) {
             biomeGrid[idx] = 5; // Smooth Flood-Basalt Mare Basin
           } else {
             biomeGrid[idx] = 16; // Regolith Craterlands
@@ -1904,48 +1939,175 @@ export function generatePlanetarySurfaceModel(
           // Cold sub-polar / periglacial zone just above freezing point
           if (craterGrid[idx] > 0.35 && pBar < 0.3) {
             biomeGrid[idx] = 16; // Cratered highlands in thin atmosphere
-          } else if (altRatio > 0.48) {
+          } else if (altRatio > 0.48 + topoVar) {
             biomeGrid[idx] = 11; // Cold Highland Plateau / Badlands
           } else {
             biomeGrid[idx] = 7; // Tundra / Permafrost Regolith
           }
         } else if (Tlocal > 370 || Tbase > 420) {
-          if (altRatio > 0.76) {
+          if (altRatio > 0.76 + topoVar) {
             biomeGrid[idx] = 13; // High Summit Peaks (e.g. Venusian pyrite frost peaks)
-          } else if (altRatio > 0.52) {
+          } else if (altRatio > 0.52 + topoVar) {
             biomeGrid[idx] = 12; // Mountain Cordillera
-          } else if (altRatio > 0.32) {
+          } else if (altRatio > 0.32 + topoVar) {
             biomeGrid[idx] = 11; // High Plateau / Badlands
           } else {
             biomeGrid[idx] = 10; // Hyper-Arid Desert / Basalt Plains
           }
         } else {
-          // Temperate ranges (strictly above freezing point)
+          // Temperate ranges (strictly above freezing point & below boiling point)
           const isAqueousOrAmmonia =
             seaPalette.solventKey === 'H2O' ||
             seaPalette.solventKey === 'H2O + CO2' ||
             seaPalette.solventKey === 'NH3-H2O';
 
-          if (altRatio > 0.52) {
+          if (altRatio > 0.54 + topoVar) {
             biomeGrid[idx] = 12; // Mountain Cordillera
-          } else if (altRatio > 0.35) {
+          } else if (altRatio > 0.36 + topoVar) {
             biomeGrid[idx] = 11; // High Plateau / Badlands
+          } else if (!isAqueousOrAmmonia) {
+            biomeGrid[idx] = localMoisture < 0.46 ? 10 : 9; // Hyper-Arid Dunes or Arid Steppe
+          } else if (freezingPointK > 0 && Tlocal < freezingPointK + 24) {
+            biomeGrid[idx] = localMoisture < 0.3 ? 9 : 6; // Boreal Taiga / High-Latitude Steppe (organic thermal contour!)
+          } else if (localMoisture < 0.27) {
+            biomeGrid[idx] = 10; // Contiguous Hyper-Arid Desert Basin (driven by organic moisture field, never boxes!)
+          } else if (localMoisture < 0.41) {
+            biomeGrid[idx] = 9; // Arid Steppe / Savanna Scrub transition belt
+          } else if (hasLiquid && hasBiosphere) {
+            biomeGrid[idx] = altRatio < 0.06 && localMoisture > 0.62 ? 3 : localMoisture > 0.58 ? 5 : 4; // Marsh, Forest, or Plains
+          } else if (hasLiquid) {
+            biomeGrid[idx] = 4; // Lowland Plains
           } else {
-            const isHadleyDesert = absLat >= 18 && absLat <= 32 && Math.sin(lon * 0.1) > 0.1;
-            if (isHadleyDesert || !isAqueousOrAmmonia) {
-              biomeGrid[idx] = 10; // Hyper-Arid Dunes
-            } else if (absLat > 48 || (freezingPointK > 0 && Tlocal < freezingPointK + 22)) {
-              biomeGrid[idx] = 6; // Boreal Taiga (if biosphere) or High-Latitude Rocky Steppe (if sterile)
-            } else if (hasLiquid && hasBiosphere) {
-              biomeGrid[idx] = altRatio < 0.06 ? 3 : 5; // Coastal Marsh or Woodland (colored by floraPalette)
-            } else if (hasLiquid) {
-              biomeGrid[idx] = 4; // Lowland Plains (colored by floraPalette: green only if F/G water life, else composition lowland)
-            } else {
-              biomeGrid[idx] = 9; // Arid Steppe
-            }
+            biomeGrid[idx] = 9; // Arid Steppe
           }
         }
       }
+    }
+  }
+
+  // 2-Pass Cellular Majority-Vote Smoothing Filter over land biomes so regions are contiguous without isolated speckle
+  if (!isNoSurface) {
+    const tempBiomes = new Uint8Array(width * height);
+    const counts = new Uint8Array(24);
+    for (let pass = 0; pass < 2; pass++) {
+      tempBiomes.set(biomeGrid);
+      for (let y = 0; y < height; y++) {
+        const yUp = Math.max(0, y - 1);
+        const yDown = Math.min(height - 1, y + 1);
+        for (let x = 0; x < width; x++) {
+          const idx = y * width + x;
+          const bCenter = tempBiomes[idx];
+          // Preserve water cells, volcanic cones/calderas, and cryotectonic ice fissures
+          if (bCenter <= 2 || bCenter === 15 || bCenter === 21 || bCenter === 22 || volcanoGrid[idx] > 0.35) {
+            continue;
+          }
+          counts.fill(0);
+          let sameCount = 0;
+          let bestBiome = bCenter;
+          let bestCount = 0;
+          for (let ny = yUp; ny <= yDown; ny++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const nx = (x + dx + width) % width;
+              const nb = tempBiomes[ny * width + nx];
+              if (nb <= 2 || nb === 21 || nb === 22) continue;
+              const weight = dx === 0 && ny === y ? 2 : 1;
+              counts[nb] += weight;
+              if (nb === bCenter && !(dx === 0 && ny === y)) sameCount++;
+              if (counts[nb] > bestCount) {
+                bestCount = counts[nb];
+                bestBiome = nb;
+              }
+            }
+          }
+          if (sameCount < 3 && bestBiome !== bCenter) {
+            biomeGrid[idx] = bestBiome;
+          }
+        }
+      }
+    }
+  }
+
+  // Precompute smoothly blended land surface RGB (3-pass spherical Gaussian feathering across land biome transitions)
+  {
+    const rawRgb = new Float32Array(width * height * 3);
+    const pingRgb = new Float32Array(width * height * 3);
+    for (let i = 0; i < width * height; i++) {
+      const bId = biomeGrid[i];
+      const Tlocal = temperatureGrid[i];
+      const h = hypsometry[i];
+      if (bId === 15 && volcanoGrid[i] <= 1.1) {
+        const meltHeat = Math.max(0, Math.min(1, (Tlocal - 800) / 420 + (1 - h) * 0.25));
+        if (meltHeat < 0.45) {
+          const t = meltHeat / 0.45;
+          rawRgb[i * 3] = 215 + (248 - 215) * t;
+          rawRgb[i * 3 + 1] = 78 + (138 - 78) * t;
+          rawRgb[i * 3 + 2] = 8 + (14 - 8) * t;
+        } else {
+          const t = (meltHeat - 0.45) / 0.55;
+          rawRgb[i * 3] = 248 + (255 - 248) * t;
+          rawRgb[i * 3 + 1] = 138 + (214 - 138) * t;
+          rawRgb[i * 3 + 2] = 14 + (46 - 14) * t;
+        }
+      } else {
+        const hex = resolveSolidBiomeColorHex(bId, floraPalette, compositionPalette);
+        rawRgb[i * 3] = parseInt(hex.slice(1, 3), 16);
+        rawRgb[i * 3 + 1] = parseInt(hex.slice(3, 5), 16);
+        rawRgb[i * 3 + 2] = parseInt(hex.slice(5, 7), 16);
+      }
+    }
+
+    // 3 passes of spherical 3x3 Gaussian smoothing across non-water cells so all biome edges blend seamlessly
+    for (let pass = 0; pass < 3; pass++) {
+      const src = pass % 2 === 0 ? rawRgb : pingRgb;
+      const dst = pass % 2 === 0 ? pingRgb : rawRgb;
+      for (let y = 0; y < height; y++) {
+        const yUp = Math.max(0, y - 1);
+        const yDown = Math.min(height - 1, y + 1);
+        for (let x = 0; x < width; x++) {
+          const idx = y * width + x;
+          const bCenter = biomeGrid[idx];
+          const isWaterCenter = !isNoSurface && hasLiquid && bCenter <= 2;
+          if (isWaterCenter || volcanoGrid[idx] > 1.1) {
+            dst[idx * 3] = src[idx * 3];
+            dst[idx * 3 + 1] = src[idx * 3 + 1];
+            dst[idx * 3 + 2] = src[idx * 3 + 2];
+            continue;
+          }
+          let sumR = 0;
+          let sumG = 0;
+          let sumB = 0;
+          let sumW = 0;
+          for (let ny = yUp; ny <= yDown; ny++) {
+            const dy = ny - y;
+            for (let dx = -1; dx <= 1; dx++) {
+              const nx = (x + dx + width) % width;
+              const nIdx = ny * width + nx;
+              const nBiome = biomeGrid[nIdx];
+              const isWaterNeighbor = !isNoSurface && hasLiquid && nBiome <= 2;
+              if (isWaterNeighbor || volcanoGrid[nIdx] > 1.1) continue;
+              const w = dx === 0 && dy === 0 ? 4 : dx === 0 || dy === 0 ? 2 : 1;
+              sumR += src[nIdx * 3] * w;
+              sumG += src[nIdx * 3 + 1] * w;
+              sumB += src[nIdx * 3 + 2] * w;
+              sumW += w;
+            }
+          }
+          if (sumW > 0) {
+            dst[idx * 3] = sumR / sumW;
+            dst[idx * 3 + 1] = sumG / sumW;
+            dst[idx * 3 + 2] = sumB / sumW;
+          } else {
+            dst[idx * 3] = src[idx * 3];
+            dst[idx * 3 + 1] = src[idx * 3 + 1];
+            dst[idx * 3 + 2] = src[idx * 3 + 2];
+          }
+        }
+      }
+    }
+
+    // After 3 passes (0: raw->ping, 1: ping->raw, 2: raw->ping), result is in pingRgb
+    for (let i = 0; i < width * height * 3; i++) {
+      blendedLandRgb[i] = Math.max(0, Math.min(255, Math.round(pingRgb[i])));
     }
   }
 
@@ -1999,7 +2161,9 @@ export function generatePlanetarySurfaceModel(
     maxElevationKm: maxElevKm,
     hypsometry,
     temperatureGrid,
+    moistureGrid,
     biomeGrid,
+    blendedLandRgb,
     craterGrid,
     fractureGrid,
     volcanoGrid,
@@ -2086,7 +2250,6 @@ export function evaluateSurfaceMapTexel(
   const gx = ((x % width) + width) % width;
   const gy = Math.max(0, Math.min(height - 1, y));
   const idx = gy * width + gx;
-  const lat = 90 - gy;
   const yUp = Math.max(0, gy - 1);
   const yDown = Math.min(height - 1, gy + 1);
   const xLeft = (gx + width - 1) % width;
@@ -2228,26 +2391,23 @@ export function evaluateSurfaceMapTexel(
         }
       }
     } else {
-      const hex = resolveSolidBiomeColorHex(biomeId, floraPalette, compositionPalette);
+      const bR = surfaceModel.blendedLandRgb[idx * 3];
+      const bG = surfaceModel.blendedLandRgb[idx * 3 + 1];
+      const bB = surfaceModel.blendedLandRgb[idx * 3 + 2];
 
-      r = parseInt(hex.slice(1, 3), 16);
-      g = parseInt(hex.slice(3, 5), 16);
-      b = parseInt(hex.slice(5, 7), 16);
-
-      if (activeLayer === 'satellite' && biomeId === 15 && volcVal <= 1.1) {
-        // Melted silicate magma surface (Tlocal >= 800 K): incandescent yellow-orange thermal gradient
-        const meltHeat = Math.max(0, Math.min(1, (Tlocal - 800) / 420 + (1 - h) * 0.25));
-        if (meltHeat < 0.45) {
-          const t = meltHeat / 0.45;
-          r = 215 + (248 - 215) * t;
-          g = 78 + (138 - 78) * t;
-          b = 8 + (14 - 8) * t;
-        } else {
-          const t = (meltHeat - 0.45) / 0.55;
-          r = 248 + (255 - 248) * t;
-          g = 138 + (214 - 138) * t;
-          b = 14 + (46 - 14) * t;
-        }
+      if (activeLayer === 'satellite') {
+        r = bR;
+        g = bG;
+        b = bB;
+      } else {
+        // Biomes layer: blend exact biome color with feathered boundary color to eliminate sharp stair-step edges
+        const hex = resolveSolidBiomeColorHex(biomeId, floraPalette, compositionPalette);
+        const exR = parseInt(hex.slice(1, 3), 16);
+        const exG = parseInt(hex.slice(3, 5), 16);
+        const exB = parseInt(hex.slice(5, 7), 16);
+        r = exR * 0.55 + bR * 0.45;
+        g = exG * 0.55 + bG * 0.45;
+        b = exB * 0.55 + bB * 0.45;
       }
 
       if (volcVal > 0.15) {
@@ -2352,6 +2512,10 @@ export function evaluateSurfaceMapTexel(
         g = Math.round(g * (1 - cloudAlpha) + atmospherePalette.cloudRgb[1] * cloudAlpha);
         b = Math.round(b * (1 - cloudAlpha) + atmospherePalette.cloudRgb[2] * cloudAlpha);
       }
+    } else {
+      r = Math.max(0, Math.min(255, Math.round(r)));
+      g = Math.max(0, Math.min(255, Math.round(g)));
+      b = Math.max(0, Math.min(255, Math.round(b)));
     }
   } else if (activeLayer === 'topography') {
     if (isWater) {
@@ -2423,47 +2587,131 @@ export function evaluateSurfaceMapTexel(
       b = Math.round(35 - t * 25);
     }
   } else if (activeLayer === 'moisture') {
-    const absLat = Math.abs(lat);
-    const isHadleyDry = absLat >= 18 && absLat <= 32;
+    const moist = surfaceModel.moistureGrid[idx];
     if (isWater) {
       r = seaPalette.shallowRgb[0];
       g = seaPalette.shallowRgb[1];
       b = seaPalette.shallowRgb[2];
-    } else if (!hasLiquid || isHadleyDry) {
-      r = 182;
-      g = 138;
-      b = 68;
+    } else if (!hasLiquid && moist < 0.35) {
+      r = Math.round(196 - moist * 65);
+      g = Math.round(148 - moist * 35);
+      b = Math.round(78 + moist * 40);
+    } else if (moist < 0.35) {
+      const t = moist / 0.35;
+      r = Math.round(204 - t * 54);
+      g = Math.round(154 - t * 18);
+      b = Math.round(74 + t * 28);
+    } else if (moist < 0.65) {
+      const t = (moist - 0.35) / 0.3;
+      r = Math.round(150 - t * 92);
+      g = Math.round(136 + t * 28);
+      b = Math.round(102 + t * 36);
     } else {
-      const moist = Math.max(0.1, Math.min(1.0, Math.cos((absLat * Math.PI) / 180)));
-      if (floraPalette.hasWaterLife && surfaceModel.starTeff >= 5100 && surfaceModel.starTeff <= 6800) {
-        r = Math.round(45 + (1 - moist) * 95);
-        g = Math.round(85 + moist * 115);
-        b = Math.round(65 + moist * 125);
-      } else {
-        r = Math.round(135 - moist * 85);
-        g = Math.round(115 + moist * 55);
-        b = Math.round(90 + moist * 135);
-      }
+      const t = (moist - 0.65) / 0.35;
+      r = Math.round(58 - t * 32);
+      g = Math.round(164 - t * 28);
+      b = Math.round(138 + t * 62);
     }
   } else if (activeLayer === 'plates') {
-    const pId = (Math.imul(Math.floor(gx / 40), 7) + Math.imul(Math.floor(gy / 30), 11) + surfaceModel.seed) % 8;
+    const pId = surfaceModel.tectonicPlateGrid[idx];
+    const pRight = surfaceModel.tectonicPlateGrid[gy * width + xRight];
+    const pDown = surfaceModel.tectonicPlateGrid[yDown * width + gx];
+    const isBoundary = pId !== pRight || pId !== pDown;
     const colors = [
-      [220, 60, 60],
-      [60, 140, 220],
-      [220, 170, 45],
-      [175, 65, 215],
-      [55, 195, 205],
-      [225, 115, 50],
-      [145, 120, 95],
-      [115, 125, 145],
+      [212, 72, 68],
+      [64, 142, 218],
+      [218, 168, 52],
+      [168, 74, 212],
+      [58, 192, 198],
+      [222, 118, 54],
+      [142, 122, 96],
+      [112, 128, 148],
+      [92, 178, 104],
+      [196, 92, 148],
     ];
     const col = colors[Math.abs(pId) % colors.length];
-    r = col[0];
-    g = col[1];
-    b = col[2];
+    if (isBoundary && surfaceModel.platesCount > 0) {
+      r = Math.min(255, Math.round(col[0] * 0.45 + 255 * 0.55));
+      g = Math.min(255, Math.round(col[1] * 0.45 + 185 * 0.55));
+      b = Math.min(255, Math.round(col[2] * 0.45 + 75 * 0.55));
+    } else {
+      r = col[0];
+      g = col[1];
+      b = col[2];
+    }
   }
 
   return { r, g, b, isWater, isSelfLuminous, dhdx, dhdy };
+}
+
+/**
+ * Evaluates fractional (xFloat, yFloat) coordinates in [0..360) x [0..179] using bilinear interpolation
+ * across the 4 surrounding texels so both the high-DPI 2D Cartographic Map and 3D Globe have smooth,
+ * anti-aliased transitions with zero square pixelation.
+ */
+export function evaluateSurfaceMapBilinear(
+  surfaceModel: PlanetarySurfaceModel,
+  xFloat: number,
+  yFloat: number,
+  activeLayer: SurfaceMapLayerType,
+  showCloudsOverlay: boolean,
+  applyReliefInSatellite = true
+): {
+  r: number;
+  g: number;
+  b: number;
+  isWater: boolean;
+  isSelfLuminous: boolean;
+  dhdx: number;
+  dhdy: number;
+} {
+  const width = 360;
+  const height = 180;
+  const wx = ((xFloat % width) + width) % width;
+  const wy = Math.max(0, Math.min(height - 1.0001, yFloat));
+
+  const x0 = Math.floor(wx);
+  const y0 = Math.floor(wy);
+  const x1 = (x0 + 1) % width;
+  const y1 = Math.min(height - 1, y0 + 1);
+  const fx = wx - x0;
+  const fy = wy - y0;
+
+  if (fx < 0.001 && fy < 0.001) {
+    return evaluateSurfaceMapTexel(surfaceModel, x0, y0, activeLayer, showCloudsOverlay, applyReliefInSatellite);
+  }
+
+  const t00 = evaluateSurfaceMapTexel(surfaceModel, x0, y0, activeLayer, showCloudsOverlay, applyReliefInSatellite);
+  const t10 = evaluateSurfaceMapTexel(surfaceModel, x1, y0, activeLayer, showCloudsOverlay, applyReliefInSatellite);
+  const t01 = evaluateSurfaceMapTexel(surfaceModel, x0, y1, activeLayer, showCloudsOverlay, applyReliefInSatellite);
+  const t11 = evaluateSurfaceMapTexel(surfaceModel, x1, y1, activeLayer, showCloudsOverlay, applyReliefInSatellite);
+
+  const w00 = (1 - fx) * (1 - fy);
+  const w10 = fx * (1 - fy);
+  const w01 = (1 - fx) * fy;
+  const w11 = fx * fy;
+
+  const r = Math.round(t00.r * w00 + t10.r * w10 + t01.r * w01 + t11.r * w11);
+  const g = Math.round(t00.g * w00 + t10.g * w10 + t01.g * w01 + t11.g * w11);
+  const b = Math.round(t00.b * w00 + t10.b * w10 + t01.b * w01 + t11.b * w11);
+  const dhdx = t00.dhdx * w00 + t10.dhdx * w10 + t01.dhdx * w01 + t11.dhdx * w11;
+  const dhdy = t00.dhdy * w00 + t10.dhdy * w10 + t01.dhdy * w01 + t11.dhdy * w11;
+  const waterScore = (t00.isWater ? w00 : 0) + (t10.isWater ? w10 : 0) + (t01.isWater ? w01 : 0) + (t11.isWater ? w11 : 0);
+  const lumScore =
+    (t00.isSelfLuminous ? w00 : 0) +
+    (t10.isSelfLuminous ? w10 : 0) +
+    (t01.isSelfLuminous ? w01 : 0) +
+    (t11.isSelfLuminous ? w11 : 0);
+
+  return {
+    r,
+    g,
+    b,
+    isWater: waterScore >= 0.5,
+    isSelfLuminous: lumScore >= 0.35,
+    dhdx,
+    dhdy,
+  };
 }
 
 export interface RenderProjectedGlobeOptions {
@@ -2702,12 +2950,12 @@ export function renderSurfaceProjectedGlobeToCanvas(
       const latDeg = (Math.asin(sy) * 180) / Math.PI;
       const lonDeg = (Math.atan2(sx, sz) * 180) / Math.PI;
 
-      const mapX = Math.floor((((lonDeg + 180) % 360) + 360) % 360);
-      const mapY = Math.max(0, Math.min(179, Math.floor(90 - latDeg)));
+      const mapX = (((lonDeg + 180) % 360) + 360) % 360;
+      const mapY = Math.max(0, Math.min(179.0, 90 - latDeg));
 
-      // Sample the exact surface generator texel!
+      // Bilinearly sample the surface generator texel so the 3D globe has zero blocky pixelation!
       // For 'satellite' on the 3D globe, we apply 3D normal-map bump relief directly in 3D sphere lighting below
-      const texel = evaluateSurfaceMapTexel(
+      const texel = evaluateSurfaceMapBilinear(
         surfaceModel,
         mapX,
         mapY,

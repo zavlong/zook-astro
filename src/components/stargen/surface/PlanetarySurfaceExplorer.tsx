@@ -19,7 +19,7 @@ import { RealisticMoon, RealisticStarNode } from '../../../types/astrophysics';
 import {
   generatePlanetarySurfaceModel,
   sampleSurfacePoint,
-  evaluateSurfaceMapTexel,
+  evaluateSurfaceMapBilinear,
   renderSurfaceProjectedGlobeToCanvas,
   pickLatLonFromProjectedGlobe,
   PlanetarySurfaceModel,
@@ -97,7 +97,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     return () => cancelAnimationFrame(rafId);
   }, [displayMode, autoSpinGlobe, isDraggingGlobe]);
 
-  // Render 2D Cartographic Surface Map
+  // Render 2D Cartographic Surface Map (2x supersampled 720x360 with bilinear sub-texel blending)
   useEffect(() => {
     if (displayMode !== 'map') return;
     const canvas = mapCanvasRef.current;
@@ -105,8 +105,8 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = 360;
-    const height = 180;
+    const width = 720;
+    const height = 360;
     canvas.width = width;
     canvas.height = height;
 
@@ -114,9 +114,11 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const data = imgData.data;
 
     for (let y = 0; y < height; y++) {
+      const mapY = (y / height) * 180;
       for (let x = 0; x < width; x++) {
+        const mapX = (x / width) * 360;
         const pIdx = (y * width + x) * 4;
-        const texel = evaluateSurfaceMapTexel(surfaceModel, x, y, activeLayer, showCloudsOverlay, true);
+        const texel = evaluateSurfaceMapBilinear(surfaceModel, mapX, mapY, activeLayer, showCloudsOverlay, true);
         data[pIdx] = texel.r;
         data[pIdx + 1] = texel.g;
         data[pIdx + 2] = texel.b;
@@ -129,11 +131,11 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     // Overlay Coordinate Grid & Equator if enabled
     if (showGrid) {
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-      ctx.lineWidth = 0.5;
+      ctx.lineWidth = 1;
 
       // Parallels every 30 degrees
       for (let lat = -60; lat <= 60; lat += 30) {
-        const y = 90 - lat;
+        const y = ((90 - lat) / 180) * height;
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(width, y);
@@ -142,7 +144,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
       // Meridians every 60 degrees
       for (let lon = -120; lon <= 120; lon += 60) {
-        const x = lon + 180;
+        const x = ((lon + 180) / 360) * width;
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, height);
@@ -152,30 +154,30 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       // Equator
       ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
       ctx.beginPath();
-      ctx.moveTo(0, 90);
-      ctx.lineTo(width, 90);
+      ctx.moveTo(0, height * 0.5);
+      ctx.lineTo(width, height * 0.5);
       ctx.stroke();
 
       // Prime Meridian
       ctx.beginPath();
-      ctx.moveTo(180, 0);
-      ctx.lineTo(180, height);
+      ctx.moveTo(width * 0.5, 0);
+      ctx.lineTo(width * 0.5, height);
       ctx.stroke();
     }
 
     // Draw Landing Site Marker
-    const markerX = selectedCoords.lon + 180;
-    const markerY = 90 - selectedCoords.lat;
+    const markerX = ((selectedCoords.lon + 180) / 360) * width;
+    const markerY = ((90 - selectedCoords.lat) / 180) * height;
 
     ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.arc(markerX, markerY, 5, 0, Math.PI * 2);
+    ctx.arc(markerX, markerY, 9, 0, Math.PI * 2);
     ctx.stroke();
 
     ctx.fillStyle = '#38bdf8';
     ctx.beginPath();
-    ctx.arc(markerX, markerY, 1.5, 0, Math.PI * 2);
+    ctx.arc(markerX, markerY, 3, 0, Math.PI * 2);
     ctx.fill();
   }, [displayMode, activeLayer, showCloudsOverlay, surfaceModel, showGrid, selectedCoords]);
 
@@ -555,13 +557,11 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const canvas = mapCanvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
+    const xDeg = ((e.clientX - rect.left) / rect.width) * 360;
+    const yDeg = ((e.clientY - rect.top) / rect.height) * 180;
 
-    const lon = Math.round(Math.max(-180, Math.min(180, x - 180)));
-    const lat = Math.round(Math.max(-90, Math.min(90, 90 - y)));
+    const lon = Math.round(Math.max(-180, Math.min(180, xDeg - 180)));
+    const lat = Math.round(Math.max(-90, Math.min(90, 90 - yDeg)));
 
     setSelectedCoords({ lat, lon });
   };
@@ -570,13 +570,11 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const canvas = mapCanvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
+    const xDeg = ((e.clientX - rect.left) / rect.width) * 360;
+    const yDeg = ((e.clientY - rect.top) / rect.height) * 180;
 
-    const lon = Math.round(Math.max(-180, Math.min(180, x - 180)));
-    const lat = Math.round(Math.max(-90, Math.min(90, 90 - y)));
+    const lon = Math.round(Math.max(-180, Math.min(180, xDeg - 180)));
+    const lat = Math.round(Math.max(-90, Math.min(90, 90 - yDeg)));
 
     setHoverCoords({ lat, lon });
   };
@@ -765,7 +763,6 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               onMouseMove={handleMapMouseMove}
               onMouseLeave={() => setHoverCoords(null)}
               className="w-full max-w-4xl h-auto rounded-lg border border-slate-800/80 shadow-inner cursor-crosshair transition"
-              style={{ imageRendering: 'pixelated' }}
             />
             {isBlankSurfaceLayer && (
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-4 text-center">
