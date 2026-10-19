@@ -50,6 +50,7 @@ import {
   clamp,
   lerp,
   log10,
+  formatDistanceKm,
 } from './types';
 import {
   computeSystem2DLayout,
@@ -2660,13 +2661,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                           });
                                         }}
                                         className="w-full flex items-center justify-between px-1.5 py-0.5 rounded text-[10px] text-amber-300/85 hover:text-amber-200 hover:bg-amber-950/30 transition cursor-pointer select-none"
-                                        title={`Planetary Ring Belt: ${b.ringSystem.ringClass}\n• Inner–Outer: ${b.ringSystem.innerRadiusRp}–${b.ringSystem.outerRadiusRp} Rp (${b.ringSystem.innerRadiusKm.toLocaleString()}–${b.ringSystem.outerRadiusKm.toLocaleString()} km)\n• Composition: ${b.ringSystem.compositionLabel}\n• Click: Zoom to\n• Double-Click: Open Stats`}
+                                        title={`Planetary Ring Belt: ${b.ringSystem.ringClass}\n• Inner–Outer: ${formatDistanceKm(b.ringSystem.innerRadiusKm)}–${formatDistanceKm(b.ringSystem.outerRadiusKm)}\n• Composition: ${b.ringSystem.compositionLabel}\n• Click: Zoom to\n• Double-Click: Open Stats`}
                                       >
                                         <span className="truncate">
                                           └─ 🪐 {b.ringSystem.ringClass.replace(/\s*\([^)]*\)/g, '')}
                                         </span>
                                         <span className="text-[9px] text-amber-400/80 font-mono shrink-0 ml-1">
-                                          {b.ringSystem.innerRadiusRp}–{b.ringSystem.outerRadiusRp} Rp
+                                          {b.ringSystem.innerRadiusKm.toLocaleString()}–{b.ringSystem.outerRadiusKm.toLocaleString()} km
                                         </span>
                                       </button>
                                     )}
@@ -4067,7 +4068,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                 });
                               }}
                             >
-                              <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}${b.ringSystem ? `\nRing System: ${b.ringSystem.ringClass} (${b.ringSystem.innerRadiusRp}–${b.ringSystem.outerRadiusRp} Rp, ${b.ringSystem.compositionLabel})` : ''}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}</title>
+                              <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}${b.ringSystem ? `\nRing System: ${b.ringSystem.ringClass} (${b.ringSystem.innerRadiusKm.toLocaleString()}–${b.ringSystem.outerRadiusKm.toLocaleString()} km, ${b.ringSystem.compositionLabel})` : ''}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}</title>
                               {/* Invisible click target for easy selection */}
                               <circle
                                 cx={pProj.x}

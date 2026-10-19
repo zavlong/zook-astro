@@ -18,6 +18,8 @@ import {
   SelectedMapEntity,
   shortClassLabel,
   shortMoonLabel,
+  formatSemiMajorAxisKm,
+  formatDistanceKm,
 } from '../types';
 import { getMoonVisualColor, getPlanetVisualColor } from '../../../core/generation/realisticStarGen';
 import {
@@ -174,9 +176,9 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
     : `Planet #${selectedEntity.bodyIdx + 1}: ${cleanPlanetClass}`;
 
   const subtitle = isMoon && activeMoon
-    ? `a = ${activeMoon.a_Rp} Rp (${activeMoon.a_km.toLocaleString()} km) · e = ${activeMoon.e} · inc = ${activeMoon.incDeg}°${
+    ? `a = ${formatSemiMajorAxisKm(activeMoon.a_km)} · e = ${activeMoon.e} · inc = ${activeMoon.incDeg}°${
         activeMoon.retrograde ? ' [Retrograde]' : ''
-      } · ${activeMoon.origin}`
+      }`
     : `a = ${hostPlanet.a} AU · e = ${hostPlanet.e} · inc = ${hostPlanet.incDeg ?? 0}°`;
 
   const massDisplay = isMoon && activeMoon
@@ -661,7 +663,12 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
               <div>
                 <span className="text-slate-400 block text-[10px]">MAGNETOPAUSE</span>
                 <b className="text-cyan-300">
-                  {magField.hasActiveDynamo ? `${magField.magnetopauseRadiusRp.toFixed(1)} Rp` : 'None (1.0 Rp)'}
+                  {magField.hasActiveDynamo
+                    ? `${Math.round(
+                        magField.magnetopauseRadiusRp *
+                          (isMoon && activeMoon ? activeMoon.radiusKm : hostPlanet.radiusEarth * 6371)
+                      ).toLocaleString()} km`
+                    : 'None'}
                 </b>
               </div>
               <div>
@@ -902,16 +909,14 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#0c121d] p-2.5 rounded-lg border border-slate-800">
               <div>
                 <span className="text-slate-400 block text-[10px]">INNER RADIUS</span>
-                <b className="text-white">{hostPlanet.ringSystem.innerRadiusRp} Rp</b>
-                <span className="text-[9px] text-slate-400 block">
-                  {hostPlanet.ringSystem.innerRadiusKm.toLocaleString()} km
-                </span>
+                <b className="text-white">{formatDistanceKm(hostPlanet.ringSystem.innerRadiusKm)}</b>
+                <span className="text-[9px] text-slate-400 block">Inner edge</span>
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px]">OUTER RADIUS</span>
-                <b className="text-amber-300">{hostPlanet.ringSystem.outerRadiusRp} Rp</b>
+                <b className="text-amber-300">{formatDistanceKm(hostPlanet.ringSystem.outerRadiusKm)}</b>
                 <span className="text-[9px] text-slate-400 block">
-                  {hostPlanet.ringSystem.outerRadiusKm.toLocaleString()} km
+                  Width: {(hostPlanet.ringSystem.outerRadiusKm - hostPlanet.ringSystem.innerRadiusKm).toLocaleString()} km
                 </span>
               </div>
               <div>
@@ -967,7 +972,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                     <div className="truncate">
                       <b>{m.name}:</b> {m.moonClass}
                       <div className="text-[10px] text-slate-400">
-                        {m.a_Rp} Rp ({m.periodDays}d) · {m.surfaceTempK}K
+                        {formatSemiMajorAxisKm(m.a_km)} · {m.periodDays}d · {m.surfaceTempK}K
                       </div>
                     </div>
                   </div>

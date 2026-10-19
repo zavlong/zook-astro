@@ -112,3 +112,16 @@ export function shortMoonLabel(moonClass: string): string {
   if (moonClass.includes('Sulfuric')) return 'Sulfuric Moon';
   return clean || 'Moon';
 }
+
+export const AU_IN_KM = 149597870.7;
+
+export function formatSemiMajorAxisKm(a_km: number): string {
+  if (a_km >= 1500000) {
+    const au = a_km / AU_IN_KM;
+    const auStr = au < 0.1 ? au.toFixed(4) : au.toFixed(3);
+    return `${auStr} AU (${Math.round(a_km).toLocaleString()} km)`;
+  }
+  return `${Math.round(a_km).toLocaleString()} km`;
+}
+
+export const formatDistanceKm = formatSemiMajorAxisKm;

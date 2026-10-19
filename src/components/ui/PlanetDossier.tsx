@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { M_JUP_EARTH, R_JUP_EARTH } from '../../core/astrophysics/constants';
 import { computePlanetPhysics } from '../../core/generation/planets';
 import { StarSystem } from '../../types/astrophysics';
+import { formatSemiMajorAxisKm } from '../stargen/types';
 
 interface PlanetDossierProps {
   selectedStar: StarSystem;
@@ -106,7 +107,7 @@ export const PlanetDossier: React.FC<PlanetDossierProps> = ({
             <div>
               <span className="text-slate-400">Orbit a:</span>{' '}
               <span className="text-slate-200 font-bold">
-                {activeMoon.a_Rp} Rp ({activeMoon.a_km.toLocaleString()} km)
+                {formatSemiMajorAxisKm(activeMoon.a_km)}
               </span>
             </div>
             <div>
@@ -242,7 +243,7 @@ export const PlanetDossier: React.FC<PlanetDossierProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-1 text-[8.5px] font-mono text-slate-400 bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/80">
           <span>
             {activeMoon
-              ? activeMoon.origin
+              ? (activeMoon.retrograde ? 'Retrograde Orbit' : 'Prograde Orbit')
               : `${curPlanet.migrationHistory || 'In-Situ Orbit'}${
                   curPlanet.a_birth && Math.abs(curPlanet.a_birth - curPlanet.a0) > 0.005
                     ? ` [Born ${curPlanet.a_birth.toFixed(2)} AU]`
@@ -367,7 +368,13 @@ export const PlanetDossier: React.FC<PlanetDossierProps> = ({
             </div>
             <div className="flex justify-between text-slate-300">
               <span>
-                Magnetopause: {activeMagField.hasActiveDynamo ? `${activeMagField.magnetopauseRadiusRp} Rp` : 'None (1.0 Rp)'}
+                Magnetopause:{' '}
+                {activeMagField.hasActiveDynamo
+                  ? `${Math.round(
+                      activeMagField.magnetopauseRadiusRp *
+                        (activeMoon ? activeMoon.radiusKm : (curPlanet.radiusEarth || 1.0) * 6371)
+                    ).toLocaleString()} km`
+                  : 'None'}
               </span>
               <span
                 className={
@@ -392,7 +399,7 @@ export const PlanetDossier: React.FC<PlanetDossierProps> = ({
           <div className="border-t border-slate-800/80 pt-1 flex flex-col gap-0.5 text-[8.5px] font-mono">
             {curPlanet.rings && (
               <div className="text-amber-300 font-semibold">
-                🪐 Rings: {curPlanet.rings} (Roche: {curPlanet.rocheLimitRp} Rp)
+                🪐 Rings: {curPlanet.rings} (Roche: {Math.round((curPlanet.rocheLimitRp || 2.44) * (curPlanet.radiusEarth || 1.0) * 6371).toLocaleString()} km)
               </div>
             )}
             {curPlanet.moons && curPlanet.moons.length > 0 && (
@@ -418,7 +425,7 @@ export const PlanetDossier: React.FC<PlanetDossierProps> = ({
                       {m.retrograde ? ' (Retro)' : ''}
                     </span>
                     <span className="text-slate-400">
-                      {m.a_Rp} Rp · {m.radiusKm} km ({m.massLunar} M☾)
+                      {formatSemiMajorAxisKm(m.a_km)} · {m.radiusKm} km ({m.massLunar} M☾)
                     </span>
                   </button>
                 );
