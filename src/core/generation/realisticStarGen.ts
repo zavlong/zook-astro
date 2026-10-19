@@ -1663,14 +1663,10 @@ export function generateZoneSystem(
       pBar = +(isRefractoryVapor ? rand(0.015, 0.24) : rand(0.004, 0.065)).toFixed(3);
       ghK = +rand(22, 48).toFixed(1);
       Tsurf = +(Tatm + ghK).toFixed(1);
-      const isGlobalMagma = Tsurf >= 1400 || random() < 0.35;
-      const covPct = isGlobalMagma
-        ? 100
-        : clamp(Math.round(22 + ((Tsurf - 800) / 600) * 60 + rand(-10, 12)), 18, 88);
+      const covPct = clamp(Math.round(1 + ((Tsurf - 800) / 700) * 99), 1, 100);
+      const isGlobalMagma = covPct >= 100;
       pClass = isChth
-        ? isGlobalMagma
-          ? 'Molten Chthonian Planet'
-          : 'Molten Chthonian Planet'
+        ? 'Molten Chthonian Planet'
         : isGlobalMagma
         ? 'Molten Magma Ocean Planet'
         : 'Molten Planet';
@@ -1692,9 +1688,7 @@ export function generateZoneSystem(
         solvent: 'Silicate Magma',
         coveragePct: covPct,
         biosphere: null,
-        liqKm: isGlobalMagma
-          ? clamp(Math.round(rE * 65), 20, 280)
-          : clamp(Math.round(rE * 11 * rand(0.4, 1.5)), 2, 22),
+        liqKm: clamp(Math.round(1 + rE * 58 * Math.pow(covPct / 100, 1.5)), 1, 260),
         scKm: 0,
         iceKm: 0,
         siKm: 0,
@@ -2169,10 +2163,8 @@ export function generateZoneSystem(
         if (Tsurf >= 800 && b.iceFrac < 0.05) {
           b.iceFrac = 0;
           b.rockFrac = +(1 - b.gasFrac).toFixed(4);
-          const isGlobalMagma = Tsurf >= 1400 || random() < 0.32;
-          const covPct = isGlobalMagma
-            ? 100
-            : clamp(Math.round(18 + ((Tsurf - 800) / 600) * 64 + rand(-10, 12)), 16, 88);
+          const covPct = clamp(Math.round(1 + ((Tsurf - 800) / 700) * 99), 1, 100);
+          const isGlobalMagma = covPct >= 100;
           atmoType =
             pBar >= 1.0
               ? 'Super-Heated CO2-SO2 Greenhouse over Molten Lava'
@@ -2189,9 +2181,7 @@ export function generateZoneSystem(
             solvent: 'Silicate Magma',
             coveragePct: covPct,
             biosphere: null,
-            liqKm: isGlobalMagma
-              ? clamp(Math.round(rE * 58), 18, 250)
-              : clamp(Math.round(rE * 9.5 * rand(0.4, 1.5)), 2, 18),
+            liqKm: clamp(Math.round(1 + rE * 58 * Math.pow(covPct / 100, 1.5)), 1, 250),
             scKm: 0,
             iceKm: 0,
             siKm: 0,
@@ -2882,8 +2872,11 @@ export function generateZoneSystem(
           siKm: 0,
         };
       } else if (mTsurf >= 800 || mc.includes('Io')) {
-        const isGlobalMagma = mTsurf >= 1400;
-        const covPct = isGlobalMagma ? 100 : randInt(16, 64);
+        const covPct =
+          mTsurf >= 800
+            ? clamp(Math.round(1 + ((mTsurf - 800) / 700) * 99), 1, 100)
+            : clamp(Math.round((mTsurf / 800) * 6 + tW * 8), 1, 8);
+        const isGlobalMagma = covPct >= 100;
         if (!mc.includes('Io') && !mc.includes('Molten')) {
           mc = isGlobalMagma
             ? 'Molten Moon (Global Magma Ocean)'
@@ -2896,7 +2889,7 @@ export function generateZoneSystem(
           solvent: 'Silicate Magma',
           coveragePct: covPct,
           biosphere: null,
-          liqKm: clamp(Math.round(rKm * 0.015), 4, 45),
+          liqKm: clamp(Math.round(1 + rKm * 0.014 * Math.pow(covPct / 100, 1.3)), 1, 45),
           scKm: 0,
           iceKm: 0,
           siKm: 0,

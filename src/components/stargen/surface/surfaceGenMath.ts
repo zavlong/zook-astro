@@ -1469,20 +1469,30 @@ export function generatePlanetarySurfaceModel(
       (activeBody.pressureBar === null && !isMoon));
   const isNoSurface = isGasGiant || isSupercritical;
 
-  const hasLiquid = Boolean(!isNoSurface && hydro && (hydro.coveragePct ?? 0) > 0 && hydro.solvent !== 'None');
-  const coverageFrac = hasLiquid && hydro && hydro.coveragePct ? hydro.coveragePct / 100 : 0;
-
   const Tbase = activeBody.surfaceTempK || activeBody.T_eq || 288;
 
   // Detect Molten / Lava / Scorched Volcanic worlds
   const isMoltenWorld =
     !isNoSurface &&
-    (Tbase >= 750 ||
+    (Tbase >= 800 ||
       bodyClassLower.includes('molten') ||
       bodyClassLower.includes('lava') ||
       solventLower.includes('magma') ||
       solventLower.includes('lava') ||
       solventLower.includes('silicate'));
+
+  // Molten lava coverage is directly proportional to surface temperature (1% at 800 K up to 100% at >= 1500 K)
+  const tempProportionalMagmaPct =
+    Tbase >= 800 ? Math.max(1, Math.min(100, Math.round(1 + ((Tbase - 800) / 700) * 99))) : 0;
+  const effectiveCoveragePct =
+    isMoltenWorld && (!hydro?.coveragePct || solventLower.includes('magma'))
+      ? tempProportionalMagmaPct || (hydro?.coveragePct ?? 0)
+      : hydro?.coveragePct ?? 0;
+
+  const hasLiquid = Boolean(
+    !isNoSurface && ((hydro && effectiveCoveragePct > 0 && hydro.solvent !== 'None') || (isMoltenWorld && effectiveCoveragePct > 0))
+  );
+  const coverageFrac = hasLiquid ? effectiveCoveragePct / 100 : 0;
 
   const hasSubsurfaceOcean = Boolean(
     !isNoSurface &&
@@ -1537,8 +1547,11 @@ export function generatePlanetarySurfaceModel(
   const prng = createPrng(seed);
   const colorPrng = createPrng(seed ^ 0x6c8e9cf5);
 
-  // Solvent-specific sea color palette (force Silicate Magma palette on molten worlds) with slight per-world randomization
-  const rawSeaPalette = getSolventSeaPalette(isMoltenWorld ? 'Silicate Magma' : hydro?.solvent);
+  // Solvent-specific sea color palette (force Silicate Magma palette on molten worlds or hot dry worlds with dayside melting)
+  const isHotDryWorldWithDaysideMelt = !isNoSurface && !hasLiquid && !isIcyWorld && Tbase >= 520;
+  const rawSeaPalette = getSolventSeaPalette(
+    isMoltenWorld || isHotDryWorldWithDaysideMelt ? 'Silicate Magma' : hydro?.solvent
+  );
   const seaHue = (colorPrng() - 0.5) * 11;
   const seaSat = 0.93 + colorPrng() * 0.14;
   const seaLit = 0.94 + colorPrng() * 0.12;
@@ -2117,7 +2130,10 @@ export function generatePlanetarySurfaceModel(
     seaPalette.solventKey !== 'SO2' &&
     seaPalette.solventKey !== 'CO2';
 
-  // Determine exact sea-level threshold to match coveragePct (for non-ice-dominated marine worlds)
+  // Determine exact sea-level threshold to match coveragePct (and always sort allElevations so lowest-altitude quantiles can be queried)
+  if (!isNoSurface && allElevations.length > 0) {
+    allElevations.sort((a, b) => a - b);
+  }
   let seaLevelNormalized = 0.42;
   if (isDeepWaterOrIceShell) {
     // On deep water/ice shell worlds, sea level is 0.50:
@@ -2126,7 +2142,6 @@ export function generatePlanetarySurfaceModel(
   } else if (isWaterIceDominated) {
     seaLevelNormalized = 0.38;
   } else if (!isNoSurface && hasLiquid && allElevations.length > 0) {
-    allElevations.sort((a, b) => a - b);
     const splitIndex = Math.min(allElevations.length - 1, Math.floor(allElevations.length * coverageFrac));
     seaLevelNormalized = allElevations[splitIndex];
   }
@@ -2182,10 +2197,11 @@ export function generatePlanetarySurfaceModel(
       const idx = y * width + x;
       let hNorm = hypsometry[idx];
       const volcVal = volcanoGrid[idx];
-      // Active volcanic cones/calderas breach the surface even if surrounded by ocean
+      // Active volcanic cones/calderas breach the surface even if surrounded by ocean (unless submerged by a >= 98% global magma ocean)
       const isBelowSeaLevel =
         !isNoSurface &&
-        (isDeepWaterOrIceShell || (!isWaterIceDominated && hasLiquid && hNorm <= seaLevelNormalized && volcVal < 0.35));
+        (isDeepWaterOrIceShell ||
+          (!isWaterIceDominated && hasLiquid && hNorm <= seaLevelNormalized && (volcVal < 0.35 || coverageFrac >= 0.98)));
 
       // 3D Spherical Domain Warping for organic, contiguous climate & biome zones (no boxy latitude/sine cutoffs!)
       const warpLat = (sphericalFbm(lat * 1.15, lon * 1.15, seed + 401, 4) - 0.5) * 32.0;
@@ -2220,13 +2236,15 @@ export function generatePlanetarySurfaceModel(
         // Spherical mean of cos^1.15(lat) is ~0.69 -> +0.31 at equator, -0.69 at poles (yielding ~220 K to 320 K at 1 bar, 288 K)
         Tlocal = Tbase * (1.0 + (Math.pow(blendedLatCos, 1.15) - 0.69) * thermalDiffFactor) + climateWave;
       }
+      const Tclimate = Tlocal;
 
-      // Convective altitude lapse cooling above datum (requires atmosphere for adiabatic expansion)
+      // Convective & geothermal altitude lapse cooling above datum (lowest altitudes are hottest; high plateaus/mountains cool below melting point)
       let altitudeKm = 0;
       if (!isBelowSeaLevel && !isNoSurface) {
-        const altitudeRatio = Math.max(-0.08, (hNorm - seaLevelNormalized) / (1 - seaLevelNormalized));
+        const altitudeRatio = Math.max(-0.08, (hNorm - seaLevelNormalized) / Math.max(0.01, 1 - seaLevelNormalized));
         altitudeKm = altitudeRatio * thermalRefElevKm;
-        const lapse = 5.4 * activeBody.gravityG * atmoLapseFactor; // K per km
+        const baseLapse = 5.4 * activeBody.gravityG * atmoLapseFactor; // K per km
+        const lapse = isMoltenWorld || Tclimate >= 800 ? Math.max(baseLapse, 6.2) : baseLapse;
         Tlocal -= altitudeKm * lapse;
       }
 
@@ -2261,12 +2279,38 @@ export function generatePlanetarySurfaceModel(
       const topoVar = (moistNoise - 0.5) * 0.1;
       const localPressureBar = pBarAtmo * Math.exp(-altitudeKm / baseScaleHeightKm);
       const localBoilingPointK = computeLocalBoilingPointK(seaPalette, localPressureBar);
-      const isMoltenMagmaTemp = !isNoSurface && Tlocal >= 800;
+
+      // Molten lava percentage is directly proportional to temperature (800 K -> 1% up to 1500 K -> 100%)
+      // and strictly fills the lowest altitudes first (hNorm <= localMagmaLevel)!
+      let localMeltFrac = 0;
+      if (!isNoSurface && (isMoltenWorld || seaPalette.solventKey === 'Silicate Magma' || Tclimate >= 800)) {
+        if (Tclimate >= 800) {
+          localMeltFrac = Math.min(1.0, Math.max(0.01, 0.01 + ((Tclimate - 800) / 700) * 0.99));
+          if (isMoltenWorld || seaPalette.solventKey === 'Silicate Magma') {
+            localMeltFrac = Math.max(localMeltFrac * 0.65 + coverageFrac * 0.35, coverageFrac * 0.85);
+          }
+        } else if ((isMoltenWorld || seaPalette.solventKey === 'Silicate Magma') && Tclimate >= 765) {
+          // Smooth transition near 800 K on uniform molten worlds so the lowest coverageFrac basins stay molten
+          const warmWeight = (Tclimate - 765) / 35;
+          localMeltFrac = coverageFrac * warmWeight;
+        }
+      }
+      const localMagmaLevel =
+        localMeltFrac > 0 && allElevations.length > 0
+          ? allElevations[Math.min(allElevations.length - 1, Math.floor((allElevations.length - 1) * localMeltFrac))]
+          : -1;
+      const isMoltenLavaPool =
+        !isNoSurface &&
+        localMeltFrac > 0 &&
+        hNorm <= localMagmaLevel &&
+        (volcVal < 0.35 || localMeltFrac >= 0.98);
+
       const isBelowFreezing = freezingPointK > 0 && Tlocal <= freezingPointK;
       const isAboveBoiling =
         !isNoSurface &&
         !isMoltenWorld &&
-        !isMoltenMagmaTemp &&
+        !isMoltenLavaPool &&
+        Tclimate < 800 &&
         (hasLiquid || pBarAtmo >= 0.005) &&
         Tlocal > localBoilingPointK;
 
@@ -2277,29 +2321,30 @@ export function generatePlanetarySurfaceModel(
         biomeGrid[idx] = 20; // Gas Giant Cloud Deck
       } else if (volcVal > 1.1) {
         biomeGrid[idx] = 15; // Active Lava Caldera & Fissure (yellow-orange)
-      } else if (isMoltenMagmaTemp) {
-        // Local temperature >= 800 K -> Rock melts into liquid Silicate Magma!
-        if (isBelowSeaLevel && seaPalette.solventKey === 'Silicate Magma') {
-          const waterDepthRatio = (seaLevelNormalized - hNorm) / Math.max(0.001, seaLevelNormalized);
-          if (waterDepthRatio > 0.6) {
-            biomeGrid[idx] = 0; // Abyssal Magma Trench
-          } else if (waterDepthRatio > 0.25) {
-            biomeGrid[idx] = 1; // Deep Magma Ocean
-          } else {
-            biomeGrid[idx] = 2; // Shallow Magma Sea
-          }
+      } else if (isMoltenLavaPool) {
+        // Lowest altitudes fill with liquid Silicate Magma in direct proportion to temperature!
+        // Remove solid-crust craters and tectonic cracks inside the liquid magma basin
+        fractureGrid[idx] = 0;
+        craterGrid[idx] = 0;
+        const magmaDepthRatio = (localMagmaLevel - hNorm) / Math.max(0.001, localMagmaLevel);
+        if (magmaDepthRatio > 0.6) {
+          biomeGrid[idx] = 0; // Abyssal Magma Trench
+        } else if (magmaDepthRatio > 0.25) {
+          biomeGrid[idx] = 1; // Deep Magma Ocean
         } else {
-          biomeGrid[idx] = 15; // Molten Silicate Magma / Lava Surface
+          biomeGrid[idx] = 2; // Shallow Magma Sea
         }
       } else if (volcVal > 0.38) {
-        biomeGrid[idx] = 22; // Active Volcanic Shield & Basalt Edifice (solid rock cone at T < 800 K)
-      } else if (isMoltenWorld || seaPalette.solventKey === 'Silicate Magma') {
-        // Local temperature < 800 K on a magma/molten world -> Magma solidifies into solid Rock!
-        if (isBelowSeaLevel) {
-          biomeGrid[idx] = 14; // Solidified Basalt Crust in cooled magma sea basin
-        } else if (altRatio > 0.72 + topoVar) {
+        biomeGrid[idx] = 22; // Active Volcanic Shield & Basalt Edifice (solid rock cone above magma sea level)
+      } else if (isMoltenWorld || seaPalette.solventKey === 'Silicate Magma' || Tclimate >= 800) {
+        // Higher altitudes above localMagmaLevel (or cooled nightside basins < 765 K) are solid volcanic rock!
+        const magmaAltRatio =
+          localMagmaLevel > 0
+            ? Math.max(0, (hNorm - localMagmaLevel) / Math.max(0.001, 1 - localMagmaLevel))
+            : altRatio;
+        if (magmaAltRatio > 0.72 + topoVar) {
           biomeGrid[idx] = 12; // Solidified Mountain Cordillera
-        } else if (altRatio > 0.42 + topoVar) {
+        } else if (magmaAltRatio > 0.42 + topoVar) {
           biomeGrid[idx] = 11; // Solidified High Plateau / Badlands
         } else if (craterGrid[idx] > 0.35 && pBarAtmo < 0.3) {
           biomeGrid[idx] = 16; // Cratered Basalt Regolith
@@ -2963,15 +3008,15 @@ export function evaluateSurfaceMapTexel(
     h <= seaLevelNormalized &&
     volcVal < 0.35;
 
-  // In Satellite view, liquid water is at hydrostatic sea-level equilibrium (0 m flat surface, no 3D hills or cracks!),
-  // and submarine seafloor depth should not cast artificial cliff shadows onto adjacent coastal land/ice cells.
+  // In Satellite view, liquid seas (including liquid magma oceans/seas) are at hydrostatic sea-level equilibrium (0 m flat surface, no 3D hills or cracks!),
+  // and submarine/sub-magma floor depth should not cast artificial cliff shadows onto adjacent coastal land/ice cells.
   const clampSea = (val: number) =>
-    hasLiquid && activeLayer === 'satellite' && !isMoltenWorld ? Math.max(seaLevelNormalized, val) : val;
+    hasLiquid && activeLayer === 'satellite' ? Math.max(seaLevelNormalized, val) : val;
   const rawDhdx = (clampSea(hypsometry[gy * width + xRight]) - clampSea(hypsometry[gy * width + xLeft])) * 0.5;
   const rawDhdy = (clampSea(hypsometry[yDown * width + gx]) - clampSea(hypsometry[yUp * width + gx])) * 0.5;
 
   const dhdx =
-    isWater && !isMoltenLiquid && activeLayer === 'satellite'
+    isWater && activeLayer === 'satellite'
       ? 0
       : isFrozenSeaIce
       ? rawDhdx * 0.18
@@ -2979,7 +3024,7 @@ export function evaluateSurfaceMapTexel(
       ? rawDhdx * 0.58
       : rawDhdx;
   const dhdy =
-    isWater && !isMoltenLiquid && activeLayer === 'satellite'
+    isWater && activeLayer === 'satellite'
       ? 0
       : isFrozenSeaIce
       ? rawDhdy * 0.18
@@ -2999,6 +3044,8 @@ export function evaluateSurfaceMapTexel(
       const depthRatio =
         h < seaLevelNormalized
           ? Math.max(0, Math.min(1, (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized)))
+          : biomeId === 0
+          ? 0.78
           : biomeId === 1
           ? 0.42
           : 0.14;
@@ -3046,7 +3093,7 @@ export function evaluateSurfaceMapTexel(
           r = Math.round(238 + 17 * calderaT);
           g = Math.round(108 + 116 * calderaT);
           b = Math.round(14 + 34 * calderaT);
-        } else if (Tlocal < 800) {
+        } else {
           const coneT = Math.min(1.0, volcVal / 0.95);
           const basaltR = coneT > 0.78 ? 148 : 46;
           const basaltG = coneT > 0.78 ? 58 : 34;
@@ -3059,26 +3106,12 @@ export function evaluateSurfaceMapTexel(
       }
 
       const crackVal = fractureGrid[idx];
-      if (Tlocal >= 800 && crackVal > 0.08) {
-        if (crackVal > 0.25) isSelfLuminous = true;
-        const t = Math.min(1.0, crackVal / 0.8);
-        if (t < 0.45) {
-          const m = t / 0.45;
-          r = r * (1 - m * 0.85) + 235 * (m * 0.85);
-          g = g * (1 - m * 0.85) + 98 * (m * 0.85);
-          b = b * (1 - m * 0.85) + 12 * (m * 0.85);
-        } else {
-          const c = (t - 0.45) / 0.55;
-          r = 235 + (255 - 235) * c;
-          g = 98 + (212 - 98) * c;
-          b = 12 + (42 - 12) * c;
-        }
-      } else if ((isMoltenWorld || seaPalette.solventKey === 'Silicate Magma') && Tlocal < 800 && crackVal > 0.08) {
-        // Cooled, solidified basalt tectonic fractures where local temperature < 800 K
-        const t = Math.min(1.0, crackVal / 0.85) * 0.42;
-        r = r * (1 - t) + 24 * t;
-        g = g * (1 - t) + 18 * t;
-        b = b * (1 - t) + 16 * t;
+      if ((isMoltenWorld || seaPalette.solventKey === 'Silicate Magma' || Tlocal >= 800) && crackVal > 0.08) {
+        // Solidified basalt tectonic fractures across higher-altitude volcanic rock crust
+        const t = Math.min(1.0, crackVal / 0.85) * 0.44;
+        r = r * (1 - t) + 22 * t;
+        g = g * (1 - t) + 16 * t;
+        b = b * (1 - t) + 14 * t;
       } else if ((isIcyWorld || isFrozenSeaIce) && isIceCell && crackVal > 0.08) {
         const t = Math.min(1.0, crackVal / 0.85);
         if (t < 0.4) {
@@ -3118,7 +3151,7 @@ export function evaluateSurfaceMapTexel(
       if (applyReliefInSatellite) {
         const craterProm = surfaceModel.craterProminence || 1.0;
         const craterReliefMult = craterGrid[idx] > 0.04 ? 0.85 + 0.35 * craterProm : 1.0;
-        const bumpScale = (isWater && !isMoltenLiquid ? 0 : biomeId === 15 ? 24 : 46) * craterReliefMult;
+        const bumpScale = (isWater ? 0 : biomeId === 15 ? 24 : 46) * craterReliefMult;
         const nx = -dhdx * bumpScale;
         const ny = -dhdy * bumpScale;
         const nz = 1.0;
@@ -3130,9 +3163,7 @@ export function evaluateSurfaceMapTexel(
             : biomeId === 15
             ? 0.95 + (NdotL - Lz) * 0.55
             : isWater
-            ? isMoltenLiquid
-              ? 0.96 + (NdotL - Lz) * 0.45
-              : 1.0
+            ? 1.0
             : 0.94 + (NdotL - Lz) * (1.32 + Math.min(0.45, Math.max(0, craterProm - 0.8) * 0.3));
 
         r = Math.max(0, Math.min(255, Math.round(r * reliefShade)));

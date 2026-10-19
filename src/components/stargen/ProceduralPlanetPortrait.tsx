@@ -814,8 +814,8 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
           }
 
           // If mixed solid + liquid surface (covPct < 100) OR tidally-locked terminator shore, draw coastal cliffs/glacier!
-          if (covPct < 98 || isTidallyLockedPlanet) {
-            const landShare = clamp((100 - covPct) / 100, 0.22, 0.82);
+          if (covPct < 99 || isTidallyLockedPlanet) {
+            const landShare = clamp((100 - covPct) / 100, 0.08, 0.95);
             ctx.beginPath();
             if (isTidallyLockedPlanet) {
               // Nightside glacier / basalt shelf encroaching from the right (anti-stellar side)
@@ -832,7 +832,7 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
               for (let y = horizonY - 8; y <= H; y += 5) {
                 const prog = (y - horizonY) / (H - horizonY);
                 const coastN = fbm3D(y * 0.03, 2.2, 0, worldSeed + 919, 3);
-                const shoreX = W * (landShare * 0.65 + prog * 0.22 + (coastN - 0.5) * 0.18);
+                const shoreX = W * (landShare * 0.85 + prog * (1.0 - landShare * 0.65) * 0.25 + (coastN - 0.5) * 0.14);
                 ctx.lineTo(shoreX, y);
               }
               ctx.lineTo(0, H);
