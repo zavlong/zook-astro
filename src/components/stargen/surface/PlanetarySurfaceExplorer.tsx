@@ -787,9 +787,8 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
                   : `Crust: ${surfaceModel.compositionPalette.compositionLabel} • ${surfaceModel.atmospherePalette.classLabel} (${Math.round(surfaceModel.cloudOpacity * 100)}%)`}
               </span>
               <span>
-                {surfaceModel.hasActiveGeology
-                  ? `Active Geology (${surfaceModel.volcanoCount} Volcanic Cones)`
-                  : 'Click anywhere on surface to deploy landing site'}
+                Weather: {surfaceModel.weatherRegime}
+                {surfaceModel.hasActiveGeology ? ` • Active Geology (${surfaceModel.volcanoCount} Cones)` : ''}
               </span>
             </div>
           </div>
@@ -923,7 +922,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
                 • Drag to rotate
               </span>
               <span>
-                {surfaceModel.atmospherePalette.classLabel} (Cloud Opacity {Math.round(surfaceModel.cloudOpacity * 100)}%)
+                {surfaceModel.weatherRegime} • {surfaceModel.atmospherePalette.classLabel} ({Math.round(surfaceModel.cloudOpacity * 100)}%)
               </span>
             </div>
           </div>

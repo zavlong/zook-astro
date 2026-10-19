@@ -1995,7 +1995,8 @@ export function generateZoneSystem(
           const Tsub = Teq + ghDelta(pC_nh3, pN, pH, pM, 0, pNH3, 0, Teq, grav);
           if (Tsub >= 176 && Tsub <= 265 && pC_nh3 + pN + pH + pNH3 >= 0.12) {
             pC = pC_nh3;
-            const isContinentalNH3 = b.iceFrac < 0.08 && (b.iceFrac < 0.025 || random() < 0.55);
+            const isContinentalNH3 = b.iceFrac < 0.04;
+            const hasIcebergContinents = !isContinentalNH3 && (Tsub < 242 || random() < 0.78);
             const bioNH3 = z.age >= 1.5 && random() < 0.58;
             if (bioNH3) {
               const pM_bio = +clamp(pM * rand(1.3, 2.2), 0.006, 0.45).toFixed(4);
@@ -2008,18 +2009,24 @@ export function generateZoneSystem(
                 ? isShielded
                   ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Cryo-Continental Biosphere`
                   : `Active ${bioNH3Complex} Subsurface & Pelagic Ammoniated Biosphere (Radiation-Sterilized Cryo-Continents)`
+                : hasIcebergContinents
+                ? isShielded
+                  ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Floating H2O-Iceberg Shelf Biosphere`
+                  : `Active ${bioNH3Complex} Sub-Iceberg & Pelagic Ammoniated (NH3-H2O) Biosphere`
                 : isShielded
                 ? `Active ${bioNH3Complex} Pelagic Ammoniated (NH3-H2O) Marine Biosphere`
                 : `Active ${bioNH3Complex} Deep Pelagic Ammoniated (NH3-H2O) Biosphere (Cosmic Ray Attenuation)`;
               atmoType = 'N2-NH3-CH4 Cryo-Biosphere Sky (Ammonia Life)';
-              pClass = isContinentalNH3
-                ? 'Cryo-Ammonia Terrestrial'
-                : 'Cryo-Ammonia Pelagic World';
+              pClass =
+                isContinentalNH3 || hasIcebergContinents
+                  ? 'Cryo-Ammonia Terrestrial'
+                  : 'Cryo-Ammonia Pelagic World';
             } else {
               atmoType = 'Sub-Zero N2-NH3-CH4 Ammonia Greenhouse Sky';
-              pClass = isContinentalNH3
-                ? 'Cryo-Ammonia Marine World'
-                : 'Cryo-Ammonia Ocean World';
+              pClass =
+                isContinentalNH3 || hasIcebergContinents
+                  ? 'Cryo-Ammonia Marine World'
+                  : 'Cryo-Ammonia Ocean World';
             }
           } else {
             pNH3 = 0;
@@ -2078,7 +2085,8 @@ export function generateZoneSystem(
           const Touter = Teq + ghDelta(0, pN, pH, pM, 0, pNH3, 0, Teq, grav);
           if (Touter >= 176 && Touter <= 265) {
             pNH3 = Math.max(pNH3, +(pN * 0.025).toFixed(4));
-            const isContinentalNH3 = b.iceFrac < 0.08 && (b.iceFrac < 0.025 || random() < 0.52);
+            const isContinentalNH3 = b.iceFrac < 0.04;
+            const hasIcebergContinents = !isContinentalNH3 && (Touter < 242 || random() < 0.78);
             const bioNH3 = z.age >= 1.5 && random() < 0.55;
             if (bioNH3) {
               const bioNH3Complex = z.age >= 3.0 ? 'Multicellular' : 'Unicellular';
@@ -2087,18 +2095,24 @@ export function generateZoneSystem(
                 ? isShielded
                   ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Cryo-Continental Biosphere`
                   : `Active ${bioNH3Complex} Subsurface & Pelagic Ammoniated Biosphere (Radiation-Sterilized Cryo-Continents)`
+                : hasIcebergContinents
+                ? isShielded
+                  ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Floating H2O-Iceberg Shelf Biosphere`
+                  : `Active ${bioNH3Complex} Sub-Iceberg & Pelagic Ammoniated (NH3-H2O) Biosphere`
                 : isShielded
                 ? `Active ${bioNH3Complex} Pelagic Ammoniated (NH3-H2O) Marine Biosphere`
                 : `Active ${bioNH3Complex} Deep Pelagic Ammoniated (NH3-H2O) Biosphere (Cosmic Ray Attenuation)`;
               atmoType = 'H2-N2-NH3 Cryo-Biosphere Sky (Ammonia Life)';
-              pClass = isContinentalNH3
-                ? 'Cryo-Ammonia Terrestrial'
-                : 'Cryo-Ammonia Pelagic World';
+              pClass =
+                isContinentalNH3 || hasIcebergContinents
+                  ? 'Cryo-Ammonia Terrestrial'
+                  : 'Cryo-Ammonia Pelagic World';
             } else {
               atmoType = 'H2-N2-NH3 Collision-Induced Ammonia Greenhouse';
-              pClass = isContinentalNH3
-                ? 'Cryo-Ammonia Marine World'
-                : 'Cryo-Ammonia Ocean World';
+              pClass =
+                isContinentalNH3 || hasIcebergContinents
+                  ? 'Cryo-Ammonia Marine World'
+                  : 'Cryo-Ammonia Ocean World';
             }
           } else if (Touter >= 88 && Touter <= 145 && pM > 0) {
             pNH3 = 0;
@@ -2250,9 +2264,8 @@ export function generateZoneSystem(
             siKm: 0,
           };
         } else if (pClass.includes('Cryo-Ammonia')) {
-          const isMarine =
-            (pClass.includes('Terrestrial') || pClass.includes('Marine')) && b.iceFrac < 0.08;
-          if (isMarine) {
+          const isRockyCryo = b.iceFrac < 0.04;
+          if (isRockyCryo) {
             const covPct = randInt(18, 84);
             const nh3DepthKm = clamp(Math.round(rE * 3.5 * rand(0.4, 1.6)), 1, 9);
             const iceMantleKm =
@@ -2278,10 +2291,18 @@ export function generateZoneSystem(
             const lKm = Math.min(totW, Math.max(8, Math.round((fGPa * 100) / grav)));
             const rem = Math.max(0, totW - lKm);
             const siK2 = b.massEarth >= 2.5 ? Math.round(rem * 0.35) : 0;
+            const hasIcebergContinents =
+              pClass.includes('Terrestrial') || pClass.includes('Marine') || Tsurf < 242;
+            const satMelt = clamp((Tsurf - 176) / 78, 0.08, 0.92);
+            const covPct = hasIcebergContinents
+              ? clamp(Math.round(28 + satMelt * 52 + rand(-10, 10)), 26, 88)
+              : 100;
             hydro = {
-              state: 'Global Surface Liquid NH3-H2O (Ammonia-Water Mixture) Ocean over Ice VI/VII (100% Coverage)',
+              state: hasIcebergContinents
+                ? `Saturated Liquid NH3-H2O Seas & Continent-Sized Precipitated H2O Icebergs over Ice VI (${covPct}% Liquid Coverage)`
+                : 'Global Surface Liquid NH3-H2O (Ammonia-Water Mixture) Ocean over Ice VI/VII (100% Coverage)',
               solvent: 'NH3-H2O',
-              coveragePct: 100,
+              coveragePct: covPct,
               biosphere: biosphereDesc,
               liqKm: lKm,
               scKm: 0,
@@ -2571,9 +2592,16 @@ export function generateZoneSystem(
               ? Math.min(baseTf, Math.max(204, Math.round(Tsurf - (Tsurf < 252 ? 18 : 15))))
               : baseTf;
           if (surfTmin <= effTf && surfTmax > effTf) {
-            const actualLiqPct = clamp(Math.round(getSurfMeltFraction(Tsurf, pBar, effTf) * 100), 8, 98);
-            if (actualLiqPct < 96) {
-              hydro.coveragePct = actualLiqPct;
+            const thermalLiqPct = clamp(Math.round(getSurfMeltFraction(Tsurf, pBar, effTf) * 100), 8, 98);
+            const hasIcebergs = solv === 'NH3-H2O' && (hydro.state?.includes('Icebergs') || (hydro.coveragePct ?? 100) < 96);
+            if (hasIcebergs) {
+              const baseCov = hydro.coveragePct ?? 70;
+              const combinedPct = clamp(Math.round((baseCov * thermalLiqPct) / 100), 12, 92);
+              hydro.coveragePct = combinedPct;
+              const regionLabel = isLockedPlanet ? 'Substellar Eyeball' : 'Equatorial';
+              hydro.state = `${regionLabel} Saturated NH3-H2O Seas, Continent-Sized H2O Icebergs & Polar/Nightside Ice over Ice VI (${combinedPct}% Liquid Coverage)`;
+            } else if (thermalLiqPct < 96) {
+              hydro.coveragePct = thermalLiqPct;
               const regionLabel = isLockedPlanet ? 'Substellar Eyeball' : 'Equatorial';
               const iceLabel = isLockedPlanet ? 'Nightside Glacial Ice Sheet' : 'Polar Glacial Ice Sheets';
               const solvLabel =
@@ -2586,7 +2614,7 @@ export function generateZoneSystem(
                   : solv.includes('Brine')
                   ? 'Saline Brine H2O'
                   : 'Liquid H2O';
-              hydro.state = `${regionLabel} ${solvLabel} Ocean & ${iceLabel} over Ice VI (${actualLiqPct}% Liquid Coverage)`;
+              hydro.state = `${regionLabel} ${solvLabel} Ocean & ${iceLabel} over Ice VI (${thermalLiqPct}% Liquid Coverage)`;
             }
           }
         }
@@ -3012,13 +3040,21 @@ export function generateZoneSystem(
           siKm: 0,
         };
       } else if (mc.includes('Cryo-Ammonia')) {
-        const isMarineNH3 = iceF < 0.12 && (iceF < 0.04 || random() < 0.65);
-        const covPct = isMarineNH3 ? randInt(18, 82) : 100;
+        const isRockyNH3Moon = iceF < 0.04;
+        const hasIcebergsNH3Moon = !isRockyNH3Moon && (mTsurf < 242 || random() < 0.78);
+        const satMeltM = clamp((mTsurf - 176) / 78, 0.08, 0.92);
+        const covPct = isRockyNH3Moon
+          ? randInt(18, 82)
+          : hasIcebergsNH3Moon
+          ? clamp(Math.round(28 + satMeltM * 52 + rand(-10, 10)), 26, 88)
+          : 100;
         const totW = Math.max(12, Math.round(rKm * 0.28 * Math.max(0.08, iceF)));
-        const lKm = isMarineNH3 ? clamp(Math.round(rKm * 0.0018), 1, 8) : clamp(Math.round(totW * 0.45), 6, 65);
+        const lKm = isRockyNH3Moon ? clamp(Math.round(rKm * 0.0018), 1, 8) : clamp(Math.round(totW * 0.45), 6, 65);
         mHydro = {
-          state: isMarineNH3
+          state: isRockyNH3Moon
             ? `Surface Liquid NH3-H2O Seas & Cryo-Continents (${covPct}% Coverage)`
+            : hasIcebergsNH3Moon
+            ? `Saturated Liquid NH3-H2O Seas & Continent-Sized Precipitated H2O Icebergs over Ice VI (${covPct}% Liquid Coverage)`
             : 'Global Surface Liquid NH3-H2O Ocean over Ice VI (100% Coverage)',
           solvent: 'NH3-H2O',
           coveragePct: covPct,

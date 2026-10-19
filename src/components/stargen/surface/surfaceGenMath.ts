@@ -99,6 +99,7 @@ export interface PlanetarySurfaceModel {
   volcanoCount: number;
   cloudGrid: Float32Array; // Cloud & atmospheric swirl density [0, 1]
   cloudOpacity: number; // Overall cloud/atmosphere layer opacity [0, 1] proportional to atmospheric density
+  weatherRegime: string; // Physical atmospheric circulation & storm regime summary
   atmospherePalette: AtmosphereCloudPalette;
   tectonicPlateGrid: Uint8Array; // Plate IDs
   platesCount: number;
@@ -1893,21 +1894,6 @@ export function generatePlanetarySurfaceModel(
         cloudGrid[idx] = Math.max(0, Math.min(1, jetWave * 0.72 + fineBands + swirl * 0.28 + vortex * 0.35));
         hypsometry[idx] = 0.5; // Blank solid surface
         continue;
-      } else if (cloudOpacity > 0) {
-        // Terrestrial / Venusian / Titan swirling weather systems & trade-wind cloud bands
-        const atmoSwirl = sphericalFbm(lat * 1.6, lon * 1.2, seed + 887, 4);
-        const shearedCloud = sphericalFbm(
-          lat * 2.1 + (atmoSwirl - 0.5) * 28,
-          lon * 1.7 + Math.cos(latRad * 3) * 22,
-          seed + 991,
-          5
-        );
-        // ITCZ equatorial & mid-latitude storm track enhancement
-        const latStormBelt = 0.85 + 0.22 * Math.cos(latRad * 4);
-        // On dense overcast worlds (e.g. Venus/Titan), cloud cover is a nearly continuous deck with banded contrast
-        const baseDeck = cloudOpacity > 0.75 ? 0.55 : 0.0;
-        const rawCloud = Math.max(0, (shearedCloud * latStormBelt - 0.36) / 0.64);
-        cloudGrid[idx] = Math.max(0, Math.min(1, baseDeck + rawCloud * (1 - baseDeck * 0.5)));
       }
 
       const theta = (lon * Math.PI) / 180;
@@ -2224,6 +2210,46 @@ export function generatePlanetarySurfaceModel(
   const approxTmaxOnGlobe =
     Tbase * (1.0 + (isTidallyLocked ? 0.50 * lockedThermalFactor : 0.31 * thermalDiffFactor)) + 4 * waveAtmoScale;
   const hasIceBoundaryOnDeepWaterWorld = isDeepWaterOrIceShell && hasLiquid && approxTminOnGlobe <= freezingPointK;
+  // On saturated NH3-H2O worlds with coverageFrac < 0.96, lower-density H2O Ice I (0.917 g/cm^3) and ammonia hydrates
+  // precipitate/condense out of saturated solution along the NH3-H2O liquidus to form continent-sized floating H2O icebergs!
+  const hasPrecipitatedNH3Icebergs =
+    isDeepWaterOrIceShell && hasLiquid && seaPalette.solventKey === 'NH3-H2O' && coverageFrac > 0 && coverageFrac < 0.96;
+
+  // Atmospheric circulation & weather regime parameters
+  const rotHours = Math.abs(activeBody.rotationHours || 24);
+  const weatherRegime = isNoSurface
+    ? isSupercritical
+      ? 'Supercritical Convective Jet Bands & Deep Vortices'
+      : isIceGiant
+      ? 'Supersonic Zonal Methane-Cloud Jet Streams & Dark Spot Vortices'
+      : 'Multi-Band Zonal Jet Streams, Equatorial Superrotation & Anticyclonic Ovals'
+    : pBarAtmo < 0.001
+    ? 'Airless / Ballistic Exosphere (No Tropospheric Weather)'
+    : isTidallyLocked
+    ? pBarAtmo >= 2.0
+      ? 'Tidally Locked Superrotating Jet & Massive Dayside Substellar Megastorm'
+      : hasLiquid
+      ? 'Tidally Locked Dayside Eyeball Megastorm & Equatorial Kelvin-Rossby Jet'
+      : 'Tidally Locked Dayside Convective Updraft & Nightside Cold-Trap Subsidence'
+    : rotHours < 16
+    ? 'Rapid-Rotator Multi-Cell Zonal Jet Streams & Baroclinic Cyclone Tracks'
+    : rotHours > 96
+    ? 'Slow-Rotator Global Hadley Cell & Superrotating Equatorial Cloud Chevrons'
+    : hasLiquid
+    ? 'Three-Cell Hadley/Ferrel Circulation, ITCZ Squall Belt & Mid-Latitude Cyclones'
+    : 'Three-Cell Baroclinic Frontal Waves & Subtropical Subsidence Belts';
+
+  // Substellar convective megastorm center on 1:1 tidally locked worlds (advected slightly eastward by equatorial superrotation)
+  const subStormLat = ((seed % 11) - 5) * 0.75;
+  const subStormLon = 7 + (seed % 9);
+
+  // Deterministic synoptic mid-latitude baroclinic cyclones for rotating worlds (16h <= rotHours <= 96h)
+  const midCyclones = [
+    { lat: 46 + (seed % 11), lon: ((seed * 37) % 360) - 180, radius: 18 + (seed % 7), spin: 1 },
+    { lat: 51 + ((seed >> 3) % 10), lon: (((seed * 37) + 165) % 360) - 180, radius: 16 + ((seed >> 2) % 6), spin: 1 },
+    { lat: -(46 + ((seed >> 4) % 11)), lon: (((seed * 53) + 80) % 360) - 180, radius: 18 + ((seed >> 3) % 7), spin: -1 },
+    { lat: -(51 + ((seed >> 5) % 9)), lon: (((seed * 53) + 255) % 360) - 180, radius: 17 + ((seed >> 4) % 6), spin: -1 },
+  ];
 
   for (let y = 0; y < height; y++) {
     const lat = 90 - y;
@@ -2256,6 +2282,7 @@ export function generatePlanetarySurfaceModel(
           (sphericalFbm(lat * 2.6, lon * 2.6, seed + 353, 3) - 0.5) * 3.0) *
         waveAtmoScale;
       let Tlocal = Tbase;
+      let distFromSubstellar = 0.5;
       if (isTidallyLocked) {
         const wLatRad = ((lat + warpLat * 0.42) * Math.PI) / 180;
         const wLonRad = ((lon + warpLon * 0.42) * Math.PI) / 180;
@@ -2263,7 +2290,7 @@ export function generatePlanetarySurfaceModel(
           -1,
           Math.min(1, Math.cos(latRad) * Math.cos((lon * Math.PI) / 180) * 0.74 + Math.cos(wLatRad) * Math.cos(wLonRad) * 0.26)
         );
-        const distFromSubstellar = Math.acos(cosPsi) / Math.PI; // 0 at substellar (0,0), 0.5 at terminator, 1.0 at antistellar
+        distFromSubstellar = Math.acos(cosPsi) / Math.PI; // 0 at substellar (0,0), 0.5 at terminator, 1.0 at antistellar
         // Dayside (dist <= 0.5) receives cos(psi) zenith-peaked stellar flux (+50% peak at substellar hotspot);
         // Nightside (dist > 0.5) receives zero direct stellar flux and plunges into a deep antistellar cold trap (-82% at antistellar point)
         const lockedAnomaly =
@@ -2299,20 +2326,43 @@ export function generatePlanetarySurfaceModel(
         ? 0
         : Math.max(0, (hNorm - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized));
 
-      // Continuous, domain-warped 3D spherical moisture field (0..1)
+      // Continuous, circulation-coupled 3D spherical moisture field (0..1)
       const moistNoise =
         sphericalFbm(lat * 1.05 + warpLat * 0.38, lon * 1.05 + warpLon * 0.38, seed + 509, 4) * 0.74 +
         sphericalFbm(lat * 2.35, lon * 2.35, seed + 547, 3) * 0.26;
-      const itczBoost = Math.exp(-Math.pow(effAbsLat / 14.5, 2)) * 0.26;
-      const hadleyDip = Math.exp(-Math.pow((effAbsLat - 25.0) / 11.5, 2)) * 0.34;
-      const ferrelBoost = Math.exp(-Math.pow((effAbsLat - 52.0) / 14.0, 2)) * 0.18;
+      let circulationMoistTerm = 0;
+      if (isTidallyLocked) {
+        // Substellar convective convergence updraft brings torrential dayside storm moisture + eastward Matsuno-Gill jet plume
+        const substellarConv = Math.exp(-Math.pow(distFromSubstellar / 0.34, 2)) * 0.42;
+        const eastJetPlume =
+          lon > -15 && lon < 105
+            ? Math.exp(-Math.pow(effAbsLat / 22.0, 2)) * Math.exp(-Math.pow((lon - 38) / 54.0, 2)) * 0.24
+            : 0;
+        const nightSubsidenceDry =
+          distFromSubstellar > 0.48 ? Math.min(0.46, (distFromSubstellar - 0.48) * 0.92) : 0;
+        circulationMoistTerm = substellarConv + eastJetPlume - nightSubsidenceDry;
+      } else if (rotHours < 16) {
+        // Rapid rotator: 5-7 alternating zonal Coriolis convergence/divergence bands
+        circulationMoistTerm = Math.cos(((effAbsLat * Math.PI) / 180) * 5.5) * 0.22;
+      } else if (rotHours > 96) {
+        // Slow rotator: global equator-to-pole Hadley cell (broad tropical convergence, polar subsidence)
+        circulationMoistTerm =
+          Math.exp(-Math.pow(effAbsLat / 38.0, 2)) * 0.24 -
+          Math.exp(-Math.pow((effAbsLat - 72.0) / 18.0, 2)) * 0.26;
+      } else {
+        // Earth-like 3-cell circulation: ITCZ equatorial belt, subtropical high-pressure desert belt (~25°), Ferrel storm track (~52°)
+        const itczBoost = Math.exp(-Math.pow(effAbsLat / 14.5, 2)) * 0.26;
+        const hadleyDip = Math.exp(-Math.pow((effAbsLat - 25.0) / 11.5, 2)) * 0.34;
+        const ferrelBoost = Math.exp(-Math.pow((effAbsLat - 52.0) / 14.0, 2)) * 0.18;
+        circulationMoistTerm = itczBoost - hadleyDip + ferrelBoost;
+      }
       const coastalBoost = hasLiquid ? Math.max(0, (0.22 - altRatio) * 0.82) : 0;
       const continentalDry = Math.max(0, (altRatio - 0.18) * 0.45);
       const rawMoist =
         !hasLiquid && !isDeepWaterOrIceShell && !(isWaterIceDominated && Tlocal >= 273.0 && pBarAtmo >= 0.0061)
           ? moistNoise * 0.32
-          : (moistNoise - 0.5) * 1.48 + 0.52 + itczBoost - hadleyDip + ferrelBoost + coastalBoost - continentalDry;
-      const localMoisture = isBelowSeaLevel ? 1.0 : Math.max(0.02, Math.min(0.98, rawMoist));
+          : (moistNoise - 0.5) * 1.42 + 0.52 + circulationMoistTerm + coastalBoost - continentalDry;
+      let localMoisture = isBelowSeaLevel ? 1.0 : Math.max(0.02, Math.min(0.98, rawMoist));
       moistureGrid[idx] = localMoisture;
 
       const topoVar = (moistNoise - 0.5) * 0.1;
@@ -2393,12 +2443,50 @@ export function generatePlanetarySurfaceModel(
       } else if (isDeepWaterOrIceShell) {
         // Deep water/ice shell world:
         // - Zero exposed silicate rock! The rocky mantle is buried hundreds/thousands of km below the water-ice shell.
-        // - If hasLiquid && pBarAtmo >= 0.0061 && !isBelowFreezing: Liquid ocean (0.01..0.49) with zero ice cracks.
-        // - Otherwise: Frozen ice shell (glacial ice sheet, cryo-ice plains, alpine glacial peaks, or cryotectonic lineae).
+        // - On saturated NH3-H2O worlds with coverageFrac < 0.96, lower-density H2O Ice I condenses out of saturated solution
+        //   to form continent-sized floating H2O icebergs even where Tlocal > 176.0 K!
+        // - Otherwise, if hasLiquid && pBarAtmo >= 0.0061 && !isBelowFreezing: Liquid ocean (0.01..0.49) with zero ice cracks.
         const bathyNorm = rawBaseElevGrid[idx]; // 0..1 smooth normalized glacial/seafloor field
         const canHaveLiquidHere = hasLiquid && pBarAtmo >= 0.0061 && !isBelowFreezing;
-        if (!canHaveLiquidHere) {
-          if (hasLiquid) {
+        // Cooling supersaturation bias on NH3-H2O worlds: cooler latitudes precipitate larger/more frequent H2O Ice I icebergs
+        const coolingSupersat = hasPrecipitatedNH3Icebergs
+          ? Math.max(-0.06, Math.min(0.14, (218.0 - Tlocal) / 360.0))
+          : 0;
+        const icebergScore = bathyNorm + coolingSupersat;
+        const isFloatingNH3Iceberg =
+          canHaveLiquidHere && hasPrecipitatedNH3Icebergs && icebergScore > seaLevelNormalized;
+
+        if (!canHaveLiquidHere || isFloatingNH3Iceberg) {
+          if (isFloatingNH3Iceberg) {
+            // Continent-sized floating H2O iceberg condensed out of saturated NH3-H2O solution!
+            const bergMargin = Math.max(0.001, icebergScore - seaLevelNormalized);
+            const bergSpan = Math.max(0.06, 1.0 - seaLevelNormalized);
+            const bergProgress = Math.min(1.0, Math.pow(bergMargin / bergSpan, 0.65));
+            // Taper cryotectonic fractures near the floating iceberg shelf margin so cracks never enter the liquid sea
+            const crackTaper = Math.min(1.0, Math.max(0.0, bergMargin / 0.07));
+            fractureGrid[idx] *= crackTaper;
+            craterGrid[idx] *= 0.25; // Freshly precipitated/slush-annealed H2O iceberg tables have few craters
+            const crackVal = fractureGrid[idx];
+
+            const iceAltRatio = Math.max(
+              0.02,
+              Math.min(0.96, 0.06 + 0.88 * bergProgress - Math.min(0.26, crackVal * 0.24))
+            );
+            hNorm = Math.min(0.99, 0.5 + 0.5 * iceAltRatio);
+            hypsometry[idx] = hNorm;
+            localMoisture = Math.min(0.95, localMoisture * 0.75);
+            moistureGrid[idx] = localMoisture;
+
+            if (crackVal > 0.28) {
+              biomeGrid[idx] = 21; // Cryotectonic Ice Fissure (Linea)
+            } else if (iceAltRatio < 0.26 + topoVar * 0.5) {
+              biomeGrid[idx] = 18; // Lowland Tabular Iceberg Shelf
+            } else if (iceAltRatio > 0.74 + topoVar * 0.5) {
+              biomeGrid[idx] = 13; // Pressure-Ridge Glacial Ice Peaks
+            } else {
+              biomeGrid[idx] = 8; // Continent-Sized Precipitated H2O Iceberg Sheet
+            }
+          } else if (hasLiquid) {
             // Taper ice cracks to 0 as temperature approaches freezingPointK so cracks never touch or bleed into liquid water
             const crackTaper = hasIceBoundaryOnDeepWaterWorld
               ? Math.min(1.0, Math.max(0.0, (freezingPointK - Tlocal) / 5.5))
@@ -2419,6 +2507,8 @@ export function generatePlanetarySurfaceModel(
             );
             hNorm = Math.min(0.99, 0.5 + 0.5 * iceAltRatio);
             hypsometry[idx] = hNorm;
+            localMoisture = Math.min(0.92, localMoisture * 0.7);
+            moistureGrid[idx] = localMoisture;
 
             if (crackVal > 0.28) {
               biomeGrid[idx] = 21; // Cryotectonic Ice Fissure (Linea)
@@ -2451,10 +2541,12 @@ export function generatePlanetarySurfaceModel(
           const coastalShoaling = hasIceBoundaryOnDeepWaterWorld
             ? Math.min(1.0, Math.pow(Math.max(0.02, (Tlocal - freezingPointK) / meltSpan), 0.72))
             : 1.0;
-          const seafloorDepth = 1.0 - bathyNorm; // 0 over submarine rises, 1 in deep basins
+          const seafloorDepth = hasPrecipitatedNH3Icebergs
+            ? Math.pow(Math.max(0.02, (seaLevelNormalized - icebergScore) / Math.max(0.06, seaLevelNormalized)), 0.72)
+            : 1.0 - bathyNorm; // Shoals smoothly toward floating H2O iceberg shelves!
           const waterDepthRatio = Math.max(
             0.02,
-            Math.min(0.98, coastalShoaling * (0.26 + 0.74 * seafloorDepth))
+            Math.min(0.98, coastalShoaling * (hasPrecipitatedNH3Icebergs ? seafloorDepth : 0.26 + 0.74 * seafloorDepth))
           );
           hNorm = Math.max(0.01, 0.5 * (1.0 - waterDepthRatio));
           hypsometry[idx] = hNorm;
@@ -2611,6 +2703,131 @@ export function generatePlanetarySurfaceModel(
           } else {
             biomeGrid[idx] = 9; // Arid Steppe
           }
+        }
+      }
+
+      // 3. Physical Tropospheric Weather & Circulation Cloud Modeling (for all solid-surface worlds with atmosphere)
+      if (!isNoSurface && cloudOpacity > 0) {
+        const isLiquidOceanCell = biomeGrid[idx] <= 2 && !isMoltenLavaPool;
+        const evapBoost = isLiquidOceanCell ? 1.18 : hasLiquid ? 0.74 + 0.38 * localMoisture : 0.88;
+        const baseDeck = cloudOpacity > 0.78 ? 0.54 : 0.0;
+
+        if (isTidallyLocked) {
+          // 1:1 Tidally Locked Circulation:
+          // - Stationary massive dayside substellar convective megastorm (central towering anvil + counter-rotating spiral rainbands)
+          // - Eastward Matsuno-Gill equatorial superrotating chevron outflow jet toward the eastern terminator
+          // - Nightside radiative subsidence clearing (descending cold air suppresses deep clouds on the nightside)
+          const dLatS = lat - subStormLat + warpLat * 0.22;
+          const dLonS = (((lon - subStormLon + 540) % 360) - 180) * Math.cos(latRad * 0.68) + warpLon * 0.22;
+          const rDeg = Math.hypot(dLatS, dLonS);
+          const az = Math.atan2(dLatS, dLonS);
+
+          // Twin hemisphere Coriolis spiral rainbands converging into the substellar convective chimney
+          const hemiSpin = lat >= 0 ? 1 : -1;
+          const spiralTurb = sphericalFbm(lat * 2.1, lon * 1.9, seed + 887, 3);
+          const spiralPhase = az * 2.0 * hemiSpin + rDeg * 0.088 + spiralTurb * 2.8;
+          const spiralRainbands = Math.pow(0.5 + 0.5 * Math.cos(spiralPhase), 1.55);
+
+          // Dense central substellar anvil shield (radius ~35 deg) + broader spiral storm complex (radius ~68 deg)
+          const substellarAnvil = Math.exp(-Math.pow(rDeg / 35.0, 1.8));
+          const substellarSpiralComplex =
+            Math.exp(-Math.pow(rDeg / 68.0, 2.0)) * (0.38 + 0.62 * spiralRainbands);
+
+          // Eastward Matsuno-Gill equatorial Kelvin/Rossby chevron outflow jet streaming toward +90 deg eastern terminator
+          const chevronLon = ((lon - subStormLon - absLat * 1.15 + 540) % 360) - 180;
+          const eastJetEnv =
+            chevronLon > -12 && chevronLon < 120
+              ? Math.exp(-Math.pow((chevronLon - 42.0) / 56.0, 2)) * Math.exp(-Math.pow(absLat / 22.0, 2))
+              : 0;
+          const jetStreaks = sphericalFbm(
+            lat * 3.0 - absLat * 0.35,
+            lon * 1.2 - absLat * 1.35,
+            seed + 991,
+            4
+          );
+          const eastJetClouds = eastJetEnv * (0.36 + 0.64 * jetStreaks);
+
+          // Nightside subsidence clearing (distFromSubstellar > 0.52)
+          const daysideConvectiveEnv =
+            distFromSubstellar <= 0.52
+              ? 1.0
+              : Math.max(
+                  cloudOpacity > 0.78 ? 0.42 : 0.06,
+                  Math.exp(-Math.pow((distFromSubstellar - 0.52) / 0.22, 2))
+                );
+          const bgWisps =
+            sphericalFbm(lat * 1.8 + warpLat * 0.35, lon * 1.5 + warpLon * 0.35, seed + 937, 4) *
+            0.34 *
+            daysideConvectiveEnv;
+
+          const rawLockedStorm =
+            Math.max(substellarAnvil * 0.98, substellarSpiralComplex * 0.88, eastJetClouds * 0.78) + bgWisps;
+          const scaledStorm = Math.max(0, (rawLockedStorm * evapBoost - 0.18) / 0.82);
+          cloudGrid[idx] = Math.max(0, Math.min(1, baseDeck + scaledStorm * (1 - baseDeck * 0.46)));
+        } else {
+          // Diurnal Rotating World Circulation scaled by rotation period (rotHours):
+          const atmoSwirl = sphericalFbm(lat * 1.6, lon * 1.2, seed + 887, 4);
+          let rawRotCloud = 0;
+
+          if (rotHours < 16) {
+            // Fast rotator (< 16h): 5-7 sharp Coriolis zonal bands + high-shear eddies
+            const zonalShear = sphericalFbm(
+              lat * 3.2 + (atmoSwirl - 0.5) * 18,
+              lon * 0.85 + Math.cos(latRad * 6) * 38,
+              seed + 991,
+              5
+            );
+            const multiBandBelt = 0.78 + 0.28 * Math.cos(latRad * 6.5 + (atmoSwirl - 0.5) * 1.4);
+            rawRotCloud = Math.max(0, (zonalShear * multiBandBelt * evapBoost - 0.34) / 0.66);
+          } else if (rotHours > 96) {
+            // Slow rotator (> 96h, e.g. Venus/Titan-like): global Hadley cell with planetary superrotating chevron waves
+            const chevronShift = lon * 1.15 - absLat * 1.65 + (atmoSwirl - 0.5) * 32;
+            const globalHadleyWave = sphericalFbm(lat * 1.45 + warpLat * 0.25, chevronShift, seed + 991, 5);
+            const eqAndPolarHood =
+              0.82 + 0.22 * Math.exp(-Math.pow(absLat / 28.0, 2)) + 0.18 * Math.exp(-Math.pow((absLat - 78.0) / 14.0, 2));
+            rawRotCloud = Math.max(0, (globalHadleyWave * eqAndPolarHood * evapBoost - 0.32) / 0.68);
+          } else {
+            // Earth-like 3-Cell Circulation (16h <= rotHours <= 96h):
+            // - Equatorial ITCZ convective thunderstorm belt (~0-12 deg)
+            // - Subtropical high-pressure Hadley subsidence clearings (~20-32 deg)
+            // - Mid-latitude Ferrel baroclinic storm tracks (~42-64 deg) with spiral comma cyclones
+            const shearedCloud = sphericalFbm(
+              lat * 2.1 + (atmoSwirl - 0.5) * 28,
+              lon * 1.65 + Math.cos(latRad * 3) * 26,
+              seed + 991,
+              5
+            );
+            const itczSquall = Math.exp(-Math.pow(effAbsLat / 11.5, 2)) * 0.34;
+            const subtropClear = Math.exp(-Math.pow((effAbsLat - 25.5) / 10.5, 2)) * 0.26;
+            const ferrelTrack = Math.exp(-Math.pow((effAbsLat - 52.0) / 14.5, 2)) * 0.26;
+            const threeCellEnv = 0.76 + itczSquall - subtropClear + ferrelTrack;
+
+            // Synoptic mid-latitude baroclinic comma cyclones
+            let cycloneBoost = 0;
+            for (let c = 0; c < midCyclones.length; c++) {
+              const cyc = midCyclones[c];
+              const dLatC = lat - cyc.lat + warpLat * 0.15;
+              if (Math.abs(dLatC) > cyc.radius * 1.45) continue;
+              const dLonC = (((lon - cyc.lon + 540) % 360) - 180) * Math.cos(latRad * 0.75) + warpLon * 0.15;
+              const rC = Math.hypot(dLatC, dLonC);
+              if (rC < cyc.radius * 1.35) {
+                const azC = Math.atan2(dLatC, dLonC);
+                const commaSpiral = Math.pow(
+                  0.5 + 0.5 * Math.cos(azC * cyc.spin - rC * 0.22 + atmoSwirl * 2.2),
+                  1.45
+                );
+                const eyeWall = rC < 2.2 ? 0.55 + 0.45 * (rC / 2.2) : 1.0;
+                const cycVal =
+                  Math.exp(-Math.pow(rC / (cyc.radius * 0.82), 1.75)) * (0.35 + 0.65 * commaSpiral) * eyeWall;
+                if (cycVal > cycloneBoost) cycloneBoost = cycVal;
+              }
+            }
+
+            const combined3Cell = Math.max(shearedCloud * threeCellEnv, cycloneBoost * 0.92 + shearedCloud * 0.18);
+            rawRotCloud = Math.max(0, (combined3Cell * evapBoost - 0.35) / 0.65);
+          }
+
+          cloudGrid[idx] = Math.max(0, Math.min(1, baseDeck + rawRotCloud * (1 - baseDeck * 0.5)));
         }
       }
     }
@@ -2847,6 +3064,7 @@ export function generatePlanetarySurfaceModel(
     volcanoCount: volcanoes.length,
     cloudGrid,
     cloudOpacity,
+    weatherRegime,
     atmospherePalette,
     tectonicPlateGrid,
     platesCount,
