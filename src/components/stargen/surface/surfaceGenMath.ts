@@ -858,8 +858,10 @@ export function computeLocalBoilingPointK(
     return Math.min(240.0, 122.0 / Math.max(0.45, 1 - Math.log(P / 1.01325) / 9.8));
   }
   if (key === 'NH3-H2O') {
-    if (P < 0.06) return 176.0;
-    return Math.min(405.5, 245.0 / Math.max(0.45, 1 - Math.log(P / 1.01325) / 11.2));
+    // Aqueous ammonia-water (NH3-H2O) seas do NOT boil at -33.3°C (239.8 K, pure anhydrous NH3);
+    // strong H-bonding in H2O elevates the mixture's boiling curve to ~345–373 K at 1 atm (critical point ~605 K).
+    if (P < 0.0061) return 176.0;
+    return Math.min(605.0, 350.0 / Math.max(0.45, 1 - Math.log(P / 1.01325) / 12.6));
   }
   if (key === 'SO2') {
     if (P < 0.016) return 197.7;
@@ -1679,7 +1681,9 @@ export function generatePlanetarySurfaceModel(
   const isDeepWaterOrIceShell =
     !isNoSurface &&
     !isMoltenWorld &&
-    (seaPalette.solventKey === 'H2O' || seaPalette.solventKey === 'H2O + CO2') &&
+    (seaPalette.solventKey === 'H2O' ||
+      seaPalette.solventKey === 'H2O + CO2' ||
+      seaPalette.solventKey === 'NH3-H2O') &&
     ((hasLiquid && coverageFrac >= 0.85) ||
       ((activeBody.iceFrac ?? 0) >= 0.25 && (activeBody.pressureBar ?? 0) >= 0.05));
 

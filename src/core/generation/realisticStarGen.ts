@@ -1995,7 +1995,7 @@ export function generateZoneSystem(
           const Tsub = Teq + ghDelta(pC_nh3, pN, pH, pM, 0, pNH3, 0, Teq, grav);
           if (Tsub >= 176 && Tsub <= 265 && pC_nh3 + pN + pH + pNH3 >= 0.12) {
             pC = pC_nh3;
-            const isContinentalNH3 = b.iceFrac < 0.035 || random() < 0.52;
+            const isContinentalNH3 = b.iceFrac < 0.08 && (b.iceFrac < 0.025 || random() < 0.55);
             const bioNH3 = z.age >= 1.5 && random() < 0.58;
             if (bioNH3) {
               const pM_bio = +clamp(pM * rand(1.3, 2.2), 0.006, 0.45).toFixed(4);
@@ -2078,7 +2078,7 @@ export function generateZoneSystem(
           const Touter = Teq + ghDelta(0, pN, pH, pM, 0, pNH3, 0, Teq, grav);
           if (Touter >= 176 && Touter <= 265) {
             pNH3 = Math.max(pNH3, +(pN * 0.025).toFixed(4));
-            const isContinentalNH3 = b.iceFrac < 0.04 || random() < 0.5;
+            const isContinentalNH3 = b.iceFrac < 0.08 && (b.iceFrac < 0.025 || random() < 0.52);
             const bioNH3 = z.age >= 1.5 && random() < 0.55;
             if (bioNH3) {
               const bioNH3Complex = z.age >= 3.0 ? 'Multicellular' : 'Unicellular';
@@ -2251,7 +2251,7 @@ export function generateZoneSystem(
           };
         } else if (pClass.includes('Cryo-Ammonia')) {
           const isMarine =
-            pClass.includes('Terrestrial') || pClass.includes('Marine');
+            (pClass.includes('Terrestrial') || pClass.includes('Marine')) && b.iceFrac < 0.08;
           if (isMarine) {
             const covPct = randInt(18, 84);
             const nh3DepthKm = clamp(Math.round(rE * 3.5 * rand(0.4, 1.6)), 1, 9);
@@ -2278,11 +2278,8 @@ export function generateZoneSystem(
             const lKm = Math.min(totW, Math.max(8, Math.round((fGPa * 100) / grav)));
             const rem = Math.max(0, totW - lKm);
             const siK2 = b.massEarth >= 2.5 ? Math.round(rem * 0.35) : 0;
-            const isPureNH3Window = Tsurf >= 195.4 && Tsurf <= 239.8;
             hydro = {
-              state: isPureNH3Window
-                ? 'Global Surface Liquid NH3 (Ammonia) & Eutectic Ocean over Ice VI/VII (100% Coverage)'
-                : 'Global Surface Liquid NH3-H2O (Ammonia-Water Eutectic) Ocean over Ice VI (100% Coverage)',
+              state: 'Global Surface Liquid NH3-H2O (Ammonia-Water Mixture) Ocean over Ice VI/VII (100% Coverage)',
               solvent: 'NH3-H2O',
               coveragePct: 100,
               biosphere: biosphereDesc,
@@ -2847,7 +2844,7 @@ export function generateZoneSystem(
           siKm: 0,
         };
       } else if (mc.includes('Cryo-Ammonia')) {
-        const isMarineNH3 = iceF < 0.25 || random() < 0.68;
+        const isMarineNH3 = iceF < 0.12 && (iceF < 0.04 || random() < 0.65);
         const covPct = isMarineNH3 ? randInt(18, 82) : 100;
         const totW = Math.max(12, Math.round(rKm * 0.28 * Math.max(0.08, iceF)));
         const lKm = isMarineNH3 ? clamp(Math.round(rKm * 0.0018), 1, 8) : clamp(Math.round(totW * 0.45), 6, 65);
