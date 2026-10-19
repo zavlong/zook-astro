@@ -1667,18 +1667,33 @@ export function generatePlanetarySurfaceModel(
       tidalW >= 0.1 ||
       (activeBody.massEarth >= 0.35 && (activeBody.rockFrac ?? 0) >= 0.45));
 
-  // Maximum elevation depends inversely on gravity (scaled 2.5x up for telemetry numbers while preserving thermalRefElevKm for visual presentation)
+  // Physical elevation and ocean depth bounds scaled by surface gravity and crust rheology:
+  // - Deep water-ice shells undergo rapid viscous/isostatic relaxation -> gentle glacial relief (~1.2 to 2.5 km)
+  // - Rocky terrestrial worlds support high silicate mountain cordilleras (~7.5 to 11 km at 1g, higher at low g)
   const gClamped = Math.max(0.05, activeBody.gravityG);
-  const thermalRefElevKm = isNoSurface
+  const elevRand = 0.86 + prng() * 0.28;
+  const maxElevKm = isNoSurface
     ? 0
-    : +(Math.min(28, 7.5 / Math.sqrt(gClamped)) * (0.8 + prng() * 0.4)).toFixed(1);
-  const maxElevKm = isNoSurface ? 0 : +(thermalRefElevKm * 2.5).toFixed(1);
-  const minElevKm = isNoSurface ? 0 : +(-maxElevKm * 0.75).toFixed(1);
+    : isDeepWaterOrIceShell
+    ? +Math.min(2.8, (1.55 / Math.sqrt(gClamped)) * elevRand).toFixed(2)
+    : isIcyWorld
+    ? +Math.min(6.5, (3.2 / Math.sqrt(gClamped)) * elevRand).toFixed(1)
+    : +Math.min(19.5, (8.4 / Math.sqrt(gClamped)) * elevRand).toFixed(1);
+  const minElevKm = isNoSurface
+    ? 0
+    : isDeepWaterOrIceShell
+    ? -+Math.min(9.5, Math.max(2.6, (4.2 / Math.sqrt(gClamped)) * elevRand)).toFixed(2)
+    : +(-maxElevKm * (hasLiquid ? 0.82 : 0.65)).toFixed(1);
+  const thermalRefElevKm = isNoSurface ? 0 : Math.min(9.5, maxElevKm * 0.85);
 
   // Hypsometry resolution: 360 lon x 180 lat
   const width = 360;
   const height = 180;
   const hypsometry = new Float32Array(width * height);
+  const rawBaseElevGrid = new Float32Array(width * height);
+  const craterDeltaGrid = new Float32Array(width * height);
+  const crackDeltaGrid = new Float32Array(width * height);
+  const volcDeltaGrid = new Float32Array(width * height);
   const temperatureGrid = new Float32Array(width * height);
   const moistureGrid = new Float32Array(width * height);
   const biomeGrid = new Uint8Array(width * height);
@@ -1761,8 +1776,51 @@ export function generatePlanetarySurfaceModel(
   const ggVortexLat = (colorPrng() < 0.5 ? -1 : 1) * (14 + colorPrng() * 20);
   const ggVortexLon = (colorPrng() - 0.5) * 280;
 
-  // Generate elevation & cloud samples
-  const allElevations: number[] = [];
+  // Pre-generate 3D spherical tectonic plates with continental/oceanic crust buoyancy & drift vectors
+  const plateCenters: {
+    cx: number;
+    cy: number;
+    cz: number;
+    vx: number;
+    vy: number;
+    vz: number;
+    isContinental: boolean;
+    baseBuoyancy: number;
+  }[] = [];
+  const targetContRatio = hasLiquid && coverageFrac < 0.92 ? Math.max(0.15, 1.0 - coverageFrac) : 0.45;
+  for (let p = 0; p < platesCount; p++) {
+    const u = prng() * 2 - 1;
+    const theta = prng() * Math.PI * 2;
+    const r = Math.sqrt(Math.max(0, 1 - u * u));
+    const cx = r * Math.cos(theta);
+    const cy = u;
+    const cz = r * Math.sin(theta);
+    // Random tangent velocity vector on sphere
+    const rx = prng() - 0.5;
+    const ry = prng() - 0.5;
+    const rz = prng() - 0.5;
+    const dot = rx * cx + ry * cy + rz * cz;
+    const tx = rx - dot * cx;
+    const ty = ry - dot * cy;
+    const tz = rz - dot * cz;
+    const tLen = Math.sqrt(tx * tx + ty * ty + tz * tz) || 1;
+    const isCont = p < Math.max(1, Math.round(platesCount * targetContRatio));
+    plateCenters.push({
+      cx,
+      cy,
+      cz,
+      vx: tx / tLen,
+      vy: ty / tLen,
+      vz: tz / tLen,
+      isContinental: isCont,
+      baseBuoyancy: isCont ? 0.14 + prng() * 0.08 : -0.14 - prng() * 0.08,
+    });
+  }
+
+  // Pass 1: Generate continuous base terrain, tectonic plate interactions, craters, cracks, volcanoes, & clouds
+  let rawBaseMin = Infinity;
+  let rawBaseMax = -Infinity;
+
   for (let y = 0; y < height; y++) {
     const lat = 90 - y; // 90 to -90
     const latRad = (lat * Math.PI) / 180;
@@ -1805,25 +1863,96 @@ export function generatePlanetarySurfaceModel(
         cloudGrid[idx] = Math.max(0, Math.min(1, baseDeck + rawCloud * (1 - baseDeck * 0.5)));
       }
 
-      // 2. Solid Surface Topography
-      let elev = sphericalFbm(lat, lon, seed, 6);
-
-      // Add mountain ridges using ridged multifractal
-      const ridgeNoise = Math.abs(sphericalFbm(lat * 1.5, lon * 1.5, seed + 499, 4) - 0.5) * 2;
-      elev = elev * 0.72 + (1.0 - ridgeNoise) * 0.28;
-      if (craters.length > 0) {
-        // On smaller airless worlds, dampen background tectonic ridge noise so circular impact craters dominate the relief
-        const topoSmoothing = Math.max(0.48, Math.min(1.0, 1.02 / Math.pow(craterProminence, 0.48)));
-        elev = 0.5 + (elev - 0.5) * topoSmoothing;
-      }
-
       const theta = (lon * Math.PI) / 180;
       const nx = sinPhi * Math.cos(theta);
       const ny = cosPhi;
       const nz = sinPhi * Math.sin(theta);
 
-      // Apply circular 3D impact craters (bowls, raised rims, central peaks, ejecta blankets)
-      if (craters.length > 0) {
+      // 2. Tectonic plates & multi-scale spherical topography
+      let tectonicOffset = 0;
+      if (platesCount > 0) {
+        const boundaryWarpA = (sphericalFbm(lat * 1.35, lon * 1.35, seed + 211, 3) - 0.5) * 0.22;
+        const boundaryWarpB = (sphericalFbm(lat * 3.1, lon * 3.1, seed + 263, 2) - 0.5) * 0.08;
+        let bestPlate = 0;
+        let secondPlate = 0;
+        let bestScore = -1e9;
+        let secondScore = -1e9;
+
+        for (let p = 0; p < platesCount; p++) {
+          const pc = plateCenters[p];
+          const pJitter =
+            (sphericalFbm(lat * 1.2 + p * 19, lon * 1.2 - p * 23, seed + 101 + p * 37, 3) - 0.5) * 0.16;
+          const score = nx * pc.cx + ny * pc.cy + nz * pc.cz + pJitter + boundaryWarpA * 0.35 + boundaryWarpB * 0.2;
+          if (score > bestScore) {
+            secondScore = bestScore;
+            secondPlate = bestPlate;
+            bestScore = score;
+            bestPlate = p;
+          } else if (score > secondScore) {
+            secondScore = score;
+            secondPlate = p;
+          }
+        }
+        tectonicPlateGrid[idx] = bestPlate;
+
+        if (!isDeepWaterOrIceShell) {
+          const p1 = plateCenters[bestPlate];
+          const p2 = plateCenters[secondPlate];
+          // Smooth interior-to-margin plate buoyancy transition
+          const borderDist = Math.max(0, bestScore - secondScore);
+          const marginBlend = Math.min(1.0, borderDist / 0.14);
+          tectonicOffset = p1.baseBuoyancy * (0.5 + 0.5 * marginBlend) + p2.baseBuoyancy * (0.5 * (1.0 - marginBlend));
+
+          // Relative convergence/divergence across the plate boundary
+          const boundaryProximity = Math.exp(-Math.pow(borderDist / 0.065, 2));
+          if (boundaryProximity > 0.02) {
+            const dx = p2.cx - p1.cx;
+            const dy = p2.cy - p1.cy;
+            const dz = p2.cz - p1.cz;
+            const dvx = p1.vx - p2.vx;
+            const dvy = p1.vy - p2.vy;
+            const dvz = p1.vz - p2.vz;
+            const convergence = dx * dvx + dy * dvy + dz * dvz;
+            const orogenyFold = Math.max(0, 1.0 - Math.abs(sphericalFbm(lat * 2.2, lon * 2.2, seed + 499, 4) - 0.5) * 4.2);
+            if (convergence > 0) {
+              // Convergent boundary: Andean/Himalayan mountain cordillera on overriding plate, trench on subducting oceanic side
+              if (p1.isContinental || p1.baseBuoyancy >= p2.baseBuoyancy) {
+                tectonicOffset += boundaryProximity * (0.14 + 0.22 * orogenyFold);
+              } else {
+                tectonicOffset -= boundaryProximity * 0.16;
+              }
+            } else {
+              // Divergent rift / mid-ocean spreading ridge
+              tectonicOffset += boundaryProximity * (p1.isContinental ? -0.09 : 0.07 * orogenyFold);
+            }
+          }
+        }
+      }
+
+      let baseElev = 0;
+      if (isDeepWaterOrIceShell) {
+        // Smooth, long-wavelength glacial dome & sub-ice basin bathymetry (no jagged silicate mountain ridges!)
+        const macroGlacial = sphericalFbm(lat * 0.75, lon * 0.75, seed + 19, 4);
+        const mesoGlacial = sphericalFbm(lat * 1.85, lon * 1.85, seed + 83, 3);
+        baseElev = macroGlacial * 0.72 + mesoGlacial * 0.28;
+      } else {
+        const macroContinents = sphericalFbm(lat * 0.85, lon * 0.85, seed, 5);
+        const mesoHills = sphericalFbm(lat * 2.3, lon * 2.3, seed + 73, 4);
+        const ridgeChains = Math.max(0, 1.0 - Math.abs(sphericalFbm(lat * 1.75, lon * 1.75, seed + 499, 4) - 0.5) * 4.2);
+        baseElev = macroContinents * 0.58 + mesoHills * 0.24 + ridgeChains * 0.18 + tectonicOffset * 0.45;
+        if (craters.length > 0) {
+          // On smaller airless worlds, dampen background tectonic ridge noise so circular impact craters dominate the relief
+          const topoSmoothing = Math.max(0.45, Math.min(1.0, 1.02 / Math.pow(craterProminence, 0.48)));
+          baseElev = 0.5 + (baseElev - 0.5) * topoSmoothing;
+        }
+      }
+
+      rawBaseElevGrid[idx] = baseElev;
+      if (baseElev < rawBaseMin) rawBaseMin = baseElev;
+      if (baseElev > rawBaseMax) rawBaseMax = baseElev;
+
+      // 3. Circular 3D impact craters (bowls, raised rims, central peaks, ejecta blankets)
+      if (craters.length > 0 && !isDeepWaterOrIceShell) {
         let craterDelta = 0;
         let craterIntensity = 0;
 
@@ -1865,11 +1994,11 @@ export function generatePlanetarySurfaceModel(
           }
         }
 
-        elev += craterDelta;
+        craterDeltaGrid[idx] = craterDelta;
         craterGrid[idx] = Math.min(1.8, craterIntensity);
       }
 
-      // Apply 3D surface cracks (cryotectonic ice lineae on icy worlds, or lava fissures on molten worlds)
+      // 4. 3D surface cracks (cryotectonic ice lineae on icy worlds, or lava fissures on molten worlds)
       if (surfaceCracks.length > 0) {
         let crackDelta = 0;
         let crackIntensity = 0;
@@ -1915,11 +2044,11 @@ export function generatePlanetarySurfaceModel(
           crackIntensity = Math.max(crackIntensity, fineIntensity);
         }
 
-        elev += crackDelta;
+        crackDeltaGrid[idx] = crackDelta;
         fractureGrid[idx] = Math.min(1.5, crackIntensity);
       }
 
-      // Apply discrete 3D Volcanic Cones & Glowing Lava Calderas on worlds with active geology
+      // 5. Discrete 3D Volcanic Cones & Glowing Lava Calderas on worlds with active geology
       if (volcanoes.length > 0) {
         let volcDelta = 0;
         let volcVal = 0;
@@ -1948,14 +2077,32 @@ export function generatePlanetarySurfaceModel(
         }
 
         if (volcVal > 0) {
-          // Ensure volcanic peaks rise above sea level as volcanic islands or continental stratovolcanoes
-          elev = Math.max(elev + volcDelta, 0.55 + volcDelta * 0.85);
+          volcDeltaGrid[idx] = volcDelta;
           volcanoGrid[idx] = volcVal;
         }
       }
+    }
+  }
 
-      hypsometry[idx] = Math.max(0.01, Math.min(0.99, elev));
-      allElevations.push(hypsometry[idx]);
+  // Normalize continuous base elevation across the entire globe to [0.05, 0.93] so every world uses the full hypsometric dynamic range!
+  const allElevations: number[] = [];
+  if (!isNoSurface) {
+    const rawSpan = Math.max(0.05, rawBaseMax - rawBaseMin);
+    for (let i = 0; i < width * height; i++) {
+      const uNorm = Math.max(0, Math.min(1, (rawBaseElevGrid[i] - rawBaseMin) / rawSpan));
+      // Smooth S-curve + slight continental shelf/plain flattening so lowland plains and ocean basins are broad while peaks/trenches reach full extremes
+      const shaped =
+        uNorm < 0.5
+          ? 0.5 * Math.pow(uNorm * 2, 1.12)
+          : 1.0 - 0.5 * Math.pow((1.0 - uNorm) * 2, 1.18);
+      rawBaseElevGrid[i] = shaped; // 0..1 normalized base terrain
+
+      let elev = 0.05 + shaped * 0.88 + craterDeltaGrid[i] + crackDeltaGrid[i];
+      if (volcanoGrid[i] > 0) {
+        elev = Math.max(elev + volcDeltaGrid[i], 0.58 + volcDeltaGrid[i] * 0.82);
+      }
+      hypsometry[i] = Math.max(0.01, Math.min(0.99, elev));
+      allElevations.push(hypsometry[i]);
     }
   }
 
@@ -1973,7 +2120,9 @@ export function generatePlanetarySurfaceModel(
   // Determine exact sea-level threshold to match coveragePct (for non-ice-dominated marine worlds)
   let seaLevelNormalized = 0.42;
   if (isDeepWaterOrIceShell) {
-    seaLevelNormalized = 1.0;
+    // On deep water/ice shell worlds, sea level is 0.50:
+    // liquid water cells map to [0.01..0.49] (bathymetric depth below sea level) and frozen ice cells map to [0.51..0.99] (glacial elevation above sea level)
+    seaLevelNormalized = 0.5;
   } else if (isWaterIceDominated) {
     seaLevelNormalized = 0.38;
   } else if (!isNoSurface && hasLiquid && allElevations.length > 0) {
@@ -2015,6 +2164,11 @@ export function generatePlanetarySurfaceModel(
   const warmMeltCandidates: { idx: number; score: number; rockBiome: number }[] = [];
   let meltwaterPatchCount = 0;
 
+  // Check if a deep water/ice shell world has any frozen ice on the globe (if Tmin <= freezingPointK)
+  const approxTminOnGlobe = Tbase * (1.0 - (isTidallyLocked ? 0.74 : 0.69) * thermalDiffFactor) - 4 * waveAtmoScale;
+  const approxTmaxOnGlobe = Tbase * (1.0 + (isTidallyLocked ? 0.34 : 0.31) * thermalDiffFactor) + 4 * waveAtmoScale;
+  const hasIceBoundaryOnDeepWaterWorld = isDeepWaterOrIceShell && approxTminOnGlobe <= freezingPointK;
+
   for (let y = 0; y < height; y++) {
     const lat = 90 - y;
     const absLat = Math.abs(lat);
@@ -2024,7 +2178,7 @@ export function generatePlanetarySurfaceModel(
     for (let x = 0; x < width; x++) {
       const lon = x - 180;
       const idx = y * width + x;
-      const hNorm = hypsometry[idx];
+      let hNorm = hypsometry[idx];
       const volcVal = volcanoGrid[idx];
       // Active volcanic cones/calderas breach the surface even if surrounded by ocean
       const isBelowSeaLevel =
@@ -2145,25 +2299,67 @@ export function generatePlanetarySurfaceModel(
           biomeGrid[idx] = 14; // Solidified Basalt Volcanic Rock Crust
         }
       } else if (isDeepWaterOrIceShell) {
-        // Deep water/ice shell world with sufficient atmosphere:
-        // Zero exposed rock! All regions with Tlocal <= 273.15 K are frozen ice,
-        // and all regions with Tlocal > 273.15 K form a continuous equatorial band/sea of liquid water!
+        // Deep water/ice shell world with sufficient atmosphere (seaLevelNormalized = 0.50):
+        // - Zero exposed rock!
+        // - Liquid water (Tlocal > 273.15 K) has ZERO ice cracks, starts as a shallow shelf at the melting ice margin,
+        //   and deepens smoothly toward the interior of the ocean basin (stored in hypsometry as 0.01..0.49).
+        // - Frozen ice (Tlocal <= 273.15 K) rises smoothly from coastal sea-ice level (+15 m) up to glacial domes (+1.5..2.5 km),
+        //   incised by cryotectonic lineae troughs (stored in hypsometry as 0.51..0.99).
+        const bathyNorm = rawBaseElevGrid[idx]; // 0..1 smooth normalized glacial/seafloor field
         if (isBelowFreezing) {
-          if (fractureGrid[idx] > 0.28) {
+          // Taper ice cracks to 0 as temperature approaches 273.15 K so cracks never touch or bleed into liquid water
+          const crackTaper = hasIceBoundaryOnDeepWaterWorld
+            ? Math.min(1.0, Math.max(0.0, (freezingPointK - Tlocal) / 5.5))
+            : 1.0;
+          fractureGrid[idx] *= crackTaper;
+          const crackVal = fractureGrid[idx];
+
+          const freezeSpan = Math.max(8.0, freezingPointK - approxTminOnGlobe);
+          const freezeProgress = hasIceBoundaryOnDeepWaterWorld
+            ? Math.min(1.0, Math.pow(Math.max(0.02, (freezingPointK - Tlocal) / freezeSpan), 0.62))
+            : 1.0;
+          const iceAltRatio = Math.max(
+            0.01,
+            Math.min(
+              0.98,
+              (0.04 + 0.96 * freezeProgress) * (0.22 + 0.78 * bathyNorm) - Math.min(0.28, crackVal * 0.26)
+            )
+          );
+          hNorm = Math.min(0.99, 0.5 + 0.5 * iceAltRatio);
+          hypsometry[idx] = hNorm;
+
+          if (crackVal > 0.28) {
             biomeGrid[idx] = 21; // Cryotectonic Ice Fissure (Linea)
-          } else if (hNorm < 0.34 + topoVar) {
+          } else if (iceAltRatio < 0.25 + topoVar * 0.5) {
             biomeGrid[idx] = 18; // Lowland Cryo-Ice Plains
+          } else if (iceAltRatio > 0.76 + topoVar * 0.5) {
+            biomeGrid[idx] = 13; // Alpine Glacial Ice Peaks
           } else {
             biomeGrid[idx] = 8; // Polar / Sea Glacial Ice Sheet
           }
         } else {
-          const waterDepthRatio = 1.0 - hNorm;
-          if (waterDepthRatio > 0.6) {
+          // Liquid water ocean: completely remove ice cracks and craters!
+          fractureGrid[idx] = 0;
+          craterGrid[idx] = 0;
+
+          const meltSpan = Math.max(6.0, (approxTmaxOnGlobe - freezingPointK) * 0.68);
+          const coastalShoaling = hasIceBoundaryOnDeepWaterWorld
+            ? Math.min(1.0, Math.pow(Math.max(0.02, (Tlocal - freezingPointK) / meltSpan), 0.72))
+            : 1.0;
+          const seafloorDepth = 1.0 - bathyNorm; // 0 over submarine rises, 1 in deep basins
+          const waterDepthRatio = Math.max(
+            0.02,
+            Math.min(0.98, coastalShoaling * (0.26 + 0.74 * seafloorDepth))
+          );
+          hNorm = Math.max(0.01, 0.5 * (1.0 - waterDepthRatio));
+          hypsometry[idx] = hNorm;
+
+          if (waterDepthRatio > 0.62) {
             biomeGrid[idx] = 0; // Abyssal Trench
-          } else if (waterDepthRatio > 0.28) {
+          } else if (waterDepthRatio > 0.24) {
             biomeGrid[idx] = 1; // Deep Ocean
           } else {
-            biomeGrid[idx] = 2; // Shallow Sea
+            biomeGrid[idx] = 2; // Shallow Shelf
           }
           meltwaterPatchCount++;
         }
@@ -2748,6 +2944,7 @@ export function evaluateSurfaceMapTexel(
   const biomeId = biomeGrid[idx];
   // Any cell with biomeId 0, 1, or 2 is liquid water/ocean (including small meltwater patches > 273 K on ice-dominated worlds!)
   const isWater = !isNoSurface && (biomeId === 0 || biomeId === 1 || biomeId === 2);
+  const isMoltenLiquid = isWater && (isMoltenWorld || seaPalette.solventKey === 'Silicate Magma');
   const isIceCell = biomeId === 8 || biomeId === 13 || biomeId === 18 || biomeId === 21;
   const isFrozenSeaIce =
     !isNoSurface &&
@@ -2757,11 +2954,30 @@ export function evaluateSurfaceMapTexel(
     isIceCell &&
     h <= seaLevelNormalized &&
     volcVal < 0.35;
-  const rawDhdx = (hypsometry[gy * width + xRight] - hypsometry[gy * width + xLeft]) * 0.5;
-  const rawDhdy = (hypsometry[yDown * width + gx] - hypsometry[yUp * width + gx]) * 0.5;
-  // Floating sea ice pack over deep ocean is relatively flat compared to continental or solid cryo-shell topography
-  const dhdx = isFrozenSeaIce ? rawDhdx * 0.22 : rawDhdx;
-  const dhdy = isFrozenSeaIce ? rawDhdy * 0.22 : rawDhdy;
+
+  // In Satellite view, liquid water is at hydrostatic sea-level equilibrium (0 m flat surface, no 3D hills or cracks!),
+  // and submarine seafloor depth should not cast artificial cliff shadows onto adjacent coastal land/ice cells.
+  const clampSea = (val: number) =>
+    hasLiquid && activeLayer === 'satellite' && !isMoltenWorld ? Math.max(seaLevelNormalized, val) : val;
+  const rawDhdx = (clampSea(hypsometry[gy * width + xRight]) - clampSea(hypsometry[gy * width + xLeft])) * 0.5;
+  const rawDhdy = (clampSea(hypsometry[yDown * width + gx]) - clampSea(hypsometry[yUp * width + gx])) * 0.5;
+
+  const dhdx =
+    isWater && !isMoltenLiquid && activeLayer === 'satellite'
+      ? 0
+      : isFrozenSeaIce
+      ? rawDhdx * 0.18
+      : isIceCell && isIcyWorld
+      ? rawDhdx * 0.58
+      : rawDhdx;
+  const dhdy =
+    isWater && !isMoltenLiquid && activeLayer === 'satellite'
+      ? 0
+      : isFrozenSeaIce
+      ? rawDhdy * 0.18
+      : isIceCell && isIcyWorld
+      ? rawDhdy * 0.58
+      : rawDhdy;
 
   const Tlocal = temperatureGrid[idx];
   let r = 0;
@@ -2771,13 +2987,13 @@ export function evaluateSurfaceMapTexel(
 
   if (activeLayer === 'satellite' || activeLayer === 'biomes') {
     if (isWater) {
-      if (isMoltenWorld || seaPalette.solventKey === 'Silicate Magma') isSelfLuminous = true;
+      if (isMoltenLiquid) isSelfLuminous = true;
       const depthRatio =
-        isIcyWorld && seaLevelNormalized < 0.99
-          ? biomeId === 1
-            ? 0.42
-            : 0.14
-          : Math.max(0, Math.min(1, (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized)));
+        h < seaLevelNormalized
+          ? Math.max(0, Math.min(1, (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized)))
+          : biomeId === 1
+          ? 0.42
+          : 0.14;
       if (activeLayer === 'biomes') {
         const rgb = biomeId === 0 ? seaPalette.trenchRgb : biomeId === 1 ? seaPalette.deepRgb : seaPalette.shallowRgb;
         r = rgb[0];
@@ -2855,7 +3071,7 @@ export function evaluateSurfaceMapTexel(
         r = r * (1 - t) + 24 * t;
         g = g * (1 - t) + 18 * t;
         b = b * (1 - t) + 16 * t;
-      } else if ((isIcyWorld || isFrozenSeaIce || seaLevelNormalized >= 0.99) && isIceCell && crackVal > 0.08) {
+      } else if ((isIcyWorld || isFrozenSeaIce) && isIceCell && crackVal > 0.08) {
         const t = Math.min(1.0, crackVal / 0.85);
         if (t < 0.4) {
           const m = t / 0.4;
@@ -2894,7 +3110,7 @@ export function evaluateSurfaceMapTexel(
       if (applyReliefInSatellite) {
         const craterProm = surfaceModel.craterProminence || 1.0;
         const craterReliefMult = craterGrid[idx] > 0.04 ? 0.85 + 0.35 * craterProm : 1.0;
-        const bumpScale = (isWater ? 14 : biomeId === 15 ? 24 : 46) * craterReliefMult;
+        const bumpScale = (isWater && !isMoltenLiquid ? 0 : biomeId === 15 ? 24 : 46) * craterReliefMult;
         const nx = -dhdx * bumpScale;
         const ny = -dhdy * bumpScale;
         const nz = 1.0;
@@ -2906,9 +3122,9 @@ export function evaluateSurfaceMapTexel(
             : biomeId === 15
             ? 0.95 + (NdotL - Lz) * 0.55
             : isWater
-            ? isMoltenWorld || seaPalette.solventKey === 'Silicate Magma'
+            ? isMoltenLiquid
               ? 0.96 + (NdotL - Lz) * 0.45
-              : 0.88 + (NdotL - Lz) * 0.65
+              : 1.0
             : 0.94 + (NdotL - Lz) * (1.32 + Math.min(0.45, Math.max(0, craterProm - 0.8) * 0.3));
 
         r = Math.max(0, Math.min(255, Math.round(r * reliefShade)));
@@ -2937,30 +3153,44 @@ export function evaluateSurfaceMapTexel(
   } else if (activeLayer === 'topography') {
     if (isWater) {
       const depthRatio =
-        isIcyWorld && seaLevelNormalized < 0.99
-          ? biomeId === 1
-            ? 0.42
-            : 0.14
-          : (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized);
-      r = Math.round(seaPalette.trenchRgb[0] + (seaPalette.shallowRgb[0] - seaPalette.trenchRgb[0]) * (1 - depthRatio) * 0.75);
-      g = Math.round(seaPalette.trenchRgb[1] + (seaPalette.shallowRgb[1] - seaPalette.trenchRgb[1]) * (1 - depthRatio) * 0.75);
-      b = Math.round(seaPalette.trenchRgb[2] + (seaPalette.shallowRgb[2] - seaPalette.trenchRgb[2]) * (1 - depthRatio) * 0.75);
+        h < seaLevelNormalized
+          ? Math.max(0, Math.min(1, (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized)))
+          : biomeId === 1
+          ? 0.42
+          : 0.14;
+      r = Math.round(seaPalette.trenchRgb[0] + (seaPalette.shallowRgb[0] - seaPalette.trenchRgb[0]) * (1 - depthRatio) * 0.82);
+      g = Math.round(seaPalette.trenchRgb[1] + (seaPalette.shallowRgb[1] - seaPalette.trenchRgb[1]) * (1 - depthRatio) * 0.82);
+      b = Math.round(seaPalette.trenchRgb[2] + (seaPalette.shallowRgb[2] - seaPalette.trenchRgb[2]) * (1 - depthRatio) * 0.82);
     } else if (volcVal > 1.1) {
       r = 251;
       g = 191;
       b = 36;
     } else if (isIceCell) {
-      // Glacial Sea Ice / Continental Ice Cap in Topography view
-      const iceHex =
-        biomeId === 13
-          ? compositionPalette.peakHex
-          : biomeId === 18
-          ? compositionPalette.cryoPlainsHex
-          : compositionPalette.iceHex;
-      const iceRgb = hexToRgbTuple(iceHex);
-      r = iceRgb[0];
-      g = iceRgb[1];
-      b = iceRgb[2];
+      // Hypsometric elevation gradient for Glacial Ice Sheets & Cryo-Shells in Topography view
+      const altRatio = isFrozenSeaIce
+        ? 0.02
+        : Math.max(0, Math.min(1, (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized)));
+      const lowIce = [108, 162, 206];
+      const midIce = [176, 218, 244];
+      const highIce = [246, 250, 255];
+      if (altRatio < 0.45) {
+        const t = altRatio / 0.45;
+        r = Math.round(lowIce[0] + (midIce[0] - lowIce[0]) * t);
+        g = Math.round(lowIce[1] + (midIce[1] - lowIce[1]) * t);
+        b = Math.round(lowIce[2] + (midIce[2] - lowIce[2]) * t);
+      } else {
+        const t = (altRatio - 0.45) / 0.55;
+        r = Math.round(midIce[0] + (highIce[0] - midIce[0]) * t);
+        g = Math.round(midIce[1] + (highIce[1] - midIce[1]) * t);
+        b = Math.round(midIce[2] + (highIce[2] - midIce[2]) * t);
+      }
+      const crackVal = fractureGrid[idx];
+      if (crackVal > 0.1) {
+        const ct = Math.min(0.65, crackVal * 0.55);
+        r = Math.round(r * (1 - ct) + 48 * ct);
+        g = Math.round(g * (1 - ct) + 112 * ct);
+        b = Math.round(b * (1 - ct) + 162 * ct);
+      }
     } else {
       const altRatio = Math.max(0, (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized));
       const lowBase = floraPalette.hasAnyLife ? floraPalette.lowRgb : compositionPalette.lowlandRgb;
@@ -2984,11 +3214,12 @@ export function evaluateSurfaceMapTexel(
         b = Math.round(mtnBase[2] + (peakBase[2] - mtnBase[2]) * t);
       }
     }
-    const nx = -dhdx * 36;
-    const ny = -dhdy * 36;
+    const topoBump = isWater ? 14 : 34;
+    const nx = -dhdx * topoBump;
+    const ny = -dhdy * topoBump;
     const invLen = 1.0 / Math.sqrt(nx * nx + ny * ny + 1.0);
     const NdotL = (nx * Lx + ny * Ly + Lz) * invLen;
-    const topoShade = volcVal > 1.1 ? 1.0 : 0.94 + (NdotL - Lz) * 1.15;
+    const topoShade = volcVal > 1.1 ? 1.0 : 0.94 + (NdotL - Lz) * 1.12;
     r = Math.max(0, Math.min(255, Math.round(r * topoShade)));
     g = Math.max(0, Math.min(255, Math.round(g * topoShade)));
     b = Math.max(0, Math.min(255, Math.round(b * topoShade)));
@@ -3403,7 +3634,12 @@ export function renderSurfaceProjectedGlobeToCanvas(
         !surfaceModel.isNoSurface && !texel.isWater && surfaceModel.cloudOpacity < 0.35
           ? 0.85 + 0.32 * (surfaceModel.craterProminence || 1.0)
           : 1.0;
-      const bumpScale = (surfaceModel.isNoSurface ? 8 : texel.isWater ? 12 : 38) * globeCraterMult;
+      const bumpScale =
+        (surfaceModel.isNoSurface
+          ? 8
+          : texel.isWater && !(surfaceModel.isMoltenWorld || surfaceModel.seaPalette.solventKey === 'Silicate Magma')
+          ? 0
+          : 38) * globeCraterMult;
       const bNx = wx - texel.dhdx * bumpScale * 0.45;
       const bNy = wy + texel.dhdy * bumpScale * 0.45;
       const bNz = wz;
@@ -3620,16 +3856,17 @@ export function sampleSurfacePoint(
   let elevationKm = 0;
   if (!model.isNoSurface) {
     if (isOcean || isBoiledSeaBasin) {
-      const depthRatio = model.isIcyWorld
-        ? biomeId === 1
+      const depthRatio =
+        hNorm < model.seaLevelNormalized
+          ? Math.max(0.02, (model.seaLevelNormalized - hNorm) / Math.max(0.001, model.seaLevelNormalized))
+          : biomeId === 1
           ? 0.25
-          : 0.08
-        : Math.max(0.02, (model.seaLevelNormalized - hNorm) / Math.max(0.001, model.seaLevelNormalized));
+          : 0.08;
       elevationKm = +(depthRatio * model.minElevationKm).toFixed(2);
     } else if (isFrozenSea) {
-      elevationKm = 0;
+      elevationKm = 0.01;
     } else {
-      const altRatio = Math.max(0, (hNorm - model.seaLevelNormalized) / Math.max(0.001, 1 - model.seaLevelNormalized));
+      const altRatio = Math.max(0.01, (hNorm - model.seaLevelNormalized) / Math.max(0.001, 1 - model.seaLevelNormalized));
       elevationKm = +(altRatio * model.maxElevationKm).toFixed(2);
     }
   }
@@ -3653,7 +3890,8 @@ export function sampleSurfacePoint(
     biomeColor = '#4a2518';
   } else if (isOcean) {
     const pal = model.seaPalette;
-    if (model.isIcyWorld && (pal.solventKey === 'H2O' || pal.solventKey === 'H2O + CO2')) {
+    const isElevatedMeltPond = model.isIcyWorld && hNorm >= model.seaLevelNormalized;
+    if (isElevatedMeltPond && (pal.solventKey === 'H2O' || pal.solventKey === 'H2O + CO2')) {
       biomeName =
         biomeId === 1 ? 'Deep Meltwater Lake (Liquid H2O)' : 'Surface Meltwater Patch (Liquid H2O)';
       biomeColor = rgbToHex(biomeId === 1 ? pal.deepRgb : pal.shallowRgb);
