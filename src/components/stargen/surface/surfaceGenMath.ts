@@ -15,6 +15,16 @@ export interface SurfacePointTelemetry {
   featureName: string;
 }
 
+export interface SolventSeaPalette {
+  solventKey: string;
+  displayName: string;
+  trenchRgb: [number, number, number];
+  deepRgb: [number, number, number];
+  shallowRgb: [number, number, number];
+  horizonTopHex: string;
+  horizonBotHex: string;
+}
+
 export interface PlanetarySurfaceModel {
   seed: number;
   isGasGiant: boolean;
@@ -25,11 +35,12 @@ export interface PlanetarySurfaceModel {
   hypsometry: Float32Array; // Normalized [0, 1] elevation grid: 360 x 180 (1 deg resolution)
   temperatureGrid: Float32Array; // Surface temperature in Kelvin
   biomeGrid: Uint8Array; // Biome index grid
-  craterGrid: Float32Array; // Impact crater density/depressions
+  craterGrid: Float32Array; // Impact crater rim/bowl intensity
   tectonicPlateGrid: Uint8Array; // Plate IDs
   platesCount: number;
   solvent: string;
   solventColorHex: string;
+  seaPalette: SolventSeaPalette;
   skyColorHex: string;
   skyHorizonHex: string;
   starAngularDiameterDeg: number;
@@ -51,10 +62,119 @@ export interface PlanetarySurfaceModel {
   }>;
 }
 
+function rgbToHex(rgb: [number, number, number]): string {
+  const [r, g, b] = rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+export function getSolventSeaPalette(solventRaw: string | undefined | null): SolventSeaPalette {
+  const s = (solventRaw || 'H2O').trim();
+  const sLower = s.toLowerCase();
+
+  if (s === 'CH4-C2H6' || sLower.includes('methane') || sLower.includes('ethane') || sLower.includes('hydrocarbon')) {
+    return {
+      solventKey: 'CH4-C2H6',
+      displayName: 'Hydrocarbon (CH4-C2H6)',
+      trenchRgb: [32, 16, 5],
+      deepRgb: [74, 38, 11],
+      shallowRgb: [182, 108, 24],
+      horizonTopHex: '#d97706',
+      horizonBotHex: '#451a03',
+    };
+  }
+  if (s === 'NH3-H2O' || sLower.includes('ammonia') || sLower.includes('nh3')) {
+    return {
+      solventKey: 'NH3-H2O',
+      displayName: 'Cryo-Ammonia (NH3-H2O)',
+      trenchRgb: [22, 16, 68],
+      deepRgb: [48, 38, 138],
+      shallowRgb: [118, 108, 228],
+      horizonTopHex: '#818cf8',
+      horizonBotHex: '#312e81',
+    };
+  }
+  if (s === 'H2SO4' || sLower.includes('sulfuric') || sLower.includes('h2so4')) {
+    return {
+      solventKey: 'H2SO4',
+      displayName: 'Sulfuric Acid (H2SO4)',
+      trenchRgb: [34, 52, 8],
+      deepRgb: [74, 108, 16],
+      shallowRgb: [158, 212, 42],
+      horizonTopHex: '#a3e635',
+      horizonBotHex: '#3f6212',
+    };
+  }
+  if (s === 'SO2' || sLower.includes('sulfur dioxide') || sLower.includes('so2')) {
+    return {
+      solventKey: 'SO2',
+      displayName: 'Liquid SO2',
+      trenchRgb: [68, 44, 4],
+      deepRgb: [148, 102, 8],
+      shallowRgb: [238, 194, 28],
+      horizonTopHex: '#facc15',
+      horizonBotHex: '#854d0e',
+    };
+  }
+  if (s === 'CO2' || (sLower.includes('co2') && !sLower.includes('h2o'))) {
+    return {
+      solventKey: 'CO2',
+      displayName: 'Liquid CO2',
+      trenchRgb: [6, 38, 36],
+      deepRgb: [14, 88, 82],
+      shallowRgb: [42, 182, 158],
+      horizonTopHex: '#2dd4bf',
+      horizonBotHex: '#115e59',
+    };
+  }
+  if (s === 'H2O + CO2' || (sLower.includes('h2o') && sLower.includes('co2'))) {
+    return {
+      solventKey: 'H2O + CO2',
+      displayName: 'Carbonated H2O + CO2',
+      trenchRgb: [5, 28, 44],
+      deepRgb: [12, 65, 95],
+      shallowRgb: [24, 148, 168],
+      horizonTopHex: '#14b8a6',
+      horizonBotHex: '#0f766e',
+    };
+  }
+  if (sLower.includes('magma') || sLower.includes('silicate') || sLower.includes('lava')) {
+    return {
+      solventKey: 'Silicate Magma',
+      displayName: 'Silicate Magma',
+      trenchRgb: [98, 14, 4],
+      deepRgb: [195, 42, 8],
+      shallowRgb: [255, 178, 28],
+      horizonTopHex: '#fb923c',
+      horizonBotHex: '#7c2d12',
+    };
+  }
+  if (sLower.includes('supercritical')) {
+    return {
+      solventKey: 'Supercritical H2O',
+      displayName: 'Supercritical Fluid',
+      trenchRgb: [18, 34, 68],
+      deepRgb: [38, 78, 128],
+      shallowRgb: [95, 175, 220],
+      horizonTopHex: '#38bdf8',
+      horizonBotHex: '#1e3a8a',
+    };
+  }
+  // Default H2O marine ocean
+  return {
+    solventKey: 'H2O',
+    displayName: 'Liquid Water (H2O)',
+    trenchRgb: [4, 18, 48],
+    deepRgb: [10, 48, 108],
+    shallowRgb: [24, 128, 198],
+    horizonTopHex: '#0ea5e9',
+    horizonBotHex: '#0369a1',
+  };
+}
+
 export const BIOMES = [
-  { id: 0, name: 'Abyssal Trench', color: '#030814', isWater: true },
-  { id: 1, name: 'Deep Ocean', color: '#091d3e', isWater: true },
-  { id: 2, name: 'Continental Shelf / Shallows', color: '#134e70', isWater: true },
+  { id: 0, name: 'Abyssal Trench', color: '#041230', isWater: true },
+  { id: 1, name: 'Deep Ocean', color: '#0a306c', isWater: true },
+  { id: 2, name: 'Continental Shelf / Shallows', color: '#1880c6', isWater: true },
   { id: 3, name: 'Coastal Marsh / Estuary', color: '#1b4d3e', isWater: false },
   { id: 4, name: 'Lowland Plains', color: '#3d6738', isWater: false },
   { id: 5, name: 'Temperate Woodland', color: '#25522b', isWater: false },
@@ -68,10 +188,10 @@ export const BIOMES = [
   { id: 13, name: 'Alpine Glacial Peaks', color: '#edf2f7', isWater: false },
   { id: 14, name: 'Basalt Lava Plains', color: '#2a1a15', isWater: false },
   { id: 15, name: 'Active Volcanic Caldera', color: '#ff3700', isWater: false },
-  { id: 16, name: 'Regolith Impact Craterlands', color: '#4b5563', isWater: false },
-  { id: 17, name: 'Hydrocarbon Methane Sea', color: '#132832', isWater: true },
+  { id: 16, name: 'Regolith Impact Craterlands', color: '#5b6472', isWater: false },
+  { id: 17, name: 'Hydrocarbon Methane Sea', color: '#4a260b', isWater: true },
   { id: 18, name: 'Cryovolcanic Nitrogen Plains', color: '#c8d3e0', isWater: false },
-  { id: 19, name: 'Supercritical Fluid Abyssal Deck', color: '#3b2f5c', isWater: true },
+  { id: 19, name: 'Supercritical Fluid Abyssal Deck', color: '#264e80', isWater: true },
   { id: 20, name: 'Jovian Cloud Deck / Continuous Envelope', color: '#b88656', isWater: false },
 ];
 
@@ -133,6 +253,68 @@ function sphericalFbm(latDeg: number, lonDeg: number, seed: number, octaves = 5)
   const s2 = fbm2D(ny * 2.5 + 20, nz * 2.5 + 20, seed + 107, octaves);
   const s3 = fbm2D(nz * 2.5 + 30, nx * 2.5 + 30, seed + 223, octaves);
   return (s1 + s2 + s3) / 3;
+}
+
+interface SphericalCrater {
+  cx: number;
+  cy: number;
+  cz: number;
+  radiusRad: number;
+  cosMaxRadius: number;
+  depth: number;
+  hasCentralPeak: boolean;
+}
+
+/**
+ * Generates a realistic population of circular 3D impact craters on the unit sphere
+ * for airless and thin-atmosphere worlds.
+ */
+function generateSphericalCraters(seed: number, pressureBar: number | null | undefined, isGasGiant: boolean): SphericalCrater[] {
+  if (isGasGiant) return [];
+  const pBar = pressureBar ?? 0;
+  // Airless (< 0.01 bar) gets heavy cratering; thin atmosphere (< 0.6 bar) gets moderate cratering
+  if (pBar >= 0.6) return [];
+
+  const craterPrng = createPrng(seed ^ 0x9e3779b9);
+  const retentionFactor = pBar < 0.01 ? 1.0 : Math.max(0.25, 1.0 - (pBar / 0.6) * 0.72);
+  const count = Math.round(115 * retentionFactor);
+  const craters: SphericalCrater[] = [];
+
+  for (let i = 0; i < count; i++) {
+    // Uniform random point on unit sphere
+    const u = craterPrng() * 2 - 1; // cos(phi) in [-1, 1]
+    const theta = craterPrng() * Math.PI * 2;
+    const rxy = Math.sqrt(Math.max(0, 1 - u * u));
+    const cx = rxy * Math.cos(theta);
+    const cy = u;
+    const cz = rxy * Math.sin(theta);
+
+    // Power-law size distribution: many small/medium craters, few giant impact basins
+    const sizeRoll = Math.pow(craterPrng(), 2.3);
+    // In thin atmospheres, tiny meteoroids burn up so minimum crater size is slightly larger
+    const minRad = pBar < 0.01 ? 0.024 : 0.032; // ~1.4 deg to 1.8 deg
+    const maxRad = 0.22; // ~12.6 deg basin
+    const radiusRad = minRad + sizeRoll * (maxRad - minRad);
+    const maxEffectRad = radiusRad * 1.45;
+    const cosMaxRadius = Math.cos(maxEffectRad);
+
+    // Depth scales with crater size and atmospheric erosion
+    const erosionScale = pBar < 0.01 ? 1.0 : 0.78;
+    const depth = (0.075 + sizeRoll * 0.16) * erosionScale;
+    const hasCentralPeak = radiusRad > 0.078;
+
+    craters.push({
+      cx,
+      cy,
+      cz,
+      radiusRad,
+      cosMaxRadius,
+      depth,
+      hasCentralPeak,
+    });
+  }
+
+  return craters;
 }
 
 /**
@@ -250,10 +432,17 @@ export function generatePlanetarySurfaceModel(
   const craterGrid = new Float32Array(width * height);
   const tectonicPlateGrid = new Uint8Array(width * height);
 
+  // Pre-generate 3D spherical impact craters for airless and thin-atmosphere worlds
+  const craters = generateSphericalCraters(seed, activeBody.pressureBar, isGasGiant);
+
   // Generate elevation samples
   const allElevations: number[] = [];
   for (let y = 0; y < height; y++) {
     const lat = 90 - y; // 90 to -90
+    const phi = ((90 - lat) * Math.PI) / 180;
+    const sinPhi = Math.sin(phi);
+    const cosPhi = Math.cos(phi);
+
     for (let x = 0; x < width; x++) {
       const lon = x - 180; // -180 to 180
       const idx = y * width + x;
@@ -272,20 +461,56 @@ export function generatePlanetarySurfaceModel(
 
       // Add mountain ridges using ridged multifractal
       const ridgeNoise = Math.abs(sphericalFbm(lat * 1.5, lon * 1.5, seed + 499, 4) - 0.5) * 2;
-      elev = elev * 0.7 + (1.0 - ridgeNoise) * 0.3;
+      elev = elev * 0.72 + (1.0 - ridgeNoise) * 0.28;
 
-      // Add impact craters on thin-atmosphere or airless worlds
-      const pBar = activeBody.pressureBar ?? 0;
-      if (pBar < 0.1) {
-        const c1 = noise2D(lon * 0.08, lat * 0.08, seed + 877);
-        if (c1 > 0.78) {
-          const depth = (c1 - 0.78) * 3.5;
-          elev -= depth * 0.15;
-          craterGrid[idx] = depth;
+      // Apply circular 3D impact craters (bowls, raised rims, central peaks, ejecta blankets)
+      if (craters.length > 0) {
+        const theta = (lon * Math.PI) / 180;
+        const nx = sinPhi * Math.cos(theta);
+        const ny = cosPhi;
+        const nz = sinPhi * Math.sin(theta);
+
+        let craterDelta = 0;
+        let craterIntensity = 0;
+
+        for (let cIdx = 0; cIdx < craters.length; cIdx++) {
+          const c = craters[cIdx];
+          const dot = nx * c.cx + ny * c.cy + nz * c.cz;
+          if (dot > c.cosMaxRadius) {
+            const angDist = Math.acos(Math.min(1, Math.max(-1, dot)));
+            const u = angDist / c.radiusRad; // normalized radial distance from crater center
+
+            if (u < 0.85) {
+              // Depressed crater bowl
+              const bowlNorm = u / 0.85;
+              let delta = -c.depth * (1.0 - Math.pow(bowlNorm, 2.2));
+              // Central peak for complex craters
+              if (c.hasCentralPeak && u < 0.24) {
+                const peakNorm = 1.0 - u / 0.24;
+                delta += c.depth * 0.52 * peakNorm * peakNorm;
+              }
+              craterDelta += delta;
+              craterIntensity = Math.max(craterIntensity, (1.0 - bowlNorm * 0.6) * (c.depth / 0.15));
+            } else if (u < 1.45) {
+              // Raised circular crater rim & outer ejecta ramp
+              let rimFactor = 0;
+              if (u <= 1.0) {
+                rimFactor = (u - 0.85) / 0.15; // steeply rises to rim crest at u = 1.0
+              } else {
+                const ejectaNorm = 1.0 - (u - 1.0) / 0.45;
+                rimFactor = ejectaNorm * ejectaNorm;
+              }
+              craterDelta += c.depth * 0.46 * rimFactor;
+              craterIntensity = Math.max(craterIntensity, rimFactor * 0.85);
+            }
+          }
         }
+
+        elev += craterDelta;
+        craterGrid[idx] = Math.min(1.5, craterIntensity);
       }
 
-      hypsometry[idx] = Math.max(0, Math.min(1, elev));
+      hypsometry[idx] = Math.max(0.01, Math.min(0.99, elev));
       allElevations.push(hypsometry[idx]);
     }
   }
@@ -297,6 +522,9 @@ export function generatePlanetarySurfaceModel(
     const splitIndex = Math.min(allElevations.length - 1, Math.floor(allElevations.length * coverageFrac));
     seaLevelNormalized = allElevations[splitIndex];
   }
+
+  // Solvent-specific sea color palette
+  const seaPalette = getSolventSeaPalette(hydro?.solvent);
 
   // Surface base temperature (Tsurf)
   const Tbase = activeBody.surfaceTempK || activeBody.T_eq || 288;
@@ -339,16 +567,12 @@ export function generatePlanetarySurfaceModel(
         biomeGrid[idx] = 20; // Jovian Cloud Deck
       } else if (isWater) {
         const waterDepthRatio = (seaLevelNormalized - hNorm) / Math.max(0.001, seaLevelNormalized);
-        if (hydro?.solvent?.includes('Methane') || hydro?.solvent?.includes('Ethane')) {
-          biomeGrid[idx] = 17; // Hydrocarbon Methane Sea
-        } else if (hydro?.solvent?.includes('Supercritical')) {
-          biomeGrid[idx] = 19; // Supercritical Fluid Abyssal Deck
-        } else if (waterDepthRatio > 0.6) {
-          biomeGrid[idx] = 0; // Abyssal Trench
+        if (waterDepthRatio > 0.6) {
+          biomeGrid[idx] = 0; // Abyssal Trench (colored by seaPalette)
         } else if (waterDepthRatio > 0.25) {
-          biomeGrid[idx] = 1; // Deep Ocean
+          biomeGrid[idx] = 1; // Deep Ocean (colored by seaPalette)
         } else {
-          biomeGrid[idx] = 2; // Continental Shelf / Shallows
+          biomeGrid[idx] = 2; // Continental Shelf / Shallows (colored by seaPalette)
         }
       } else {
         // Dry Land Biomes
@@ -369,6 +593,8 @@ export function generatePlanetarySurfaceModel(
           // Freezing
           if (Tlocal < 235 || altRatio > 0.7) {
             biomeGrid[idx] = 8; // Polar Glacial Ice
+          } else if (craterGrid[idx] > 0.35 && pBar < 0.3) {
+            biomeGrid[idx] = 16; // Cratered highlands in thin atmosphere
           } else {
             biomeGrid[idx] = 7; // Tundra
           }
@@ -452,7 +678,8 @@ export function generatePlanetarySurfaceModel(
     tectonicPlateGrid,
     platesCount,
     solvent: hydro?.solvent || 'None',
-    solventColorHex: hydro?.solvent?.includes('Methane') ? '#193e4f' : '#1d5e94',
+    solventColorHex: seaPalette.horizonTopHex,
+    seaPalette,
     skyColorHex: skyColors.zenith,
     skyHorizonHex: skyColors.horizon,
     starAngularDiameterDeg,
@@ -506,6 +733,25 @@ export function sampleSurfacePoint(
   const biomeId = model.biomeGrid[idx];
   const biomeDef = BIOMES.find((b) => b.id === biomeId) || BIOMES[4];
 
+  let biomeName = biomeDef.name;
+  let biomeColor = biomeDef.color;
+
+  if (isOcean) {
+    const pal = model.seaPalette;
+    if (biomeId === 0) {
+      biomeName = `Abyssal Trench (${pal.solventKey} Sea)`;
+      biomeColor = rgbToHex(pal.trenchRgb);
+    } else if (biomeId === 1) {
+      biomeName = `Deep ${pal.solventKey} Ocean`;
+      biomeColor = rgbToHex(pal.deepRgb);
+    } else {
+      biomeName = `Shallow ${pal.solventKey} Shelf`;
+      biomeColor = rgbToHex(pal.shallowRgb);
+    }
+  } else if (model.craterGrid[idx] > 0.35) {
+    biomeName = `${biomeDef.name} (Impact Crater)`;
+  }
+
   // Barometric pressure at altitude: P(h) = P0 * exp(-h / H)
   const P0 = activeBody.pressureBar ?? 0;
   const scaleHeightKm = Math.max(2, (8.314 * T_K) / (0.029 * activeBody.gravityG * 9.81 * 1000));
@@ -513,7 +759,15 @@ export function sampleSurfacePoint(
 
   // Generate plausible procedural name for geographical feature
   const hemisphere = clampedLat >= 0 ? 'Northern' : 'Southern';
-  const prefix = isOcean ? 'Mare' : elevationKm > 3 ? 'Mons' : elevationKm > 1 ? 'Planum' : 'Vallis';
+  const prefix = isOcean
+    ? 'Mare'
+    : model.craterGrid[idx] > 0.35
+    ? 'Crater'
+    : elevationKm > 3
+    ? 'Mons'
+    : elevationKm > 1
+    ? 'Planum'
+    : 'Vallis';
   const featureName = `${prefix} ${hemisphere} (Lat ${Math.round(clampedLat)}°, Lon ${Math.round(normalizedLon)}°)`;
 
   return {
@@ -525,8 +779,8 @@ export function sampleSurfacePoint(
     temperatureK: T_K,
     temperatureC: T_C,
     pressureBar,
-    biome: biomeDef.name,
-    biomeColor: biomeDef.color,
+    biome: biomeName,
+    biomeColor,
     featureName,
   };
 }

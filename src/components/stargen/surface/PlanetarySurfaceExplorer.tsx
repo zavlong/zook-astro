@@ -27,7 +27,7 @@ interface PlanetarySurfaceExplorerProps {
   stars: RealisticStarNode[];
 }
 
-type MapLayer = 'topography' | 'biomes' | 'temperature' | 'moisture' | 'plates';
+type MapLayer = 'satellite' | 'biomes' | 'topography' | 'temperature' | 'moisture' | 'plates';
 type DisplayMode = 'map' | 'horizon';
 
 export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> = ({
@@ -37,7 +37,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
   stars,
 }) => {
   const [displayMode, setDisplayMode] = useState<DisplayMode>('map');
-  const [activeLayer, setActiveLayer] = useState<MapLayer>('biomes');
+  const [activeLayer, setActiveLayer] = useState<MapLayer>('satellite');
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lon: number }>({ lat: 0, lon: 0 });
   const [hoverCoords, setHoverCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [timeOfDayDeg, setTimeOfDayDeg] = useState<number>(45); // 0 = Sunrise, 90 = Noon, 180 = Sunset, 270 = Midnight
@@ -74,26 +74,109 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const imgData = ctx.createImageData(width, height);
     const data = imgData.data;
 
-    const { hypsometry, temperatureGrid, biomeGrid, seaLevelNormalized, isGasGiant, hasLiquid } = surfaceModel;
+    const {
+      hypsometry,
+      temperatureGrid,
+      biomeGrid,
+      craterGrid,
+      seaLevelNormalized,
+      isGasGiant,
+      hasLiquid,
+      seaPalette,
+    } = surfaceModel;
+
+    // Directional sun light vector for normal-map relief (from upper-left / NW)
+    const Lx = -0.62;
+    const Ly = -0.48;
+    const Lz = 0.62;
 
     for (let y = 0; y < height; y++) {
       const lat = 90 - y;
+      const yUp = Math.max(0, y - 1);
+      const yDown = Math.min(height - 1, y + 1);
+
       for (let x = 0; x < width; x++) {
         const idx = y * width + x;
         const pIdx = idx * 4;
+        const h = hypsometry[idx];
+        const isWater = !isGasGiant && hasLiquid && h <= seaLevelNormalized;
+
+        // Compute horizontal & vertical elevation gradients for normal map
+        const xLeft = (x + width - 1) % width;
+        const xRight = (x + 1) % width;
+        const dhdx = (hypsometry[y * width + xRight] - hypsometry[y * width + xLeft]) * 0.5;
+        const dhdy = (hypsometry[yDown * width + x] - hypsometry[yUp * width + x]) * 0.5;
 
         let r = 0;
         let g = 0;
         let b = 0;
 
-        if (activeLayer === 'topography') {
-          const h = hypsometry[idx];
-          if (!isGasGiant && hasLiquid && h <= seaLevelNormalized) {
-            // Underwater depth
+        if (activeLayer === 'satellite' || activeLayer === 'biomes') {
+          if (isWater) {
+            // Smooth solvent-specific sea color gradient by depth
+            const depthRatio = Math.max(0, Math.min(1, (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized)));
+            if (activeLayer === 'biomes') {
+              const biomeId = biomeGrid[idx];
+              const rgb = biomeId === 0 ? seaPalette.trenchRgb : biomeId === 1 ? seaPalette.deepRgb : seaPalette.shallowRgb;
+              r = rgb[0];
+              g = rgb[1];
+              b = rgb[2];
+            } else {
+              // Continuous bathymetric color blend for Satellite view
+              if (depthRatio < 0.35) {
+                const t = depthRatio / 0.35;
+                r = seaPalette.shallowRgb[0] + (seaPalette.deepRgb[0] - seaPalette.shallowRgb[0]) * t;
+                g = seaPalette.shallowRgb[1] + (seaPalette.deepRgb[1] - seaPalette.shallowRgb[1]) * t;
+                b = seaPalette.shallowRgb[2] + (seaPalette.deepRgb[2] - seaPalette.shallowRgb[2]) * t;
+              } else {
+                const t = (depthRatio - 0.35) / 0.65;
+                r = seaPalette.deepRgb[0] + (seaPalette.trenchRgb[0] - seaPalette.deepRgb[0]) * t;
+                g = seaPalette.deepRgb[1] + (seaPalette.trenchRgb[1] - seaPalette.deepRgb[1]) * t;
+                b = seaPalette.deepRgb[2] + (seaPalette.trenchRgb[2] - seaPalette.deepRgb[2]) * t;
+              }
+            }
+          } else {
+            const biomeId = biomeGrid[idx];
+            const def = BIOMES.find((bm) => bm.id === biomeId) || BIOMES[4];
+            const hex = def.color;
+            r = parseInt(hex.slice(1, 3), 16);
+            g = parseInt(hex.slice(3, 5), 16);
+            b = parseInt(hex.slice(5, 7), 16);
+
+            if (activeLayer === 'satellite' && !isGasGiant) {
+              // Subtle hypsometric tinting + crater ejecta brightening on land
+              const altRatio = Math.max(0, (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized));
+              const craterBoost = craterGrid[idx] * 14;
+              r = Math.min(255, r * (0.92 + altRatio * 0.22) + craterBoost);
+              g = Math.min(255, g * (0.92 + altRatio * 0.22) + craterBoost);
+              b = Math.min(255, b * (0.92 + altRatio * 0.22) + craterBoost * 1.05);
+            }
+          }
+
+          // Apply 3D Normal-Map Relief Overlay in 'satellite' mode
+          if (activeLayer === 'satellite') {
+            const bumpScale = isGasGiant ? 10 : isWater ? 14 : 46;
+            const nx = -dhdx * bumpScale;
+            const ny = -dhdy * bumpScale;
+            const nz = 1.0;
+            const invLen = 1.0 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+            const NdotL = (nx * Lx + ny * Ly + nz * Lz) * invLen;
+            // Normal-map illumination relative to flat surface (Lz = 0.62)
+            const reliefShade = isWater
+              ? 0.88 + (NdotL - Lz) * 0.65
+              : 0.94 + (NdotL - Lz) * 1.35;
+
+            r = Math.max(0, Math.min(255, Math.round(r * reliefShade)));
+            g = Math.max(0, Math.min(255, Math.round(g * reliefShade)));
+            b = Math.max(0, Math.min(255, Math.round(b * reliefShade)));
+          }
+        } else if (activeLayer === 'topography') {
+          if (isWater) {
+            // Underwater depth tinted by solvent palette
             const depthRatio = (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized);
-            r = Math.round(5 + 10 * (1 - depthRatio));
-            g = Math.round(25 + 40 * (1 - depthRatio));
-            b = Math.round(70 + 90 * (1 - depthRatio));
+            r = Math.round(seaPalette.trenchRgb[0] + (seaPalette.shallowRgb[0] - seaPalette.trenchRgb[0]) * (1 - depthRatio) * 0.75);
+            g = Math.round(seaPalette.trenchRgb[1] + (seaPalette.shallowRgb[1] - seaPalette.trenchRgb[1]) * (1 - depthRatio) * 0.75);
+            b = Math.round(seaPalette.trenchRgb[2] + (seaPalette.shallowRgb[2] - seaPalette.trenchRgb[2]) * (1 - depthRatio) * 0.75);
           } else {
             // Land elevation
             const altRatio = (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized);
@@ -107,6 +190,15 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               r = 230; g = 240; b = 250; // Snow/Ice caps
             }
           }
+          // Add hillshading to topography layer as well so craters and ridges are sharp
+          const nx = -dhdx * 36;
+          const ny = -dhdy * 36;
+          const invLen = 1.0 / Math.sqrt(nx * nx + ny * ny + 1.0);
+          const NdotL = (nx * Lx + ny * Ly + Lz) * invLen;
+          const topoShade = 0.94 + (NdotL - Lz) * 1.15;
+          r = Math.max(0, Math.min(255, Math.round(r * topoShade)));
+          g = Math.max(0, Math.min(255, Math.round(g * topoShade)));
+          b = Math.max(0, Math.min(255, Math.round(b * topoShade)));
         } else if (activeLayer === 'temperature') {
           const T = temperatureGrid[idx];
           // Gradient from frozen (blue/purple) to temperate (green/yellow) to scorching (red/white)
@@ -131,10 +223,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         } else if (activeLayer === 'moisture') {
           const absLat = Math.abs(lat);
           const isHadleyDry = absLat >= 18 && absLat <= 32;
-          const h = hypsometry[idx];
-          const isWater = !isGasGiant && hasLiquid && h <= seaLevelNormalized;
           if (isWater) {
-            r = 20; g = 80; b = 160;
+            r = seaPalette.shallowRgb[0];
+            g = seaPalette.shallowRgb[1];
+            b = seaPalette.shallowRgb[2];
           } else if (isHadleyDry) {
             r = 180; g = 140; b = 60; // Arid desert
           } else {
@@ -151,14 +243,6 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
           ];
           const col = colors[Math.abs(pId) % colors.length];
           r = col[0]; g = col[1]; b = col[2];
-        } else {
-          // Default 'biomes' layer
-          const biomeId = biomeGrid[idx];
-          const def = BIOMES.find((b) => b.id === biomeId) || BIOMES[4];
-          const hex = def.color;
-          r = parseInt(hex.slice(1, 3), 16);
-          g = parseInt(hex.slice(3, 5), 16);
-          b = parseInt(hex.slice(5, 7), 16);
         }
 
         data[pIdx] = r;
@@ -374,9 +458,9 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     // 8. Foreground Ground / Ocean Surface
     const groundGrad = ctx.createLinearGradient(0, horizonY, 0, h);
     if (currentTelemetry.isOcean) {
-      // Liquid Ocean / Sea with Water Specular Reflections
-      groundGrad.addColorStop(0, isNight ? '#040b17' : surfaceModel.solventColorHex);
-      groundGrad.addColorStop(1, isNight ? '#02050d' : '#081a2e');
+      // Liquid Ocean / Sea with Solvent-Specific Palette & Specular Reflections
+      groundGrad.addColorStop(0, isNight ? '#040b17' : surfaceModel.seaPalette.horizonTopHex);
+      groundGrad.addColorStop(1, isNight ? '#02050d' : surfaceModel.seaPalette.horizonBotHex);
       ctx.fillStyle = groundGrad;
       ctx.fillRect(0, horizonY, w, h - horizonY);
 
@@ -503,7 +587,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               <Layers className="w-3 h-3" />
               LAYER:
             </span>
-            {(['biomes', 'topography', 'temperature', 'moisture', 'plates'] as MapLayer[]).map((layer) => (
+            {(['satellite', 'biomes', 'topography', 'temperature', 'moisture', 'plates'] as MapLayer[]).map((layer) => (
               <button
                 key={layer}
                 type="button"
