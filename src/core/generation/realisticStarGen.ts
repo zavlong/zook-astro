@@ -2893,7 +2893,7 @@ export function generateZoneSystem(
         incDeg: +inc.toFixed(1),
         periodDays: +pD.toFixed(2),
         massEarth: +mE.toPrecision(4),
-        massLunar: +(mE / 0.0123).toFixed(3),
+        massLunar: (mE / 0.0123000371) >= 1 ? +((mE / 0.0123000371).toFixed(3)) : +((mE / 0.0123000371).toPrecision(3)),
         radiusEarth: +rmE.toFixed(4),
         radiusKm: rKm,
         densityGcm3: mDens,

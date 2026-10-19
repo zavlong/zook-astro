@@ -126,7 +126,13 @@ export const PlanetDossier: React.FC<PlanetDossierProps> = ({
             <div>
               <span className="text-slate-400">Mass:</span>{' '}
               <span className="text-slate-200">
-                {activeMoon.massLunar} M☾ ({activeMoon.massEarth} M⊕)
+                {(() => {
+                  const mLunar =
+                    activeMoon.massLunar > 0
+                      ? activeMoon.massLunar
+                      : +((activeMoon.massEarth / 0.0123000371).toPrecision(3));
+                  return mLunar < 1 ? `${mLunar} M☾` : `${mLunar} M☾ (${activeMoon.massEarth} M⊕)`;
+                })()}
               </span>
             </div>
             <div>
@@ -425,7 +431,7 @@ export const PlanetDossier: React.FC<PlanetDossierProps> = ({
                       {m.retrograde ? ' (Retro)' : ''}
                     </span>
                     <span className="text-slate-400">
-                      {formatSemiMajorAxisKm(m.a_km)} · {m.radiusKm} km ({m.massLunar} M☾)
+                      {formatSemiMajorAxisKm(m.a_km)} · {m.radiusKm} km ({m.massLunar > 0 ? m.massLunar : +((m.massEarth / 0.0123000371).toPrecision(3))} M☾)
                     </span>
                   </button>
                 );

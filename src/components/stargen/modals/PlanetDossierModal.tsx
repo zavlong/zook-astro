@@ -181,8 +181,16 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
       }`
     : `a = ${hostPlanet.a} AU · e = ${hostPlanet.e} · inc = ${hostPlanet.incDeg ?? 0}°`;
 
+  const moonMassLunar = activeMoon
+    ? activeMoon.massLunar > 0
+      ? activeMoon.massLunar
+      : +(activeMoon.massEarth / 0.0123000371).toPrecision(3)
+    : 0;
+
   const massDisplay = isMoon && activeMoon
-    ? `${activeMoon.massLunar} M☾ (${activeMoon.massEarth} M⊕)`
+    ? moonMassLunar < 1
+      ? `${moonMassLunar} M☾`
+      : `${moonMassLunar} M☾ (${activeMoon.massEarth} M⊕)`
     : hostPlanet.massEarth >= 30
     ? `${hostPlanet.massJup} MJ (${hostPlanet.massEarth} M⊕)`
     : `${hostPlanet.massEarth} M⊕`;
@@ -196,7 +204,9 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
     ? `${activeMoon.densityGcm3} g/cm³`
     : `${hostPlanet.densityGcm3} g/cm³`;
   const periodDisplay = isMoon && activeMoon
-    ? `${activeMoon.periodDays} d (around Planet #${selectedEntity.bodyIdx + 1})`
+    ? activeMoon.periodDays >= 365
+      ? `${activeMoon.periodDays} d (${(activeMoon.periodDays / 365.25).toFixed(2)} yr)`
+      : `${activeMoon.periodDays} d`
     : `${hostPlanet.orbitalPeriodDays} d (${(hostPlanet.orbitalPeriodDays / 365.25).toFixed(2)} yr)`;
 
   const isLocked = isMoon && activeMoon
@@ -492,12 +502,12 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="bg-[#151d2c] p-3.5 rounded-xl border border-slate-800 flex flex-col gap-2.5 font-mono text-xs">
             <span className="text-xs font-bold text-sky-300 uppercase tracking-wider">
-              Atmosphere & Volatiles
+              Atmosphere
             </span>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               <div>
                 <span className="text-slate-400 block text-[10px]">CLASSIFICATION</span>
-                <b className="text-white">{cleanAtmoClassification}</b>
+                <b className="text-white">{cleanAtmoClassification.replace(/airless vacuum/gi, 'Vacuum')}</b>
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px]">SURFACE PRESSURE</span>
@@ -528,7 +538,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                 COMPOSITION (BY VOLUME FRACTION)
               </span>
               {Object.keys(gases).length === 0 ? (
-                <span className="text-slate-500 italic">No significant atmosphere retained</span>
+                <span className="text-slate-500 italic">Vacuum</span>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
                   {Object.entries(gases).map(([gas, frac]) => (
@@ -573,7 +583,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
               </div>
             ) : (
               <div className="text-slate-500 italic flex items-center h-full">
-                No surface liquid or oceans (dry body)
+                No surface liquid
               </div>
             )}
           </div>
@@ -964,7 +974,9 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                   </div>
                   <div className="text-right flex-shrink-0 ml-2">
                     <span className="text-sky-300 font-bold block">{m.radiusKm} km</span>
-                    <span className="text-[10px] text-slate-400">{m.massLunar} M☾</span>
+                    <span className="text-[10px] text-slate-400">
+                      {m.massLunar > 0 ? m.massLunar : +((m.massEarth / 0.0123000371).toPrecision(3))} M☾
+                    </span>
                   </div>
                 </button>
               ))}

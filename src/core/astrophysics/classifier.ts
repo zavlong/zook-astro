@@ -205,7 +205,7 @@ export function deriveAtmosphereClassification(
     (pressureBar === null || pressureBar === undefined || pressureBar <= 0) &&
     (!gases || Object.keys(gases).length === 0)
   ) {
-    return 'Airless Vacuum';
+    return 'Vacuum';
   }
   if (pressureBar === null || pressureBar === undefined || pressureBar <= 0) {
     return 'Continuous Fluid Envelope';
