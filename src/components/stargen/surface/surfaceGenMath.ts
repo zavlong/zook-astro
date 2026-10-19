@@ -2190,7 +2190,7 @@ export function generatePlanetarySurfaceModel(
         } else {
           biomeGrid[idx] = 8; // Polar / Sea Glacial Ice
         }
-      } else if (isAboveBoiling) {
+      } else if (isAboveBoiling && !(coverageFrac >= 0.95 && isBelowSeaLevel)) {
         // Local temperature rose above the liquid's local boiling point -> replace biome here with Desert!
         biomeGrid[idx] = 10; // Hyper-Arid Dunes / Desert
       } else if (isBelowSeaLevel) {

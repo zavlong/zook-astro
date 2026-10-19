@@ -1711,14 +1711,28 @@ export function generateZoneSystem(
           : 'Barren Rocky World';
     } else {
       const mSc2 = Math.pow(10, 0.5 * z.feh);
+      // If a warm planet (Teq >= 200 K) has muMin > 28 (where H2O and N2 escape), it either:
+      // 1) Sustains a thick outgassed atmosphere if it is a massive water-rich world (massEarth >= 0.45, iceFrac >= 0.08, muMin <= 36), OR
+      // 2) Loses its volatile ice reservoir to XUV desiccation over geological time, becoming a dry rocky world!
+      let effMuMin = muMin;
+      if (muMin > 28 && b.iceFrac >= 0.015 && Teq >= 200) {
+        if (b.massEarth >= 0.45 && b.iceFrac >= 0.08 && muMin <= 36 && random() < 0.65) {
+          effMuMin = Math.min(muMin, 24.0);
+        } else {
+          b.iceFrac = 0;
+          b.rockFrac = +(1 - b.gasFrac).toFixed(4);
+          rE = Math.max(0.08, Math.pow(b.coreMassEarth, 0.279) * 0.98);
+        }
+      }
+
       const hasCont = b.iceFrac < 0.015;
-      const rH2 = muMin <= 4.5 ? Math.pow(b.massEarth, 1.1) * rand(1.2, 12.0) * (4.8 - muMin) : 0;
+      const rH2 = effMuMin <= 4.5 ? Math.pow(b.massEarth, 1.1) * rand(1.2, 12.0) * (4.8 - effMuMin) : 0;
       const rN2 =
-        muMin <= 28 ? Math.pow(b.massEarth, 0.75) * grav * mSc2 * rand(0.7, 2.2) : 0;
+        effMuMin <= 28 ? Math.pow(b.massEarth, 0.75) * grav * mSc2 * rand(0.85, 2.6) : 0;
       const rCO2 =
-        muMin <= 28
+        effMuMin <= 28
           ? Math.pow(b.massEarth, 0.85) * grav * mSc2 * rand(28, 95)
-          : muMin <= 44
+          : effMuMin <= 44
           ? Math.pow(b.massEarth, 1.1) * grav * mSc2 * rand(0.08, 6.5)
           : 0;
       const cCap =
@@ -1742,7 +1756,12 @@ export function generateZoneSystem(
       let isSupercriticalWater = false;
       let biosphereDesc: string | null = null;
 
-      if (Teq > 325 || (Tpot >= 340 && (!hasCont || rH2 >= 1.5))) {
+      // Ocean worlds (!hasCont) without exposed silicate continents undergo a Runaway / Greenhouse Water state
+      // when Teq > 282 K, or when rH2 >= 1.5, or when seafloor weathering/clathrates fail to buffer CO2 (Teq >= 242 K, 42% chance)
+      const isUnbufferedOceanGreenhouse =
+        !hasCont && (Teq > 282 || rH2 >= 1.5 || (Teq >= 242 && random() < 0.42));
+
+      if (Teq > 325 || (Tpot >= 340 && (rH2 >= 1.5 || isUnbufferedOceanGreenhouse))) {
         pC = avCO2;
         const Tdry = Teq + ghDelta(pC, pN, pH, 0, 0.02, 0, 0, Teq, grav);
         if (hasCont && Teq > 325) {
@@ -1789,14 +1808,19 @@ export function generateZoneSystem(
             pClass = 'Greenhouse Water World';
           }
         }
-      } else if (muMin > 28 && muMin <= 64) {
-        // Heavy-gas retention regime (28 < muMin <= 64): H2O (18) & N2 (28) escape, leaving CO2 (44) and volcanic SO2 (64)
-        pC = muMin <= 44 ? avCO2 : 0;
+      } else if (effMuMin > 28 && effMuMin <= 64) {
+        // Heavy-gas retention regime (28 < effMuMin <= 64): H2O (18) & N2 (28) escape, leaving CO2 (44) and volcanic SO2 (64)
+        pC = effMuMin <= 44 ? avCO2 : 0;
         pS =
           Teq >= 150 && b.iceFrac < 0.08
             ? +(Math.pow(b.massEarth, 0.9) * grav * mSc2 * rand(0.18, 3.8)).toFixed(3)
             : +(rand(0.002, 0.04) * b.massEarth).toFixed(4);
         const Ttest = Teq + ghDelta(pC, 0, 0, 0, 0, 0, pS, Teq, grav);
+        // If Ttest >= 245 K under heavy-gas escape, any remaining surface ice sublimated and escaped to space
+        if (Ttest >= 245 && b.iceFrac > 0) {
+          b.iceFrac = 0;
+          b.rockFrac = +(1 - b.gasFrac).toFixed(4);
+        }
         const pTotHeavy = pC + pS;
         const tBoilSO2 = Math.min(428, 263.15 / Math.max(0.5, 1 - Math.log(Math.max(0.05, pTotHeavy)) / 10.5));
         const pSatSO2 =
@@ -1813,7 +1837,7 @@ export function generateZoneSystem(
           atmoType = pC + pS >= 0.05 ? 'Thin Volcanic CO2-SO2 Sky' : 'Tenuous Heavy-Gas Exosphere';
           pClass = b.iceFrac >= 0.15 ? 'Frozen World' : 'Martian World';
         }
-      } else if (Tpot >= 274 && muMin <= 28) {
+      } else if (Tpot >= 274 && effMuMin <= 28) {
         if (hasCont) {
           // Check whether a high-pressure Liquid CO2 world (5.2 <= P_CO2 <= 55 bar, 218 <= Tsurf <= 302.5 K) is physically possible at this Teq
           const tAtMinCO2 = Teq + ghDelta(5.2, pN, pH, 0, 0.001, 0, 0, Teq, grav);
@@ -1874,7 +1898,9 @@ export function generateZoneSystem(
                 : 'High-Pressure Liquid CO2 Ocean World';
           } else {
             // Carbonate-silicate thermostat buffers P_CO2 so Tsurf lands in the temperate liquid-water window
-            pW = rand(0.01, 0.028);
+            // Ensure sufficient N2 buffer pressure so surface oceans never boil at the equator
+            pN = Math.max(pN, clamp(Math.pow(b.massEarth, 0.65) * rand(0.75, 1.8), 0.65, 6.0));
+            pW = rand(0.012, 0.032);
             const targetT = rand(280, 306);
             pC = solveCO2ForTargetTemp(
               targetT,
@@ -1918,11 +1944,27 @@ export function generateZoneSystem(
                 : 'Temperate Terrestrial';
           }
         } else {
-          pW = rand(0.012, 0.032);
-          pC = clamp(avCO2 * rand(0.08, 0.3), 1.5, 28);
-          const bioPelagic = z.age >= 1.5 && pC < 12 && random() < 0.55;
+          // Temperate Pelagic / Aquatic Ocean World: seafloor basalt weathering & clathrate trapping
+          // maintain a thick N2-dominated atmosphere with moderate/low greenhouse CO2 and equilibrium H2O vapor!
+          pN = Math.max(pN, clamp(Math.pow(b.massEarth, 0.7) * rand(1.4, 4.8), 1.2, 8.5));
+          pW = rand(0.016, 0.045);
+          const targetT = rand(280, 312);
+          pC = solveCO2ForTargetTemp(
+            targetT,
+            Teq,
+            pN,
+            pH,
+            0.001,
+            pW,
+            0,
+            0,
+            grav,
+            0.0005,
+            Math.min(8.5, avCO2)
+          );
+          const bioPelagic = z.age >= 1.5 && pC < 6.0 && random() < 0.58;
           if (bioPelagic) {
-            pO = pN * rand(0.08, 0.22);
+            pO = pN * rand(0.1, 0.24);
             const isShielded = magField.shieldingEfficiencyPct >= 50;
             biosphereDesc =
               z.age >= 3.0
@@ -1934,15 +1976,15 @@ export function generateZoneSystem(
                 : 'Active Unicellular Deep-Water Microbial Biosphere (Cosmic Ray Attenuation)';
           }
           atmoType = bioPelagic
-            ? 'Biogenic N2-CO2-O2 Pelagic Sky (Marine Biosphere)'
-            : 'Clathrate-Buffered CO2-N2 Pelagic Sky (Seltzer Ocean)';
+            ? 'Biogenic N2-O2-H2O Pelagic Sky (Marine Biosphere)'
+            : 'Thick N2-CO2-H2O Pelagic Ocean Sky';
           pClass = 'Temperate Pelagic Water World';
         }
       } else if (Teq >= 135 || b.iceFrac < 0.15) {
         // Sub-zero / Outer-HZ / Cool Zone: Check for Liquid NH3-H2O, Liquid CO2, or Liquid SO2 seas & oceans
         pC = avCO2;
         const canFormAmmoniaWorld =
-          muMin <= 28 &&
+          effMuMin <= 28 &&
           Teq >= 115 &&
           (b.iceFrac >= 0.015 || (b.iceFrac >= 0.001 && random() < 0.42));
 
@@ -1980,12 +2022,13 @@ export function generateZoneSystem(
                 ? 'Cryo-Ammonia Marine World'
                 : 'Cryo-Ammonia Ocean World';
             }
+          } else {
             pNH3 = 0;
             pM = 0;
             atmoType = 'Cold Glaciated CO2-N2 Sky';
             pClass = b.iceFrac >= 0.15 ? 'Frozen World' : 'Martian World';
           }
-        } else if (b.iceFrac < 0.025 && muMin <= 44) {
+        } else if (b.iceFrac < 0.025 && effMuMin <= 44) {
           // Cool rocky world: check for High-Pressure Liquid CO2 Seas/Ocean (216.6-304.1 K, P_CO2 >= 5.18 bar) or Liquid SO2 Seas
           const tAtMinCO2 = Teq + ghDelta(5.2, pN, pH, 0, 0, 0, 0, Teq, grav);
           const tAtMaxCO2 = Teq + ghDelta(Math.max(5.2, avCO2), pN, pH, 0, 0, 0, 0, Teq, grav);
@@ -2023,12 +2066,12 @@ export function generateZoneSystem(
           pClass = b.iceFrac >= 0.15 ? 'Frozen World' : 'Martian World';
         }
       } else {
-        if (muMin > 28 || Teq < 62) {
+        if (effMuMin > 28 || Teq < 62) {
           atmoType = 'Frozen Cryogenic Vacuum';
           pClass = 'Frozen World';
         } else {
           pN = clamp(Math.pow(b.massEarth / 0.022, 0.65) * rand(0.8, 2.5), 0.08, 12);
-          pM = muMin <= 16.5 ? pN * rand(0.03, 0.12) : 0;
+          pM = effMuMin <= 16.5 ? pN * rand(0.03, 0.12) : 0;
           // If internal/greenhouse H2+CH4+NH3 warms a massive outer icy world to >= 176 K, it transitions to a Cryo-Ammonia world
           if (Teq >= 115 && (rH2 >= 0.8 || pN >= 3.5)) {
             pNH3 = +(pN * rand(0.015, 0.06)).toFixed(4);
@@ -2058,34 +2101,44 @@ export function generateZoneSystem(
                 ? 'Cryo-Ammonia Marine World'
                 : 'Cryo-Ammonia Ocean World';
             }
-          } else {
+          } else if (Touter >= 88 && Touter <= 145 && pM > 0) {
             pNH3 = 0;
             atmoType = 'Dense Cryogenic N2-CH4 Smog';
             pClass = 'Methane World';
+          } else {
+            pNH3 = 0;
+            atmoType = 'Cold Cryogenic N2-CH4 Sky';
+            pClass = 'Frozen World';
           }
         }
       }
 
-      const rawG: Record<string, number> = {
-        CO2: pC,
-        N2: pN,
-        H2: pH,
-        O2: pO,
-        H2O: pW,
-        CH4: pM,
-        NH3: pNH3,
-        SO2: pS,
-        H2SO4: pH2SO4,
-      };
-      const gSum = +(pC + pN + pH + pO + pM + pW + pNH3 + pS + pH2SO4).toFixed(3);
-      if (gSum > 0) {
-        const gks = Object.keys(rawG);
-        for (let gk = 0; gk < gks.length; gk++) {
-          if (rawG[gks[gk]] / gSum >= 0.0005) {
-            gases[gks[gk]] = +(rawG[gks[gk]] / gSum).toFixed(4);
+      const rebuildGases = () => {
+        for (const k of Object.keys(gases)) delete gases[k];
+        const rawG: Record<string, number> = {
+          CO2: pC,
+          N2: pN,
+          H2: pH,
+          O2: pO,
+          H2O: pW,
+          CH4: pM,
+          NH3: pNH3,
+          SO2: pS,
+          H2SO4: pH2SO4,
+        };
+        const gSum = +(pC + pN + pH + pO + pM + pW + pNH3 + pS + pH2SO4).toFixed(3);
+        if (gSum > 0) {
+          const gks = Object.keys(rawG);
+          for (let gk = 0; gk < gks.length; gk++) {
+            if (rawG[gks[gk]] / gSum >= 0.0005) {
+              gases[gks[gk]] = +(rawG[gks[gk]] / gSum).toFixed(4);
+            }
           }
         }
-      }
+        return gSum;
+      };
+
+      let gSum = rebuildGases();
 
       if (isSupercriticalWater) {
         // Supercritical water worlds have NO liquid-vapor phase boundary (no surface), just like gas giants
@@ -2114,6 +2167,8 @@ export function generateZoneSystem(
 
         // Any rocky/Chthonian planet with Tsurf >= 800 K melts its surface rock into liquid lava/magma and becomes a Molten Planet!
         if (Tsurf >= 800 && b.iceFrac < 0.05) {
+          b.iceFrac = 0;
+          b.rockFrac = +(1 - b.gasFrac).toFixed(4);
           const isGlobalMagma = Tsurf >= 1400 || random() < 0.32;
           const covPct = isGlobalMagma
             ? 100
@@ -2123,9 +2178,7 @@ export function generateZoneSystem(
               ? 'Super-Heated CO2-SO2 Greenhouse over Molten Lava'
               : 'Volcanic SO2-Alkali Vapor Sky over Molten Lava';
           pClass = isChth
-            ? isGlobalMagma
-              ? 'Molten Chthonian Planet'
-              : 'Molten Chthonian Planet'
+            ? 'Molten Chthonian Planet'
             : isGlobalMagma
             ? 'Molten Magma Ocean Planet'
             : 'Molten Planet';
@@ -2243,15 +2296,37 @@ export function generateZoneSystem(
               siKm: siK2,
             };
           }
-        } else if (b.iceFrac >= 0.015 && Tsurf >= 265) {
+        } else if (b.iceFrac >= 0.015 && Tsurf >= 265 && effMuMin <= 28) {
+          // Ensure atmosphere is in thermodynamic equilibrium with the liquid water ocean!
+          if (pW < 0.01 || pBar < 1.0) {
+            pN = Math.max(pN, clamp(Math.pow(b.massEarth, 0.7) * rand(1.2, 3.8), 1.0, 6.5));
+            const pSatW = 1.013 * Math.exp(13.7 * (1 - 373.15 / Math.min(640, Tsurf)));
+            pW = +clamp(pSatW * rand(0.5, 0.85), 0.015, 220.6).toFixed(4);
+            ghK = +ghDelta(pC, pN, pH, pM, pW, pNH3, pS, Teq, grav).toFixed(1);
+            Tsurf = +(Tatm + ghK).toFixed(1);
+            // If saturation vapor pressure at the new Tsurf exceeds 45% of total pressure, iterate steam feedback
+            const pSatW2 = Tsurf >= 647.1 ? 220.6 : 1.013 * Math.exp(13.7 * (1 - 373.15 / Tsurf));
+            if (pSatW2 > (pC + pN + pH + pO) * 0.45) {
+              pW = +clamp(pSatW2, 0.05, 220.6).toFixed(3);
+              ghK = +ghDelta(pC, pN, pH, pM, pW, pNH3, pS, Teq, grav).toFixed(1);
+              Tsurf = +(Tatm + ghK).toFixed(1);
+            }
+            gSum = rebuildGases();
+            pBar = gSum;
+          }
+
           const totW = Math.round(rE * 6371 * (1 - Math.pow(1 - b.iceFrac, 0.42)));
-          if (Tsurf >= 647.1) {
-            // Reached supercritical regime via greenhouse
+          if (Tsurf >= 647.1 || pW >= 220.6) {
+            // Reached supercritical regime via steam runaway greenhouse
             pBar = null;
             ghK = 0;
             Tsurf = Tatm;
             atmoType = 'Continuous Supercritical Steam-Fluid Envelope (No Surface)';
             pClass = 'Supercritical Water World';
+            for (const k of Object.keys(gases)) delete gases[k];
+            gases.H2O = 0.88;
+            gases.CO2 = 0.09;
+            gases.N2 = 0.03;
             const scK = Math.min(Math.round(totW * 0.3), Math.round(420 / grav));
             const siK = Math.round((totW - scK) * 0.7);
             hydro = {
@@ -2285,7 +2360,7 @@ export function generateZoneSystem(
         } else if (
           pClass.includes('Temperate Terrestrial') ||
           pClass.includes('Temperate Super-Earth') ||
-          (b.iceFrac < 0.015 && pBar > 0.05 && Tsurf >= 268 && Tsurf < 647.1 && pW > 0)
+          (b.iceFrac < 0.015 && pBar > 0.35 && Tsurf >= 268 && Tsurf < 647.1 && pW > 0)
         ) {
           // Earth-like / Super-Earth marine oceans with emergent continental crust
           const covPct = randInt(24, 86);
