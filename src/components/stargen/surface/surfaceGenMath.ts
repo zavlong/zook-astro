@@ -93,6 +93,7 @@ export interface PlanetarySurfaceModel {
   biomeGrid: Uint8Array; // Contiguous biome index grid
   blendedLandRgb: Uint8Array; // Smoothly blended RGB (360 * 180 * 3) across biome transitions
   craterGrid: Float32Array; // Impact crater rim/bowl intensity
+  craterProminence: number; // Inverse size/gravity scaling factor for crater visibility (higher on smaller airless worlds)
   fractureGrid: Float32Array; // Cryotectonic ice crack or tectonic lava fissure intensity
   volcanoGrid: Float32Array; // Discrete volcanic cone slope (0..1) and active lava caldera (>1.0)
   volcanoCount: number;
@@ -873,9 +874,16 @@ interface SphericalCrater {
 
 /**
  * Generates a realistic population of circular 3D impact craters on the unit sphere
- * for airless and thin-atmosphere worlds.
+ * for airless and thin-atmosphere worlds. Smaller/lower-gravity worlds have higher
+ * craterProminence (more numerous, deeper, and larger angular-scale craters relative to body radius),
+ * while larger/higher-gravity worlds have smaller angular craters flattened by gravity and resurfacing.
  */
-function generateSphericalCraters(seed: number, pressureBar: number | null | undefined, isNoSurface: boolean): SphericalCrater[] {
+function generateSphericalCraters(
+  seed: number,
+  pressureBar: number | null | undefined,
+  isNoSurface: boolean,
+  craterProminence = 1.0
+): SphericalCrater[] {
   if (isNoSurface) return [];
   const pBar = pressureBar ?? 0;
   // Airless (< 0.01 bar) gets heavy cratering; thin atmosphere (< 0.6 bar) gets moderate cratering
@@ -883,31 +891,33 @@ function generateSphericalCraters(seed: number, pressureBar: number | null | und
 
   const craterPrng = createPrng(seed ^ 0x9e3779b9);
   const retentionFactor = pBar < 0.01 ? 1.0 : Math.max(0.25, 1.0 - (pBar / 0.6) * 0.72);
-  const count = Math.round(115 * retentionFactor);
+  const count = Math.round((38 + 92 * craterProminence) * retentionFactor);
+  const angularScale = Math.max(0.52, Math.min(1.7, 0.42 + 0.58 * craterProminence));
+  const depthScale = Math.pow(craterProminence, 0.92);
   const craters: SphericalCrater[] = [];
 
   for (let i = 0; i < count; i++) {
     // Uniform random point on unit sphere
     const u = craterPrng() * 2 - 1; // cos(phi) in [-1, 1]
-    const theta = craterPrng() * Math.PI * 2;
+    const theta = craterPrng() * 2 * Math.PI;
     const rxy = Math.sqrt(Math.max(0, 1 - u * u));
     const cx = rxy * Math.cos(theta);
     const cy = u;
     const cz = rxy * Math.sin(theta);
 
     // Power-law size distribution: many small/medium craters, few giant impact basins
-    const sizeRoll = Math.pow(craterPrng(), 2.3);
+    const sizeRoll = Math.pow(craterPrng(), 2.2);
     // In thin atmospheres, tiny meteoroids burn up so minimum crater size is slightly larger
-    const minRad = pBar < 0.01 ? 0.024 : 0.032; // ~1.4 deg to 1.8 deg
-    const maxRad = 0.22; // ~12.6 deg basin
+    const minRad = (pBar < 0.01 ? 0.022 : 0.03) * Math.max(0.68, Math.min(1.3, angularScale));
+    const maxRad = 0.21 * angularScale;
     const radiusRad = minRad + sizeRoll * (maxRad - minRad);
     const maxEffectRad = radiusRad * 1.45;
     const cosMaxRadius = Math.cos(maxEffectRad);
 
-    // Depth scales with crater size and atmospheric erosion
+    // Depth scales with crater size, atmospheric erosion, and inverse body size/gravity (craterProminence)
     const erosionScale = pBar < 0.01 ? 1.0 : 0.78;
-    const depth = (0.075 + sizeRoll * 0.16) * erosionScale;
-    const hasCentralPeak = radiusRad > 0.078;
+    const depth = (0.078 + sizeRoll * 0.18) * erosionScale * depthScale;
+    const hasCentralPeak = radiusRad > 0.072;
 
     craters.push({
       cx,
@@ -1352,8 +1362,8 @@ export function generatePlanetarySurfaceModel(
   const activeBody = moon || planet;
   const star = stars?.[0] || { Teff: 5778, colorHex: '#fff4e6', radius: 1.0, lumNum: 1.0 };
   const cacheKey = isMoon
-    ? `moon_${moon?.id || moon?.name}_${moon?.moonClass}_${moon?.rockFrac}_${moon?.iceFrac}_${moon?.densityGcm3}_${moon?.surfaceTempK}_${moon?.pressureBar}_${moon?.hydrosphere?.coveragePct}_${star.Teff}`
-    : `planet_${planet.a}_${planet.massEarth}_${planet.radiusEarth}_${planet.planetClass}_${planet.rockFrac}_${planet.iceFrac}_${planet.densityGcm3}_${planet.surfaceTempK}_${planet.pressureBar}_${planet.hydrosphere?.coveragePct}_${star.Teff}`;
+    ? `moon_${moon?.id || moon?.name}_${moon?.moonClass}_${moon?.radiusKm}_${moon?.gravityG}_${moon?.rockFrac}_${moon?.iceFrac}_${moon?.densityGcm3}_${moon?.surfaceTempK}_${moon?.pressureBar}_${moon?.hydrosphere?.coveragePct}_${star.Teff}`
+    : `planet_${planet.a}_${planet.massEarth}_${planet.radiusEarth}_${planet.gravityG}_${planet.planetClass}_${planet.rockFrac}_${planet.iceFrac}_${planet.densityGcm3}_${planet.surfaceTempK}_${planet.pressureBar}_${planet.hydrosphere?.coveragePct}_${star.Teff}`;
 
   const cached = surfaceModelCache.get(cacheKey);
   if (cached) return cached;
@@ -1507,11 +1517,21 @@ export function generatePlanetarySurfaceModel(
   const cloudGrid = new Float32Array(width * height);
   const tectonicPlateGrid = new Uint8Array(width * height);
 
+  // Compute craterProminence inversely from body radius and surface gravity:
+  // Smaller airless worlds (e.g. small/medium moons, Mercury/Moon-sized bodies) have much more noticeable craters;
+  // larger/higher-gravity worlds have smaller angular craters flattened by isostatic relaxation & resurfacing.
+  const bodyRadiusKm = isMoon ? (moon?.radiusKm || 1500) : (planet.radiusEarth || 1.0) * 6371;
+  const bodyGravityG = Math.max(0.01, activeBody.gravityG || 0.2);
+  const radiusScale = Math.pow(2800 / Math.max(300, Math.min(10000, bodyRadiusKm)), 0.56);
+  const gravScale = Math.pow(0.35 / Math.max(0.015, Math.min(2.2, bodyGravityG)), 0.28);
+  const craterProminence = Math.max(0.38, Math.min(2.35, radiusScale * 0.65 + gravScale * 0.35));
+
   // Pre-generate 3D spherical impact craters for airless and thin-atmosphere worlds
   const craters = generateSphericalCraters(
     seed,
     hasSubsurfaceOcean || isMoltenWorld ? 0.42 : activeBody.pressureBar,
-    isNoSurface
+    isNoSurface,
+    craterProminence
   );
 
   // Pre-generate 3D spherical cracks (cryotectonic ice lineae on icy worlds, or glowing magma fissures on molten worlds)
@@ -1584,6 +1604,11 @@ export function generatePlanetarySurfaceModel(
       // Add mountain ridges using ridged multifractal
       const ridgeNoise = Math.abs(sphericalFbm(lat * 1.5, lon * 1.5, seed + 499, 4) - 0.5) * 2;
       elev = elev * 0.72 + (1.0 - ridgeNoise) * 0.28;
+      if (craters.length > 0) {
+        // On smaller airless worlds, dampen background tectonic ridge noise so circular impact craters dominate the relief
+        const topoSmoothing = Math.max(0.48, Math.min(1.0, 1.02 / Math.pow(craterProminence, 0.48)));
+        elev = 0.5 + (elev - 0.5) * topoSmoothing;
+      }
 
       const theta = (lon * Math.PI) / 180;
       const nx = sinPhi * Math.cos(theta);
@@ -1609,10 +1634,15 @@ export function generatePlanetarySurfaceModel(
               // Central peak for complex craters
               if (c.hasCentralPeak && u < 0.24) {
                 const peakNorm = 1.0 - u / 0.24;
-                delta += c.depth * 0.52 * peakNorm * peakNorm;
+                delta += c.depth * 0.58 * peakNorm * peakNorm;
+                craterIntensity = Math.max(craterIntensity, peakNorm * 0.95 * Math.pow(craterProminence, 0.55));
+              } else {
+                craterIntensity = Math.max(
+                  craterIntensity,
+                  (0.35 + bowlNorm * 0.45) * (c.depth / 0.14) * Math.pow(craterProminence, 0.5)
+                );
               }
               craterDelta += delta;
-              craterIntensity = Math.max(craterIntensity, (1.0 - bowlNorm * 0.6) * (c.depth / 0.15));
             } else if (u < 1.45) {
               // Raised circular crater rim & outer ejecta ramp
               let rimFactor = 0;
@@ -1622,14 +1652,14 @@ export function generatePlanetarySurfaceModel(
                 const ejectaNorm = 1.0 - (u - 1.0) / 0.45;
                 rimFactor = ejectaNorm * ejectaNorm;
               }
-              craterDelta += c.depth * 0.46 * rimFactor;
-              craterIntensity = Math.max(craterIntensity, rimFactor * 0.85);
+              craterDelta += c.depth * 0.52 * rimFactor;
+              craterIntensity = Math.max(craterIntensity, rimFactor * 1.15 * Math.pow(craterProminence, 0.6));
             }
           }
         }
 
         elev += craterDelta;
-        craterGrid[idx] = Math.min(1.5, craterIntensity);
+        craterGrid[idx] = Math.min(1.8, craterIntensity);
       }
 
       // Apply 3D surface cracks (cryotectonic ice lineae on icy worlds, or lava fissures on molten worlds)
@@ -2146,6 +2176,7 @@ export function generatePlanetarySurfaceModel(
     biomeGrid,
     blendedLandRgb,
     craterGrid,
+    craterProminence,
     fractureGrid,
     volcanoGrid,
     volcanoCount: volcanoes.length,
@@ -2449,7 +2480,10 @@ export function evaluateSurfaceMapTexel(
         const altRatio = isFrozenSeaIce
           ? 0.15
           : Math.max(0, (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized));
-        const craterBoost = isFrozenSeaIce ? 0 : craterGrid[idx] * (12 + compositionPalette.iceEjectaBoost * 24);
+        const promScale = 0.75 + 0.32 * (surfaceModel.craterProminence || 1.0);
+        const craterBoost = isFrozenSeaIce
+          ? 0
+          : craterGrid[idx] * (13 + compositionPalette.iceEjectaBoost * 25) * promScale;
         r = Math.min(255, r * (0.92 + altRatio * 0.22) + craterBoost * 0.94);
         g = Math.min(255, g * (0.92 + altRatio * 0.22) + craterBoost * 0.98);
         b = Math.min(255, b * (0.92 + altRatio * 0.22) + craterBoost * 1.08);
@@ -2458,7 +2492,9 @@ export function evaluateSurfaceMapTexel(
 
     if (activeLayer === 'satellite') {
       if (applyReliefInSatellite) {
-        const bumpScale = isWater ? 14 : biomeId === 15 ? 24 : 46;
+        const craterProm = surfaceModel.craterProminence || 1.0;
+        const craterReliefMult = craterGrid[idx] > 0.04 ? 0.85 + 0.35 * craterProm : 1.0;
+        const bumpScale = (isWater ? 14 : biomeId === 15 ? 24 : 46) * craterReliefMult;
         const nx = -dhdx * bumpScale;
         const ny = -dhdy * bumpScale;
         const nz = 1.0;
@@ -2473,7 +2509,7 @@ export function evaluateSurfaceMapTexel(
             ? isMoltenWorld || seaPalette.solventKey === 'Silicate Magma'
               ? 0.96 + (NdotL - Lz) * 0.45
               : 0.88 + (NdotL - Lz) * 0.65
-            : 0.94 + (NdotL - Lz) * 1.35;
+            : 0.94 + (NdotL - Lz) * (1.32 + Math.min(0.45, Math.max(0, craterProm - 0.8) * 0.3));
 
         r = Math.max(0, Math.min(255, Math.round(r * reliefShade)));
         g = Math.max(0, Math.min(255, Math.round(g * reliefShade)));
@@ -2952,7 +2988,11 @@ export function renderSurfaceProjectedGlobeToCanvas(
       }
 
       // Compute 3D spherical illumination + normal-map relief bump in camera/world space
-      const bumpScale = surfaceModel.isNoSurface ? 8 : texel.isWater ? 12 : 38;
+      const globeCraterMult =
+        !surfaceModel.isNoSurface && !texel.isWater && surfaceModel.cloudOpacity < 0.35
+          ? 0.85 + 0.32 * (surfaceModel.craterProminence || 1.0)
+          : 1.0;
+      const bumpScale = (surfaceModel.isNoSurface ? 8 : texel.isWater ? 12 : 38) * globeCraterMult;
       const bNx = wx - texel.dhdx * bumpScale * 0.45;
       const bNy = wy + texel.dhdy * bumpScale * 0.45;
       const bNz = wz;
