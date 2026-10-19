@@ -877,18 +877,37 @@ export function deriveAtmosphericSkyColors(
   };
 }
 
+export type SurfaceMapLayerType =
+  | 'satellite'
+  | 'clouds'
+  | 'biomes'
+  | 'topography'
+  | 'temperature'
+  | 'moisture'
+  | 'plates';
+
+const surfaceModelCache = new Map<string, PlanetarySurfaceModel>();
+
 /**
- * Builds the complete planetary surface model including topography, biomes,
- * climate grid, volcanoes, cloud/atmosphere layer, and sky horizon parameters.
+ * Builds (or retrieves from cache) the complete planetary surface model including topography,
+ * biomes, climate grid, volcanoes, cloud/atmosphere layer, and sky horizon parameters.
  */
 export function generatePlanetarySurfaceModel(
   planet: RealisticPlanetBody,
-  moon: RealisticMoon | null | undefined,
-  zone: RealisticPlanetaryZone,
-  stars: RealisticStarNode[]
+  moon?: RealisticMoon | null,
+  zone?: RealisticPlanetaryZone | null,
+  stars?: RealisticStarNode[] | null
 ): PlanetarySurfaceModel {
   const isMoon = Boolean(moon);
   const activeBody = moon || planet;
+  const star = stars?.[0] || { Teff: 5778, colorHex: '#fff4e6', radius: 1.0, lumNum: 1.0 };
+  const cacheKey = isMoon
+    ? `moon_${moon?.id || moon?.name}_${moon?.moonClass}_${moon?.surfaceTempK}_${moon?.pressureBar}_${moon?.hydrosphere?.coveragePct}_${star.Teff}`
+    : `planet_${planet.a}_${planet.massEarth}_${planet.radiusEarth}_${planet.planetClass}_${planet.surfaceTempK}_${planet.pressureBar}_${planet.hydrosphere?.coveragePct}_${star.Teff}`;
+
+  const cached = surfaceModelCache.get(cacheKey);
+  if (cached) return cached;
+
   const bodyClass = isMoon ? (moon?.moonClass || '') : planet.planetClass;
   const bodyClassLower = bodyClass.toLowerCase();
 
@@ -954,7 +973,6 @@ export function generatePlanetarySurfaceModel(
       (Tbase < 225 && (activeBody.rockFrac ?? 1) < 0.85));
 
   // Host star telemetry
-  const star = stars[0] || { Teff: 5778, colorHex: '#fff4e6', radius: 1.0, lumNum: 1.0 };
   const starTeff = star.Teff || 5778;
   const starDistAU = Math.max(0.02, planet.a);
   const starRadiusAU = (star.radius || 1.0) * 0.00465047;
@@ -1405,7 +1423,7 @@ export function generatePlanetarySurfaceModel(
   const ringSys = planet.ringSystem;
   const hasRings = Boolean(!isMoon && ringSys);
 
-  return {
+  const model: PlanetarySurfaceModel = {
     seed,
     isGasGiant,
     isIceGiant,
@@ -1441,7 +1459,7 @@ export function generatePlanetarySurfaceModel(
     starAngularDiameterDeg,
     starColorHex: star.colorHex || '#fff4e6',
     starTeff,
-    ambientIllumination: Math.min(1.0, Math.max(0.1, (zone.a_in || 1) / (planet.a || 1))),
+    ambientIllumination: Math.min(1.0, Math.max(0.1, (zone?.a_in || 1) / (planet.a || 1))),
     hasRings,
     ringInnerRp: ringSys?.innerRadiusRp || 1.25,
     ringOuterRp: ringSys?.outerRadiusRp || 2.1,
@@ -1449,7 +1467,810 @@ export function generatePlanetarySurfaceModel(
     ringTau: ringSys?.opticalDepth || 0.45,
     moonsInSky,
   };
+
+  if (surfaceModelCache.size > 120) {
+    surfaceModelCache.clear();
+  }
+  surfaceModelCache.set(cacheKey, model);
+  return model;
 }
+
+/**
+ * Computes the RGB color and physical properties of a single (x, y) texel in the 360x180
+ * surface map for any requested layer ('satellite', 'clouds', 'biomes', 'topography', etc.),
+ * so both the 2D Equirectangular Map and the 3D Projected Globe share identical rendering.
+ */
+export function evaluateSurfaceMapTexel(
+  surfaceModel: PlanetarySurfaceModel,
+  x: number,
+  y: number,
+  activeLayer: SurfaceMapLayerType,
+  showCloudsOverlay: boolean,
+  applyReliefInSatellite = true
+): {
+  r: number;
+  g: number;
+  b: number;
+  isWater: boolean;
+  isSelfLuminous: boolean;
+  dhdx: number;
+  dhdy: number;
+} {
+  const width = 360;
+  const height = 180;
+  const gx = ((x % width) + width) % width;
+  const gy = Math.max(0, Math.min(height - 1, y));
+  const idx = gy * width + gx;
+  const lat = 90 - gy;
+  const yUp = Math.max(0, gy - 1);
+  const yDown = Math.min(height - 1, gy + 1);
+  const xLeft = (gx + width - 1) % width;
+  const xRight = (gx + 1) % width;
+
+  const {
+    hypsometry,
+    temperatureGrid,
+    biomeGrid,
+    craterGrid,
+    fractureGrid,
+    volcanoGrid,
+    cloudGrid,
+    cloudOpacity,
+    atmospherePalette,
+    floraPalette,
+    seaLevelNormalized,
+    isNoSurface,
+    isIcyWorld,
+    isMoltenWorld,
+    hasLiquid,
+    seaPalette,
+  } = surfaceModel;
+
+  const isBlankSurfaceLayer =
+    isNoSurface &&
+    (activeLayer === 'biomes' || activeLayer === 'topography' || activeLayer === 'moisture' || activeLayer === 'plates');
+
+  if (isBlankSurfaceLayer) {
+    return { r: 10, g: 15, b: 26, isWater: false, isSelfLuminous: false, dhdx: 0, dhdy: 0 };
+  }
+
+  const Lx = -0.62;
+  const Ly = -0.48;
+  const Lz = 0.62;
+
+  // Dedicated Cloud & Atmosphere Layer OR No-Surface World in Satellite/Clouds view (100% Cloud/Atmosphere Opacity)
+  if (activeLayer === 'clouds' || (isNoSurface && activeLayer === 'satellite')) {
+    if (cloudOpacity <= 0.001 && !isNoSurface) {
+      return { r: 8, g: 12, b: 22, isWater: false, isSelfLuminous: false, dhdx: 0, dhdy: 0 };
+    }
+
+    const cVal = cloudGrid[idx];
+    const dcdx = (cloudGrid[gy * width + xRight] - cloudGrid[gy * width + xLeft]) * 0.5;
+    const dcdy = (cloudGrid[yDown * width + gx] - cloudGrid[yUp * width + gx]) * 0.5;
+
+    let r = 0;
+    let g = 0;
+    let b = 0;
+
+    if (isNoSurface) {
+      if (surfaceModel.isSupercritical) {
+        const cloudCover = Math.max(0, Math.min(1, (cVal - 0.18) / 0.78));
+        const greyShade = 0.76 + 0.24 * Math.sin(cVal * Math.PI);
+        const cr = atmospherePalette.bandLightRgb[0] * greyShade;
+        const cg = atmospherePalette.bandLightRgb[1] * greyShade;
+        const cb = atmospherePalette.bandLightRgb[2] * greyShade;
+        r = atmospherePalette.atmoRgb[0] * (1 - cloudCover * 0.88) + cr * (cloudCover * 0.88);
+        g = atmospherePalette.atmoRgb[1] * (1 - cloudCover * 0.88) + cg * (cloudCover * 0.88);
+        b = atmospherePalette.atmoRgb[2] * (1 - cloudCover * 0.88) + cb * (cloudCover * 0.88);
+      } else {
+        r = atmospherePalette.bandDarkRgb[0] + (atmospherePalette.bandLightRgb[0] - atmospherePalette.bandDarkRgb[0]) * cVal;
+        g = atmospherePalette.bandDarkRgb[1] + (atmospherePalette.bandLightRgb[1] - atmospherePalette.bandDarkRgb[1]) * cVal;
+        b = atmospherePalette.bandDarkRgb[2] + (atmospherePalette.bandLightRgb[2] - atmospherePalette.bandDarkRgb[2]) * cVal;
+      }
+
+      if (applyReliefInSatellite) {
+        const cnx = -dcdx * 14;
+        const cny = -dcdy * 14;
+        const invLen = 1.0 / Math.sqrt(cnx * cnx + cny * cny + 1.0);
+        const NdotL = (cnx * Lx + cny * Ly + Lz) * invLen;
+        const cloudRelief = 0.95 + (NdotL - Lz) * 0.65;
+        r = Math.max(0, Math.min(255, Math.round(r * cloudRelief)));
+        g = Math.max(0, Math.min(255, Math.round(g * cloudRelief)));
+        b = Math.max(0, Math.min(255, Math.round(b * cloudRelief)));
+      }
+    } else {
+      const bgR = 10;
+      const bgG = 15;
+      const bgB = 26;
+      const localAlpha = Math.min(1.0, cloudOpacity * (0.35 + 0.65 * cVal));
+      const cr = atmospherePalette.atmoRgb[0] * (1 - cVal) + atmospherePalette.cloudRgb[0] * cVal;
+      const cg = atmospherePalette.atmoRgb[1] * (1 - cVal) + atmospherePalette.cloudRgb[1] * cVal;
+      const cb = atmospherePalette.atmoRgb[2] * (1 - cVal) + atmospherePalette.cloudRgb[2] * cVal;
+
+      r = Math.round(bgR * (1 - localAlpha) + cr * localAlpha);
+      g = Math.round(bgG * (1 - localAlpha) + cg * localAlpha);
+      b = Math.round(bgB * (1 - localAlpha) + cb * localAlpha);
+    }
+
+    return { r, g, b, isWater: false, isSelfLuminous: false, dhdx: dcdx, dhdy: dcdy };
+  }
+
+  const h = hypsometry[idx];
+  const volcVal = volcanoGrid[idx];
+  const isWater = !isNoSurface && hasLiquid && h <= seaLevelNormalized && volcVal < 0.35;
+  const dhdx = (hypsometry[gy * width + xRight] - hypsometry[gy * width + xLeft]) * 0.5;
+  const dhdy = (hypsometry[yDown * width + gx] - hypsometry[yUp * width + gx]) * 0.5;
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let isSelfLuminous = volcVal > 1.1;
+
+  if (activeLayer === 'satellite' || activeLayer === 'biomes') {
+    if (isWater) {
+      if (isMoltenWorld) isSelfLuminous = true;
+      const depthRatio = Math.max(0, Math.min(1, (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized)));
+      if (activeLayer === 'biomes') {
+        const biomeId = biomeGrid[idx];
+        const rgb = biomeId === 0 ? seaPalette.trenchRgb : biomeId === 1 ? seaPalette.deepRgb : seaPalette.shallowRgb;
+        r = rgb[0];
+        g = rgb[1];
+        b = rgb[2];
+      } else {
+        if (depthRatio < 0.35) {
+          const t = depthRatio / 0.35;
+          r = seaPalette.shallowRgb[0] + (seaPalette.deepRgb[0] - seaPalette.shallowRgb[0]) * t;
+          g = seaPalette.shallowRgb[1] + (seaPalette.deepRgb[1] - seaPalette.shallowRgb[1]) * t;
+          b = seaPalette.shallowRgb[2] + (seaPalette.deepRgb[2] - seaPalette.shallowRgb[2]) * t;
+        } else {
+          const t = (depthRatio - 0.35) / 0.65;
+          r = seaPalette.deepRgb[0] + (seaPalette.trenchRgb[0] - seaPalette.deepRgb[0]) * t;
+          g = seaPalette.deepRgb[1] + (seaPalette.trenchRgb[1] - seaPalette.deepRgb[1]) * t;
+          b = seaPalette.deepRgb[2] + (seaPalette.trenchRgb[2] - seaPalette.deepRgb[2]) * t;
+        }
+      }
+    } else {
+      const biomeId = biomeGrid[idx];
+      let hex = (BIOMES.find((bm) => bm.id === biomeId) || BIOMES[4]).color;
+      if (biomeId === 3) hex = floraPalette.marshHex;
+      else if (biomeId === 4) hex = floraPalette.plainsHex;
+      else if (biomeId === 5) hex = floraPalette.woodlandHex;
+      else if (biomeId === 6) hex = floraPalette.taigaHex;
+
+      r = parseInt(hex.slice(1, 3), 16);
+      g = parseInt(hex.slice(3, 5), 16);
+      b = parseInt(hex.slice(5, 7), 16);
+
+      if (volcVal > 0.15) {
+        if (volcVal > 1.1) {
+          const calderaT = Math.min(1.0, (volcVal - 1.1) / 0.8);
+          r = Math.round(238 + 17 * calderaT);
+          g = Math.round(108 + 116 * calderaT);
+          b = Math.round(14 + 34 * calderaT);
+        } else {
+          const coneT = Math.min(1.0, volcVal / 0.95);
+          const basaltR = coneT > 0.78 ? 148 : 46;
+          const basaltG = coneT > 0.78 ? 58 : 34;
+          const basaltB = coneT > 0.78 ? 22 : 30;
+          const blend = Math.min(0.88, coneT * 0.9);
+          r = r * (1 - blend) + basaltR * blend;
+          g = g * (1 - blend) + basaltG * blend;
+          b = b * (1 - blend) + basaltB * blend;
+        }
+      }
+
+      const crackVal = fractureGrid[idx];
+      if (isMoltenWorld && crackVal > 0.08) {
+        if (crackVal > 0.25) isSelfLuminous = true;
+        const t = Math.min(1.0, crackVal / 0.8);
+        if (t < 0.45) {
+          const m = t / 0.45;
+          r = r * (1 - m * 0.85) + 235 * (m * 0.85);
+          g = g * (1 - m * 0.85) + 98 * (m * 0.85);
+          b = b * (1 - m * 0.85) + 12 * (m * 0.85);
+        } else {
+          const c = (t - 0.45) / 0.55;
+          r = 235 + (255 - 235) * c;
+          g = 98 + (212 - 98) * c;
+          b = 12 + (42 - 12) * c;
+        }
+      } else if (isIcyWorld && crackVal > 0.08) {
+        const t = Math.min(1.0, crackVal / 0.85);
+        if (t < 0.4) {
+          const m = t / 0.4;
+          r = r * (1 - m * 0.35) + 155 * (m * 0.35);
+          g = g * (1 - m * 0.35) + 125 * (m * 0.35);
+          b = b * (1 - m * 0.35) + 115 * (m * 0.35);
+        } else {
+          const c = (t - 0.4) / 0.6;
+          r = r * (1 - c * 0.72) + 38 * (c * 0.72);
+          g = g * (1 - c * 0.65) + 108 * (c * 0.65);
+          b = b * (1 - c * 0.55) + 158 * (c * 0.55);
+        }
+      }
+
+      if (activeLayer === 'satellite' && !isNoSurface && volcVal <= 1.1) {
+        const altRatio = Math.max(0, (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized));
+        const craterBoost = craterGrid[idx] * 14;
+        r = Math.min(255, r * (0.92 + altRatio * 0.22) + craterBoost);
+        g = Math.min(255, g * (0.92 + altRatio * 0.22) + craterBoost);
+        b = Math.min(255, b * (0.92 + altRatio * 0.22) + craterBoost * 1.05);
+      }
+    }
+
+    if (activeLayer === 'satellite') {
+      if (applyReliefInSatellite) {
+        const bumpScale = isWater ? 14 : 46;
+        const nx = -dhdx * bumpScale;
+        const ny = -dhdy * bumpScale;
+        const nz = 1.0;
+        const invLen = 1.0 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+        const NdotL = (nx * Lx + ny * Ly + nz * Lz) * invLen;
+        const reliefShade =
+          volcVal > 1.1
+            ? 1.0
+            : isWater
+            ? isMoltenWorld
+              ? 0.96 + (NdotL - Lz) * 0.45
+              : 0.88 + (NdotL - Lz) * 0.65
+            : 0.94 + (NdotL - Lz) * 1.35;
+
+        r = Math.max(0, Math.min(255, Math.round(r * reliefShade)));
+        g = Math.max(0, Math.min(255, Math.round(g * reliefShade)));
+        b = Math.max(0, Math.min(255, Math.round(b * reliefShade)));
+      }
+
+      // Composite Cloud & Atmosphere Layer on top of Satellite surface with opacity proportional to atmospheric density
+      if (showCloudsOverlay && cloudOpacity > 0.001) {
+        const cVal = cloudGrid[idx];
+        const atmoTintWeight = cloudOpacity * 0.24;
+        r = r * (1 - atmoTintWeight) + atmospherePalette.atmoRgb[0] * atmoTintWeight;
+        g = g * (1 - atmoTintWeight) + atmospherePalette.atmoRgb[1] * atmoTintWeight;
+        b = b * (1 - atmoTintWeight) + atmospherePalette.atmoRgb[2] * atmoTintWeight;
+
+        const cloudAlpha = Math.min(0.95, cloudOpacity * Math.pow(cVal, 0.85) * 0.92);
+        r = Math.round(r * (1 - cloudAlpha) + atmospherePalette.cloudRgb[0] * cloudAlpha);
+        g = Math.round(g * (1 - cloudAlpha) + atmospherePalette.cloudRgb[1] * cloudAlpha);
+        b = Math.round(b * (1 - cloudAlpha) + atmospherePalette.cloudRgb[2] * cloudAlpha);
+      }
+    }
+  } else if (activeLayer === 'topography') {
+    if (isWater) {
+      const depthRatio = (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized);
+      r = Math.round(seaPalette.trenchRgb[0] + (seaPalette.shallowRgb[0] - seaPalette.trenchRgb[0]) * (1 - depthRatio) * 0.75);
+      g = Math.round(seaPalette.trenchRgb[1] + (seaPalette.shallowRgb[1] - seaPalette.trenchRgb[1]) * (1 - depthRatio) * 0.75);
+      b = Math.round(seaPalette.trenchRgb[2] + (seaPalette.shallowRgb[2] - seaPalette.trenchRgb[2]) * (1 - depthRatio) * 0.75);
+    } else if (volcVal > 1.1) {
+      r = 251;
+      g = 191;
+      b = 36;
+    } else {
+      const altRatio = (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized);
+      if (altRatio < 0.28) {
+        const t = altRatio / 0.28;
+        r = Math.round(floraPalette.lowRgb[0] * (1 - t * 0.3) + 145 * (t * 0.3));
+        g = Math.round(floraPalette.lowRgb[1] * (1 - t * 0.3) + 145 * (t * 0.3));
+        b = Math.round(floraPalette.lowRgb[2] * (1 - t * 0.3) + 75 * (t * 0.3));
+      } else if (altRatio < 0.6) {
+        const t = (altRatio - 0.28) / 0.32;
+        r = Math.round(145 + t * 40);
+        g = Math.round(112 + t * 25);
+        b = Math.round(68 - t * 12);
+      } else if (altRatio < 0.85) {
+        r = 115;
+        g = 98;
+        b = 90;
+      } else {
+        r = 230;
+        g = 238;
+        b = 248;
+      }
+    }
+    const nx = -dhdx * 36;
+    const ny = -dhdy * 36;
+    const invLen = 1.0 / Math.sqrt(nx * nx + ny * ny + 1.0);
+    const NdotL = (nx * Lx + ny * Ly + Lz) * invLen;
+    const topoShade = volcVal > 1.1 ? 1.0 : 0.94 + (NdotL - Lz) * 1.15;
+    r = Math.max(0, Math.min(255, Math.round(r * topoShade)));
+    g = Math.max(0, Math.min(255, Math.round(g * topoShade)));
+    b = Math.max(0, Math.min(255, Math.round(b * topoShade)));
+  } else if (activeLayer === 'temperature') {
+    const T = temperatureGrid[idx];
+    if (T < 200) {
+      r = 32;
+      g = 24;
+      b = 128;
+    } else if (T < 273.15) {
+      const t = (T - 200) / 73.15;
+      r = Math.round(32 + t * 56);
+      g = Math.round(52 + t * 128);
+      b = Math.round(180 + t * 65);
+    } else if (T < 320) {
+      const t = (T - 273.15) / 46.85;
+      r = Math.round(140 + t * 105);
+      g = Math.round(185 + t * 25);
+      b = Math.round(190 - t * 150);
+    } else {
+      const t = Math.min(1.0, (T - 320) / 250);
+      r = Math.round(245 + t * 10);
+      g = Math.round(140 - t * 110);
+      b = Math.round(35 - t * 25);
+    }
+  } else if (activeLayer === 'moisture') {
+    const absLat = Math.abs(lat);
+    const isHadleyDry = absLat >= 18 && absLat <= 32;
+    if (isWater) {
+      r = seaPalette.shallowRgb[0];
+      g = seaPalette.shallowRgb[1];
+      b = seaPalette.shallowRgb[2];
+    } else if (!hasLiquid || isHadleyDry) {
+      r = 182;
+      g = 138;
+      b = 68;
+    } else {
+      const moist = Math.max(0.1, Math.min(1.0, Math.cos((absLat * Math.PI) / 180)));
+      if (floraPalette.hasWaterLife && surfaceModel.starTeff >= 5100 && surfaceModel.starTeff <= 6800) {
+        r = Math.round(45 + (1 - moist) * 95);
+        g = Math.round(85 + moist * 115);
+        b = Math.round(65 + moist * 125);
+      } else {
+        r = Math.round(135 - moist * 85);
+        g = Math.round(115 + moist * 55);
+        b = Math.round(90 + moist * 135);
+      }
+    }
+  } else if (activeLayer === 'plates') {
+    const pId = (Math.imul(Math.floor(gx / 40), 7) + Math.imul(Math.floor(gy / 30), 11) + surfaceModel.seed) % 8;
+    const colors = [
+      [220, 60, 60],
+      [60, 140, 220],
+      [220, 170, 45],
+      [175, 65, 215],
+      [55, 195, 205],
+      [225, 115, 50],
+      [145, 120, 95],
+      [115, 125, 145],
+    ];
+    const col = colors[Math.abs(pId) % colors.length];
+    r = col[0];
+    g = col[1];
+    b = col[2];
+  }
+
+  return { r, g, b, isWater, isSelfLuminous, dhdx, dhdy };
+}
+
+export interface RenderProjectedGlobeOptions {
+  activeLayer?: SurfaceMapLayerType;
+  showCloudsOverlay?: boolean;
+  showGrid?: boolean;
+  rotYaw?: number;
+  rotPitch?: number;
+  transparentBg?: boolean;
+  includeRings?: boolean;
+  selectedCoords?: { lat: number; lon: number } | null;
+}
+
+/**
+ * Projects the generated 360x180 planetary surface model onto a 3D sphere with:
+ * - Satellite base (topography normal-map relief + biomes + craters + cracks + volcanoes)
+ * - Cloud & atmosphere overlay (proportional to atmospheric density, or 100% for Sudarsky/Class-II fluid worlds)
+ * - Outer atmospheric halo glow & Fresnel limb scattering
+ * - Optional planetary ring system & coordinate grid / landing marker
+ */
+export function renderSurfaceProjectedGlobeToCanvas(
+  canvas: HTMLCanvasElement,
+  surfaceModel: PlanetarySurfaceModel,
+  planet: RealisticPlanetBody,
+  moon: RealisticMoon | null | undefined,
+  options: RenderProjectedGlobeOptions = {}
+): { cx: number; cy: number; R: number } {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+  const activeBody = moon || planet;
+  const isMoon = Boolean(moon);
+  const includeRings = options.includeRings ?? !isMoon;
+  const hasRings = Boolean(!isMoon && includeRings && (planet.rings || surfaceModel.hasRings));
+  const transparentBg = options.transparentBg ?? false;
+  const activeLayer = options.activeLayer ?? 'satellite';
+  const showCloudsOverlay = options.showCloudsOverlay ?? true;
+  const showGrid = options.showGrid ?? false;
+  const rotYaw = options.rotYaw ?? 0;
+  const rotPitch = options.rotPitch ?? 0;
+
+  const cx = W * 0.5;
+  const cy = H * 0.5;
+  const R = Math.min(W, H) * (hasRings ? 0.34 : transparentBg ? 0.44 : 0.41);
+
+  if (!ctx) return { cx, cy, R };
+
+  const img = ctx.createImageData(W, H);
+  const data = img.data;
+
+  const isBlankSurfaceLayer =
+    surfaceModel.isNoSurface &&
+    (activeLayer === 'biomes' || activeLayer === 'topography' || activeLayer === 'moisture' || activeLayer === 'plates');
+
+  // Starlight direction vector in world space
+  const isTidallyLockedPlanet = !isMoon && (planet.spinState || '').includes('1:1');
+  const lx = isTidallyLockedPlanet ? -0.52 : -0.58;
+  const ly = isTidallyLockedPlanet ? -0.18 : -0.32;
+  const lz = isTidallyLockedPlanet ? 0.835 : 0.748;
+
+  const cosYaw = Math.cos(rotYaw);
+  const sinYaw = Math.sin(rotYaw);
+  const cosPitch = Math.cos(rotPitch);
+  const sinPitch = Math.sin(rotPitch);
+
+  // Transform starlight into camera space for rim/halo & specular glint
+  const laX = lx * cosYaw - lz * sinYaw;
+  const laZ = lx * sinYaw + lz * cosYaw;
+  const lCamX = laX;
+  const lCamY = ly * cosPitch + laZ * sinPitch;
+  const lCamZ = -ly * sinPitch + laZ * cosPitch;
+
+  // Axial tilt
+  const tiltDeg = activeBody.axialTiltDeg ?? 0;
+  const tiltRad = (Math.max(0, Math.min(90, tiltDeg)) * Math.PI) / 180;
+  const cTilt = Math.cos(tiltRad * 0.38);
+  const sTilt = Math.sin(tiltRad * 0.38);
+
+  // Ring geometry in 3D camera space
+  const ringTiltRad = ((22 + (surfaceModel.seed % 18)) * Math.PI) / 180;
+  const sinT = Math.sin(ringTiltRad);
+  const cosT = Math.cos(ringTiltRad);
+  const rInner = R * (planet.ringSystem ? planet.ringSystem.innerRadiusRp : 1.24);
+  const rOuter = R * (planet.ringSystem ? Math.min(2.25, planet.ringSystem.outerRadiusRp) : 1.88);
+  const rnaX = -sinT * -sinYaw;
+  const rnaZ = -sinT * cosYaw;
+  const rNormX = rnaX;
+  const rNormY = cosT * cosPitch + rnaZ * sinPitch;
+  const rNormZ = -cosT * sinPitch + rnaZ * cosPitch;
+
+  // Atmospheric glow color & strength
+  const pBar = activeBody.pressureBar;
+  const hasAtmoGlow = surfaceModel.isNoSurface || (pBar !== null && pBar !== undefined && pBar > 0.005);
+  const atmoGlowRgb: [number, number, number] = surfaceModel.isSupercritical
+    ? [72, 162, 248]
+    : surfaceModel.isNoSurface
+    ? surfaceModel.atmospherePalette.bandLightRgb
+    : surfaceModel.isMoltenWorld
+    ? [251, 118, 36]
+    : surfaceModel.atmospherePalette.atmoRgb[0] +
+        surfaceModel.atmospherePalette.atmoRgb[1] +
+        surfaceModel.atmospherePalette.atmoRgb[2] >
+      30
+    ? surfaceModel.atmospherePalette.atmoRgb
+    : [88, 172, 252];
+  const atmoGlowStrength = surfaceModel.isNoSurface
+    ? 0.85
+    : hasAtmoGlow
+    ? Math.min(0.88, Math.max(0.22, 0.25 + surfaceModel.cloudOpacity * 0.65))
+    : 0;
+
+  // Host star RGB tint
+  const starHex = (surfaceModel.starColorHex || '#fff4e6').replace('#', '');
+  const starNum = parseInt(starHex, 16) || 0xfff4e6;
+  const starR = (starNum >> 16) & 255;
+  const starG = (starNum >> 8) & 255;
+  const starB = starNum & 255;
+
+  for (let py = 0; py < H; py++) {
+    for (let px = 0; px < W; px++) {
+      const pIdx = (py * W + px) * 4;
+      const dx = px - cx;
+      const dy = py - cy;
+      const distSq = dx * dx + dy * dy;
+      const dist = Math.sqrt(distSq);
+
+      // Space background & subtle starfield
+      let bgR = 5;
+      let bgG = 8;
+      let bgB = 16;
+      if (!transparentBg) {
+        const starHash = hash2D(px, py, surfaceModel.seed);
+        if (starHash > 0.9978) {
+          const br = Math.round(140 + 115 * ((starHash - 0.9978) / 0.0022));
+          bgR = br;
+          bgG = br;
+          bgB = Math.min(255, br + 20);
+        }
+      }
+
+      // Check 3D Ring Intersection
+      let ringAlpha = 0;
+      let ringR = 0;
+      let ringG = 0;
+      let ringB = 0;
+      let ringZ = 0;
+
+      if (hasRings) {
+        const nzPlane = Math.abs(rNormZ) < 0.04 ? (rNormZ >= 0 ? 0.04 : -0.04) : rNormZ;
+        ringZ = -(dx * rNormX + dy * rNormY) / nzPlane;
+        const r3d = Math.sqrt(dx * dx + dy * dy + ringZ * ringZ);
+        if (r3d >= rInner && r3d <= rOuter) {
+          const u = (r3d - rInner) / (rOuter - rInner);
+          const band1 = Math.sin(u * 28 + (surfaceModel.seed % 7)) * 0.5 + 0.5;
+          const band2 = Math.sin(u * 74 + 1.7) * 0.5 + 0.5;
+          const cassiniGap = Math.abs(u - 0.62) < 0.045 ? 0.12 : 1.0;
+          const tau = surfaceModel.ringTau || 0.45;
+          const baseRingAlpha = Math.max(0.18, Math.min(0.68, 0.18 + 0.42 * Math.sqrt(Math.min(1.2, tau / 1.5))));
+          ringAlpha = baseRingAlpha * (0.45 + 0.35 * band1 + 0.2 * band2) * cassiniGap * Math.sin(u * Math.PI);
+
+          const dotL = dx * lCamX + dy * lCamY + ringZ * lCamZ;
+          const perpSq = Math.max(0, r3d * r3d - dotL * dotL);
+          const shadowFactor =
+            dotL < 0 && perpSq < R * R * 0.96
+              ? Math.max(0.12, Math.min(1.0, (Math.sqrt(perpSq) - R * 0.86) / (R * 0.12)))
+              : 1.0;
+
+          const isIcyRing = (planet.rings || '').includes('Icy') || (planet.rings || '').includes('Major');
+          ringR = (isIcyRing ? 215 : 182) * (0.78 + 0.22 * band1) * shadowFactor;
+          ringG = (isIcyRing ? 208 : 158) * (0.78 + 0.22 * band1) * shadowFactor;
+          ringB = (isIcyRing ? 195 : 132) * (0.78 + 0.22 * band1) * shadowFactor;
+        }
+      }
+
+      // Outside sphere: render outer atmospheric halo glow + rings
+      if (dist > R) {
+        const haloDist = (dist - R) / (R * 0.18);
+        let haloAlpha = 0;
+        if (hasAtmoGlow && haloDist < 1.0 && !isBlankSurfaceLayer) {
+          const sunSide = Math.max(0.18, Math.min(1.0, ((dx / dist) * lCamX + (dy / dist) * lCamY + 0.4) * 0.85));
+          haloAlpha = Math.pow(1 - haloDist, 2.3) * sunSide * atmoGlowStrength * 0.78;
+        }
+
+        if (transparentBg) {
+          const totA = Math.max(0, Math.min(1, haloAlpha + ringAlpha * (1 - haloAlpha)));
+          if (totA <= 0.01) {
+            data[pIdx + 3] = 0;
+            continue;
+          }
+          const outR = (atmoGlowRgb[0] * haloAlpha + ringR * ringAlpha * (1 - haloAlpha)) / totA;
+          const outG = (atmoGlowRgb[1] * haloAlpha + ringG * ringAlpha * (1 - haloAlpha)) / totA;
+          const outB = (atmoGlowRgb[2] * haloAlpha + ringB * ringAlpha * (1 - haloAlpha)) / totA;
+          data[pIdx] = Math.round(outR);
+          data[pIdx + 1] = Math.round(outG);
+          data[pIdx + 2] = Math.round(outB);
+          data[pIdx + 3] = Math.round(totA * 255);
+          continue;
+        } else {
+          if (haloAlpha > 0) {
+            bgR = Math.round(bgR + (atmoGlowRgb[0] - bgR) * haloAlpha);
+            bgG = Math.round(bgG + (atmoGlowRgb[1] - bgG) * haloAlpha);
+            bgB = Math.round(bgB + (atmoGlowRgb[2] - bgB) * haloAlpha);
+          }
+          if (ringAlpha > 0) {
+            bgR = Math.round(bgR + (ringR - bgR) * ringAlpha);
+            bgG = Math.round(bgG + (ringG - bgG) * ringAlpha);
+            bgB = Math.round(bgB + (ringB - bgB) * ringAlpha);
+          }
+          data[pIdx] = bgR;
+          data[pIdx + 1] = bgG;
+          data[pIdx + 2] = bgB;
+          data[pIdx + 3] = 255;
+          continue;
+        }
+      }
+
+      // Inside sphere: compute 3D unit normal in camera space (nx, ny, nz)
+      const nx = dx / R;
+      const ny = -dy / R; // +ny is North (up on screen)
+      const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+
+      // Rotate camera normal into 3D world space (wx, wy, wz)
+      const y1 = ny * cosPitch - nz * sinPitch;
+      const z1 = ny * sinPitch + nz * cosPitch;
+      const wx = nx * cosYaw + z1 * sinYaw;
+      const wy = y1;
+      const wz = -nx * sinYaw + z1 * cosYaw;
+
+      // Apply axial tilt to get planetary body coordinates (sx, sy, sz)
+      const sx = wx * cTilt - wy * sTilt;
+      const sy = Math.max(-1, Math.min(1, wx * sTilt + wy * cTilt));
+      const sz = wz;
+
+      // Convert 3D spherical point (sx, sy, sz) to (lat, lon) in degrees:
+      // At yaw=0, pitch=0, tilt=0: center of disk is (nx=0, ny=0, nz=1) -> (sx=0, sy=0, sz=1) -> lat=0, lon=0!
+      const latDeg = (Math.asin(sy) * 180) / Math.PI;
+      const lonDeg = (Math.atan2(sx, sz) * 180) / Math.PI;
+
+      const mapX = Math.floor((((lonDeg + 180) % 360) + 360) % 360);
+      const mapY = Math.max(0, Math.min(179, Math.floor(90 - latDeg)));
+
+      // Sample the exact surface generator texel!
+      // For 'satellite' on the 3D globe, we apply 3D normal-map bump relief directly in 3D sphere lighting below
+      const texel = evaluateSurfaceMapTexel(
+        surfaceModel,
+        mapX,
+        mapY,
+        activeLayer,
+        showCloudsOverlay,
+        activeLayer !== 'satellite'
+      );
+
+      if (isBlankSurfaceLayer) {
+        data[pIdx] = texel.r;
+        data[pIdx + 1] = texel.g;
+        data[pIdx + 2] = texel.b;
+        data[pIdx + 3] = 255;
+        continue;
+      }
+
+      // Compute 3D spherical illumination + normal-map relief bump in camera/world space
+      const bumpScale = surfaceModel.isNoSurface ? 8 : texel.isWater ? 12 : 38;
+      const bNx = wx - texel.dhdx * bumpScale * 0.45;
+      const bNy = wy + texel.dhdy * bumpScale * 0.45;
+      const bNz = wz;
+      const bLen = Math.sqrt(bNx * bNx + bNy * bNy + bNz * bNz) || 1;
+
+      const ndotl = (bNx * lx + bNy * ly + bNz * lz) / bLen;
+      const smoothNdotL = wx * lx + wy * ly + wz * lz;
+
+      // In data layers (biomes, topography, temperature, moisture, plates), keep nightside brighter so the user can inspect the full globe
+      const isDataLayer = activeLayer !== 'satellite' && activeLayer !== 'clouds';
+      const ambientMin = isDataLayer ? 0.58 : 0.08;
+      const atmoScatter = hasAtmoGlow ? 0.16 : 0.04;
+      const diff = isDataLayer
+        ? Math.max(ambientMin, Math.min(1.08, 0.68 + 0.38 * ndotl))
+        : Math.max(ambientMin, Math.min(1.06, (ndotl + atmoScatter) / (1 + atmoScatter)));
+
+      let litR = texel.r * diff * (0.84 + 0.16 * (starR / 255));
+      let litG = texel.g * diff * (0.84 + 0.16 * (starG / 255));
+      let litB = texel.b * diff * (0.84 + 0.16 * (starB / 255));
+
+      // Specular glint on liquid seas in 'satellite' mode
+      if (activeLayer === 'satellite' && texel.isWater && smoothNdotL > 0) {
+        const hx = lCamX;
+        const hy = -lCamY;
+        const hz = lCamZ + 1.0;
+        const hLen = Math.sqrt(hx * hx + hy * hy + hz * hz) || 1;
+        const ndoth = Math.max(0, (nx * hx + ny * hy + nz * hz) / hLen);
+        // Attenuate ocean glint under thick cloud decks
+        const cloudAtten = showCloudsOverlay ? Math.max(0.1, 1.0 - surfaceModel.cloudOpacity * 0.75) : 1.0;
+        const spec = Math.pow(ndoth, 22) * 0.65 * cloudAtten;
+        litR += 235 * spec;
+        litG += 245 * spec;
+        litB += 255 * spec;
+      }
+
+      // Self-luminous volcanic calderas, molten oceans, & magma fissures glow even on the nightside
+      if (texel.isSelfLuminous) {
+        litR = Math.max(litR, texel.r * 0.92);
+        litG = Math.max(litG, texel.g * 0.92);
+        litB = Math.max(litB, texel.b * 0.92);
+      }
+
+      // Atmospheric Fresnel Limb Glow (inner rim scattering)
+      if (hasAtmoGlow && (activeLayer === 'satellite' || activeLayer === 'clouds')) {
+        const fresnel = Math.pow(1 - nz, 2.5);
+        const sunRim = Math.max(0.22, Math.min(0.95, (smoothNdotL + 0.48) * 0.78));
+        const limbStrength = fresnel * sunRim * atmoGlowStrength * 0.82;
+        litR = litR + (atmoGlowRgb[0] - litR) * limbStrength;
+        litG = litG + (atmoGlowRgb[1] - litG) * limbStrength;
+        litB = litB + (atmoGlowRgb[2] - litB) * limbStrength;
+      }
+
+      // Optional Lat/Lon Grid lines on the 3D Globe
+      if (showGrid) {
+        const nearParallel = Math.abs(((latDeg + 90) % 30) - 15) > 14.35;
+        const nearMeridian = Math.abs(((lonDeg + 180) % 60) - 30) > 29.25;
+        const nearEquator = Math.abs(latDeg) < 0.65;
+        const nearPrime = Math.abs(lonDeg) < 0.65;
+        if (nearEquator || nearPrime) {
+          litR = litR * 0.6 + 56 * 0.4;
+          litG = litG * 0.6 + 189 * 0.4;
+          litB = litB * 0.6 + 248 * 0.4;
+        } else if (nearParallel || nearMeridian) {
+          litR = litR * 0.82 + 255 * 0.18;
+          litG = litG * 0.82 + 255 * 0.18;
+          litB = litB * 0.82 + 255 * 0.18;
+        }
+      }
+
+      // Front of ring (in front of sphere: ringZ > 0)
+      if (ringAlpha > 0 && ringZ > 0) {
+        litR = litR + (ringR - litR) * ringAlpha;
+        litG = litG + (ringG - litG) * ringAlpha;
+        litB = litB + (ringB - litB) * ringAlpha;
+      }
+
+      data[pIdx] = Math.max(0, Math.min(255, Math.round(litR)));
+      data[pIdx + 1] = Math.max(0, Math.min(255, Math.round(litG)));
+      data[pIdx + 2] = Math.max(0, Math.min(255, Math.round(litB)));
+      data[pIdx + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+
+  // If selectedCoords is provided, project landing site marker onto visible hemisphere of the 3D globe
+  if (options.selectedCoords && !isBlankSurfaceLayer) {
+    const sLatRad = (options.selectedCoords.lat * Math.PI) / 180;
+    const sLonRad = (options.selectedCoords.lon * Math.PI) / 180;
+    const psx = Math.cos(sLatRad) * Math.sin(sLonRad);
+    const psy = Math.sin(sLatRad);
+    const psz = Math.cos(sLatRad) * Math.cos(sLonRad);
+
+    // Inverse axial tilt: (psx, psy, psz) -> world (wx, wy, wz)
+    const wx = psx * cTilt + psy * sTilt;
+    const wy = -psx * sTilt + psy * cTilt;
+    const wz = psz;
+
+    // Inverse yaw & pitch: world (wx, wy, wz) -> camera (nx, ny, nz)
+    const x1 = wx * cosYaw - wz * sinYaw;
+    const z1 = wx * sinYaw + wz * cosYaw;
+    const camNx = x1;
+    const camNy = wy * cosPitch + z1 * sinPitch;
+    const camNz = -wy * sinPitch + z1 * cosPitch;
+
+    if (camNz > 0.05) {
+      const mPx = cx + camNx * R;
+      const mPy = cy - camNy * R;
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(mPx, mPy, 5.5, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.arc(mPx, mPy, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  return { cx, cy, R };
+}
+
+/**
+ * Inverse-projects a 2D pixel click/hover (px, py) on the 3D Globe canvas into planetary (lat, lon) degrees,
+ * or returns null if the pointer is outside the globe disk.
+ */
+export function pickLatLonFromProjectedGlobe(
+  px: number,
+  py: number,
+  cx: number,
+  cy: number,
+  R: number,
+  rotYaw: number,
+  rotPitch: number,
+  axialTiltDeg = 0
+): { lat: number; lon: number } | null {
+  const dx = px - cx;
+  const dy = py - cy;
+  const distSq = dx * dx + dy * dy;
+  if (distSq > R * R) return null;
+
+  const nx = dx / R;
+  const ny = -dy / R;
+  const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+
+  const cosYaw = Math.cos(rotYaw);
+  const sinYaw = Math.sin(rotYaw);
+  const cosPitch = Math.cos(rotPitch);
+  const sinPitch = Math.sin(rotPitch);
+
+  const y1 = ny * cosPitch - nz * sinPitch;
+  const z1 = ny * sinPitch + nz * cosPitch;
+  const wx = nx * cosYaw + z1 * sinYaw;
+  const wy = y1;
+  const wz = -nx * sinYaw + z1 * cosYaw;
+
+  const tiltRad = (Math.max(0, Math.min(90, axialTiltDeg)) * Math.PI) / 180;
+  const cTilt = Math.cos(tiltRad * 0.38);
+  const sTilt = Math.sin(tiltRad * 0.38);
+
+  const sx = wx * cTilt - wy * sTilt;
+  const sy = Math.max(-1, Math.min(1, wx * sTilt + wy * cTilt));
+  const sz = wz;
+
+  const lat = Math.round((Math.asin(sy) * 180) / Math.PI);
+  const lon = Math.round((Math.atan2(sx, sz) * 180) / Math.PI);
+  return { lat: Math.max(-90, Math.min(90, lat)), lon: Math.max(-180, Math.min(180, lon)) };
+}
+
 
 /**
  * Samples exact telemetry at a given latitude (-90 to +90) and longitude (-180 to +180).

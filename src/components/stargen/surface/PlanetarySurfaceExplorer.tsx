@@ -1,11 +1,15 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   Map as MapIcon,
+  Globe,
   Compass,
   Sun,
   Eye,
   Layers,
   Download,
+  Play,
+  Pause,
+  RotateCcw,
 } from 'lucide-react';
 import {
   RealisticPlanetBody,
@@ -15,9 +19,12 @@ import { RealisticMoon, RealisticStarNode } from '../../../types/astrophysics';
 import {
   generatePlanetarySurfaceModel,
   sampleSurfacePoint,
+  evaluateSurfaceMapTexel,
+  renderSurfaceProjectedGlobeToCanvas,
+  pickLatLonFromProjectedGlobe,
   PlanetarySurfaceModel,
   SurfacePointTelemetry,
-  BIOMES
+  SurfaceMapLayerType,
 } from './surfaceGenMath';
 
 interface PlanetarySurfaceExplorerProps {
@@ -27,8 +34,8 @@ interface PlanetarySurfaceExplorerProps {
   stars: RealisticStarNode[];
 }
 
-type MapLayer = 'satellite' | 'clouds' | 'biomes' | 'topography' | 'temperature' | 'moisture' | 'plates';
-type DisplayMode = 'map' | 'horizon';
+type MapLayer = SurfaceMapLayerType;
+type DisplayMode = 'map' | 'globe' | 'horizon';
 
 export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> = ({
   planet,
@@ -45,7 +52,22 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
   const [cameraPanDeg, setCameraPanDeg] = useState<number>(0);
   const [showGrid, setShowGrid] = useState<boolean>(true);
 
+  // Interactive 3D Globe Rotation State
+  const [globeYaw, setGlobeYaw] = useState<number>(0);
+  const [globePitch, setGlobePitch] = useState<number>(0);
+  const [isDraggingGlobe, setIsDraggingGlobe] = useState<boolean>(false);
+  const [autoSpinGlobe, setAutoSpinGlobe] = useState<boolean>(false);
+  const globeDragRef = useRef<{
+    startX: number;
+    startY: number;
+    startYaw: number;
+    startPitch: number;
+    moved: boolean;
+  } | null>(null);
+  const globeGeomRef = useRef<{ cx: number; cy: number; R: number }>({ cx: 210, cy: 170, R: 140 });
+
   const mapCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const globeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const horizonCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Generate physics surface model
@@ -63,6 +85,18 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     surfaceModel.isNoSurface &&
     (activeLayer === 'biomes' || activeLayer === 'topography' || activeLayer === 'moisture' || activeLayer === 'plates');
 
+  // Auto-spin loop for 3D Globe view
+  useEffect(() => {
+    if (displayMode !== 'globe' || !autoSpinGlobe || isDraggingGlobe) return;
+    let rafId = 0;
+    const step = () => {
+      setGlobeYaw((prev) => (prev + 0.022) % (Math.PI * 2));
+      rafId = requestAnimationFrame(step);
+    };
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
+  }, [displayMode, autoSpinGlobe, isDraggingGlobe]);
+
   // Render 2D Cartographic Surface Map
   useEffect(() => {
     if (displayMode !== 'map') return;
@@ -79,364 +113,13 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const imgData = ctx.createImageData(width, height);
     const data = imgData.data;
 
-    const {
-      hypsometry,
-      temperatureGrid,
-      biomeGrid,
-      craterGrid,
-      fractureGrid,
-      volcanoGrid,
-      cloudGrid,
-      cloudOpacity,
-      atmospherePalette,
-      floraPalette,
-      seaLevelNormalized,
-      isNoSurface,
-      isIcyWorld,
-      isMoltenWorld,
-      hasLiquid,
-      seaPalette,
-    } = surfaceModel;
-
-    // Directional sun light vector for normal-map relief (from upper-left / NW)
-    const Lx = -0.62;
-    const Ly = -0.48;
-    const Lz = 0.62;
-
     for (let y = 0; y < height; y++) {
-      const lat = 90 - y;
-      const yUp = Math.max(0, y - 1);
-      const yDown = Math.min(height - 1, y + 1);
-
       for (let x = 0; x < width; x++) {
-        const idx = y * width + x;
-        const pIdx = idx * 4;
-
-        // 1. Gas Giants, Ice Giants, & Supercritical Water Worlds have NO solid surface:
-        // Solid surface layers (biomes, topography, moisture, plates) are blank!
-        if (isBlankSurfaceLayer) {
-          data[pIdx] = 10;
-          data[pIdx + 1] = 15;
-          data[pIdx + 2] = 26;
-          data[pIdx + 3] = 255;
-          continue;
-        }
-
-        // 2. Dedicated Cloud & Atmosphere Layer OR No-Surface World in Satellite/Clouds view (100% Cloud/Atmosphere Opacity)
-        if (activeLayer === 'clouds' || (isNoSurface && activeLayer === 'satellite')) {
-          if (cloudOpacity <= 0.001 && !isNoSurface) {
-            // Vacuum world in Clouds layer: empty dark space canvas
-            data[pIdx] = 8;
-            data[pIdx + 1] = 12;
-            data[pIdx + 2] = 22;
-            data[pIdx + 3] = 255;
-            continue;
-          }
-
-          const cVal = cloudGrid[idx];
-          const xLeft = (x + width - 1) % width;
-          const xRight = (x + 1) % width;
-          const dcdx = (cloudGrid[y * width + xRight] - cloudGrid[y * width + xLeft]) * 0.5;
-          const dcdy = (cloudGrid[yDown * width + x] - cloudGrid[yUp * width + x]) * 0.5;
-
-          let r = 0;
-          let g = 0;
-          let b = 0;
-
-          if (isNoSurface) {
-            // 100% Opacity Sudarsky Class I-V or Supercritical Water World (Class II water clouds in blue water atmosphere)
-            if (surfaceModel.isSupercritical) {
-              // Blue water atmosphere base with swirling white~grey water clouds
-              const cloudCover = Math.max(0, Math.min(1, (cVal - 0.18) / 0.78));
-              const greyShade = 0.76 + 0.24 * Math.sin(cVal * Math.PI);
-              const cr = atmospherePalette.bandLightRgb[0] * greyShade;
-              const cg = atmospherePalette.bandLightRgb[1] * greyShade;
-              const cb = atmospherePalette.bandLightRgb[2] * greyShade;
-              r = atmospherePalette.atmoRgb[0] * (1 - cloudCover * 0.88) + cr * (cloudCover * 0.88);
-              g = atmospherePalette.atmoRgb[1] * (1 - cloudCover * 0.88) + cg * (cloudCover * 0.88);
-              b = atmospherePalette.atmoRgb[2] * (1 - cloudCover * 0.88) + cb * (cloudCover * 0.88);
-            } else {
-              // Sudarsky Class I-V & Ice Giant zonal cloud bands
-              r = atmospherePalette.bandDarkRgb[0] + (atmospherePalette.bandLightRgb[0] - atmospherePalette.bandDarkRgb[0]) * cVal;
-              g = atmospherePalette.bandDarkRgb[1] + (atmospherePalette.bandLightRgb[1] - atmospherePalette.bandDarkRgb[1]) * cVal;
-              b = atmospherePalette.bandDarkRgb[2] + (atmospherePalette.bandLightRgb[2] - atmospherePalette.bandDarkRgb[2]) * cVal;
-            }
-
-            // Soft 3D cloud-top relief shading
-            const cnx = -dcdx * 14;
-            const cny = -dcdy * 14;
-            const invLen = 1.0 / Math.sqrt(cnx * cnx + cny * cny + 1.0);
-            const NdotL = (cnx * Lx + cny * Ly + Lz) * invLen;
-            const cloudRelief = 0.95 + (NdotL - Lz) * 0.65;
-            r = Math.max(0, Math.min(255, Math.round(r * cloudRelief)));
-            g = Math.max(0, Math.min(255, Math.round(g * cloudRelief)));
-            b = Math.max(0, Math.min(255, Math.round(b * cloudRelief)));
-          } else {
-            // Solid-surface planet's Cloud & Atmosphere layer rendered over dark telemetry backdrop with proportional opacity
-            const bgR = 10;
-            const bgG = 15;
-            const bgB = 26;
-            const localAlpha = Math.min(1.0, cloudOpacity * (0.35 + 0.65 * cVal));
-            const cr = atmospherePalette.atmoRgb[0] * (1 - cVal) + atmospherePalette.cloudRgb[0] * cVal;
-            const cg = atmospherePalette.atmoRgb[1] * (1 - cVal) + atmospherePalette.cloudRgb[1] * cVal;
-            const cb = atmospherePalette.atmoRgb[2] * (1 - cVal) + atmospherePalette.cloudRgb[2] * cVal;
-
-            r = Math.round(bgR * (1 - localAlpha) + cr * localAlpha);
-            g = Math.round(bgG * (1 - localAlpha) + cg * localAlpha);
-            b = Math.round(bgB * (1 - localAlpha) + cb * localAlpha);
-          }
-
-          data[pIdx] = r;
-          data[pIdx + 1] = g;
-          data[pIdx + 2] = b;
-          data[pIdx + 3] = 255;
-          continue;
-        }
-
-        const h = hypsometry[idx];
-        const volcVal = volcanoGrid[idx];
-        const isWater = !isNoSurface && hasLiquid && h <= seaLevelNormalized && volcVal < 0.35;
-
-        // Compute horizontal & vertical elevation gradients for normal map
-        const xLeft = (x + width - 1) % width;
-        const xRight = (x + 1) % width;
-        const dhdx = (hypsometry[y * width + xRight] - hypsometry[y * width + xLeft]) * 0.5;
-        const dhdy = (hypsometry[yDown * width + x] - hypsometry[yUp * width + x]) * 0.5;
-
-        let r = 0;
-        let g = 0;
-        let b = 0;
-
-        if (activeLayer === 'satellite' || activeLayer === 'biomes') {
-          if (isWater) {
-            // Smooth solvent-specific sea color gradient by depth
-            const depthRatio = Math.max(0, Math.min(1, (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized)));
-            if (activeLayer === 'biomes') {
-              const biomeId = biomeGrid[idx];
-              const rgb = biomeId === 0 ? seaPalette.trenchRgb : biomeId === 1 ? seaPalette.deepRgb : seaPalette.shallowRgb;
-              r = rgb[0];
-              g = rgb[1];
-              b = rgb[2];
-            } else {
-              // Continuous bathymetric color blend for Satellite view
-              if (depthRatio < 0.35) {
-                const t = depthRatio / 0.35;
-                r = seaPalette.shallowRgb[0] + (seaPalette.deepRgb[0] - seaPalette.shallowRgb[0]) * t;
-                g = seaPalette.shallowRgb[1] + (seaPalette.deepRgb[1] - seaPalette.shallowRgb[1]) * t;
-                b = seaPalette.shallowRgb[2] + (seaPalette.deepRgb[2] - seaPalette.shallowRgb[2]) * t;
-              } else {
-                const t = (depthRatio - 0.35) / 0.65;
-                r = seaPalette.deepRgb[0] + (seaPalette.trenchRgb[0] - seaPalette.deepRgb[0]) * t;
-                g = seaPalette.deepRgb[1] + (seaPalette.trenchRgb[1] - seaPalette.deepRgb[1]) * t;
-                b = seaPalette.deepRgb[2] + (seaPalette.trenchRgb[2] - seaPalette.deepRgb[2]) * t;
-              }
-            }
-          } else {
-            const biomeId = biomeGrid[idx];
-            // Biomes 3, 4, 5, 6 use dynamic floraPalette (green ONLY for water-based life around F & G stars; barren tan if sterile)
-            let hex = (BIOMES.find((bm) => bm.id === biomeId) || BIOMES[4]).color;
-            if (biomeId === 3) hex = floraPalette.marshHex;
-            else if (biomeId === 4) hex = floraPalette.plainsHex;
-            else if (biomeId === 5) hex = floraPalette.woodlandHex;
-            else if (biomeId === 6) hex = floraPalette.taigaHex;
-
-            r = parseInt(hex.slice(1, 3), 16);
-            g = parseInt(hex.slice(3, 5), 16);
-            b = parseInt(hex.slice(5, 7), 16);
-
-            // Discrete Volcanoes on worlds with active geology (Earth, Venus, Io, etc.):
-            // Dark basaltic volcanic cone slopes rising to a glowing yellow-orange central lava caldera
-            if (volcVal > 0.15) {
-              if (volcVal > 1.1) {
-                // Incandescent yellow-orange summit lava caldera
-                const calderaT = Math.min(1.0, (volcVal - 1.1) / 0.8);
-                r = Math.round(238 + 17 * calderaT);
-                g = Math.round(108 + 116 * calderaT);
-                b = Math.round(14 + 34 * calderaT);
-              } else {
-                // Dark volcanic basalt/tephra cone edifice with warm rim glow near summit
-                const coneT = Math.min(1.0, volcVal / 0.95);
-                const basaltR = coneT > 0.78 ? 148 : 46;
-                const basaltG = coneT > 0.78 ? 58 : 34;
-                const basaltB = coneT > 0.78 ? 22 : 30;
-                const blend = Math.min(0.88, coneT * 0.9);
-                r = r * (1 - blend) + basaltR * blend;
-                g = g * (1 - blend) + basaltG * blend;
-                b = b * (1 - blend) + basaltB * blend;
-              }
-            }
-
-            const crackVal = fractureGrid[idx];
-            if (isMoltenWorld && crackVal > 0.08) {
-              // Incandescent yellow-orange lava fissures cutting across dark basalt crust
-              const t = Math.min(1.0, crackVal / 0.8);
-              if (t < 0.45) {
-                const m = t / 0.45;
-                r = r * (1 - m * 0.85) + 235 * (m * 0.85);
-                g = g * (1 - m * 0.85) + 98 * (m * 0.85);
-                b = b * (1 - m * 0.85) + 12 * (m * 0.85);
-              } else {
-                const c = (t - 0.45) / 0.55;
-                r = 235 + (255 - 235) * c;
-                g = 98 + (212 - 98) * c;
-                b = 12 + (42 - 12) * c;
-              }
-            } else if (isIcyWorld && crackVal > 0.08) {
-              // Blend Europan mineral-stained double-ridge margins & deep cryo-blue chasm cores
-              const t = Math.min(1.0, crackVal / 0.85);
-              if (t < 0.4) {
-                const m = t / 0.4;
-                r = r * (1 - m * 0.35) + 155 * (m * 0.35);
-                g = g * (1 - m * 0.35) + 125 * (m * 0.35);
-                b = b * (1 - m * 0.35) + 115 * (m * 0.35);
-              } else {
-                const c = (t - 0.4) / 0.6;
-                r = r * (1 - c * 0.72) + 38 * (c * 0.72);
-                g = g * (1 - c * 0.65) + 108 * (c * 0.65);
-                b = b * (1 - c * 0.55) + 158 * (c * 0.55);
-              }
-            }
-
-            if (activeLayer === 'satellite' && !isNoSurface && volcVal <= 1.1) {
-              // Subtle hypsometric tinting + crater ejecta brightening on land
-              const altRatio = Math.max(0, (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized));
-              const craterBoost = craterGrid[idx] * 14;
-              r = Math.min(255, r * (0.92 + altRatio * 0.22) + craterBoost);
-              g = Math.min(255, g * (0.92 + altRatio * 0.22) + craterBoost);
-              b = Math.min(255, b * (0.92 + altRatio * 0.22) + craterBoost * 1.05);
-            }
-          }
-
-          // Apply 3D Normal-Map Relief Overlay in 'satellite' mode
-          if (activeLayer === 'satellite') {
-            const bumpScale = isWater ? 14 : 46;
-            const nx = -dhdx * bumpScale;
-            const ny = -dhdy * bumpScale;
-            const nz = 1.0;
-            const invLen = 1.0 / Math.sqrt(nx * nx + ny * ny + nz * nz);
-            const NdotL = (nx * Lx + ny * Ly + nz * Lz) * invLen;
-            // Lava calderas remain self-luminous
-            const reliefShade =
-              volcVal > 1.1
-                ? 1.0
-                : isWater
-                ? isMoltenWorld
-                  ? 0.96 + (NdotL - Lz) * 0.45
-                  : 0.88 + (NdotL - Lz) * 0.65
-                : 0.94 + (NdotL - Lz) * 1.35;
-
-            r = Math.max(0, Math.min(255, Math.round(r * reliefShade)));
-            g = Math.max(0, Math.min(255, Math.round(g * reliefShade)));
-            b = Math.max(0, Math.min(255, Math.round(b * reliefShade)));
-
-            // Composite Cloud & Atmosphere Layer on top of Satellite surface with opacity proportional to atmospheric density
-            if (showCloudsOverlay && cloudOpacity > 0.001) {
-              const cVal = cloudGrid[idx];
-              // Atmosphere Rayleigh/haze tint + swirling cloud decks
-              const atmoTintWeight = cloudOpacity * 0.24;
-              r = r * (1 - atmoTintWeight) + atmospherePalette.atmoRgb[0] * atmoTintWeight;
-              g = g * (1 - atmoTintWeight) + atmospherePalette.atmoRgb[1] * atmoTintWeight;
-              b = b * (1 - atmoTintWeight) + atmospherePalette.atmoRgb[2] * atmoTintWeight;
-
-              const cloudAlpha = Math.min(0.95, cloudOpacity * Math.pow(cVal, 0.85) * 0.92);
-              r = Math.round(r * (1 - cloudAlpha) + atmospherePalette.cloudRgb[0] * cloudAlpha);
-              g = Math.round(g * (1 - cloudAlpha) + atmospherePalette.cloudRgb[1] * cloudAlpha);
-              b = Math.round(b * (1 - cloudAlpha) + atmospherePalette.cloudRgb[2] * cloudAlpha);
-            }
-          }
-        } else if (activeLayer === 'topography') {
-          if (isWater) {
-            const depthRatio = (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized);
-            r = Math.round(seaPalette.trenchRgb[0] + (seaPalette.shallowRgb[0] - seaPalette.trenchRgb[0]) * (1 - depthRatio) * 0.75);
-            g = Math.round(seaPalette.trenchRgb[1] + (seaPalette.shallowRgb[1] - seaPalette.trenchRgb[1]) * (1 - depthRatio) * 0.75);
-            b = Math.round(seaPalette.trenchRgb[2] + (seaPalette.shallowRgb[2] - seaPalette.trenchRgb[2]) * (1 - depthRatio) * 0.75);
-          } else if (volcVal > 1.1) {
-            // Active volcanic lava caldera in topography view
-            r = 251; g = 191; b = 36;
-          } else {
-            // Land elevation: Only use green in lowland band if water-based life around F/G star! Otherwise use flora pigment or warm ochre/tan
-            const altRatio = (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized);
-            if (altRatio < 0.28) {
-              const t = altRatio / 0.28;
-              r = Math.round(floraPalette.lowRgb[0] * (1 - t * 0.3) + 145 * (t * 0.3));
-              g = Math.round(floraPalette.lowRgb[1] * (1 - t * 0.3) + 115 * (t * 0.3));
-              b = Math.round(floraPalette.lowRgb[2] * (1 - t * 0.3) + 75 * (t * 0.3));
-            } else if (altRatio < 0.6) {
-              const t = (altRatio - 0.28) / 0.32;
-              r = Math.round(145 + t * 40);
-              g = Math.round(112 + t * 25);
-              b = Math.round(68 - t * 12);
-            } else if (altRatio < 0.85) {
-              r = 115; g = 98; b = 90;
-            } else {
-              r = 230; g = 238; b = 248;
-            }
-          }
-          // Add hillshading to topography layer so craters, cracks, and volcanic cones are sharp
-          const nx = -dhdx * 36;
-          const ny = -dhdy * 36;
-          const invLen = 1.0 / Math.sqrt(nx * nx + ny * ny + 1.0);
-          const NdotL = (nx * Lx + ny * Ly + Lz) * invLen;
-          const topoShade = volcVal > 1.1 ? 1.0 : 0.94 + (NdotL - Lz) * 1.15;
-          r = Math.max(0, Math.min(255, Math.round(r * topoShade)));
-          g = Math.max(0, Math.min(255, Math.round(g * topoShade)));
-          b = Math.max(0, Math.min(255, Math.round(b * topoShade)));
-        } else if (activeLayer === 'temperature') {
-          const T = temperatureGrid[idx];
-          // Thermal palette from cryo-violet/blue to amber/red/white (no misleading green)
-          if (T < 200) {
-            r = 32; g = 24; b = 128;
-          } else if (T < 273.15) {
-            const t = (T - 200) / 73.15;
-            r = Math.round(32 + t * 56);
-            g = Math.round(52 + t * 128);
-            b = Math.round(180 + t * 65);
-          } else if (T < 320) {
-            const t = (T - 273.15) / 46.85;
-            r = Math.round(140 + t * 105);
-            g = Math.round(185 + t * 25);
-            b = Math.round(190 - t * 150);
-          } else {
-            const t = Math.min(1.0, (T - 320) / 250);
-            r = Math.round(245 + t * 10);
-            g = Math.round(140 - t * 110);
-            b = Math.round(35 - t * 25);
-          }
-        } else if (activeLayer === 'moisture') {
-          const absLat = Math.abs(lat);
-          const isHadleyDry = absLat >= 18 && absLat <= 32;
-          if (isWater) {
-            r = seaPalette.shallowRgb[0];
-            g = seaPalette.shallowRgb[1];
-            b = seaPalette.shallowRgb[2];
-          } else if (!hasLiquid || isHadleyDry) {
-            r = 182; g = 138; b = 68; // Arid
-          } else {
-            const moist = Math.max(0.1, Math.min(1.0, Math.cos((absLat * Math.PI) / 180)));
-            // Use cyan-blue hydrosphere moisture scale unless water-based F/G chlorophyll life is present
-            if (floraPalette.hasWaterLife && surfaceModel.starTeff >= 5100 && surfaceModel.starTeff <= 6800) {
-              r = Math.round(45 + (1 - moist) * 95);
-              g = Math.round(85 + moist * 115);
-              b = Math.round(65 + moist * 125);
-            } else {
-              r = Math.round(135 - moist * 85);
-              g = Math.round(115 + moist * 55);
-              b = Math.round(90 + moist * 135);
-            }
-          }
-        } else if (activeLayer === 'plates') {
-          const pId = (Math.imul(Math.floor(x / 40), 7) + Math.imul(Math.floor(y / 30), 11) + surfaceModel.seed) % 8;
-          const colors = [
-            [220, 60, 60], [60, 140, 220], [220, 170, 45], [175, 65, 215],
-            [55, 195, 205], [225, 115, 50], [145, 120, 95], [115, 125, 145]
-          ];
-          const col = colors[Math.abs(pId) % colors.length];
-          r = col[0]; g = col[1]; b = col[2];
-        }
-
-        data[pIdx] = r;
-        data[pIdx + 1] = g;
-        data[pIdx + 2] = b;
+        const pIdx = (y * width + x) * 4;
+        const texel = evaluateSurfaceMapTexel(surfaceModel, x, y, activeLayer, showCloudsOverlay, true);
+        data[pIdx] = texel.r;
+        data[pIdx + 1] = texel.g;
+        data[pIdx + 2] = texel.b;
         data[pIdx + 3] = 255;
       }
     }
@@ -494,7 +177,43 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     ctx.beginPath();
     ctx.arc(markerX, markerY, 1.5, 0, Math.PI * 2);
     ctx.fill();
-  }, [displayMode, activeLayer, showCloudsOverlay, isBlankSurfaceLayer, surfaceModel, showGrid, selectedCoords]);
+  }, [displayMode, activeLayer, showCloudsOverlay, surfaceModel, showGrid, selectedCoords]);
+
+  // Render 3D Projected Globe View (projecting the exact 360x180 surface map onto a 3D sphere + atmosphere glow)
+  useEffect(() => {
+    if (displayMode !== 'globe') return;
+    const canvas = globeCanvasRef.current;
+    if (!canvas) return;
+
+    const isFast = isDraggingGlobe || autoSpinGlobe;
+    canvas.width = isFast ? 320 : 420;
+    canvas.height = isFast ? 250 : 330;
+
+    const geom = renderSurfaceProjectedGlobeToCanvas(canvas, surfaceModel, planet, moon, {
+      activeLayer,
+      showCloudsOverlay,
+      showGrid,
+      rotYaw: globeYaw,
+      rotPitch: globePitch,
+      transparentBg: false,
+      includeRings: !moon,
+      selectedCoords,
+    });
+    globeGeomRef.current = geom;
+  }, [
+    displayMode,
+    activeLayer,
+    showCloudsOverlay,
+    showGrid,
+    globeYaw,
+    globePitch,
+    isDraggingGlobe,
+    autoSpinGlobe,
+    surfaceModel,
+    planet,
+    moon,
+    selectedCoords,
+  ]);
 
   // Render First-Person Horizon Vista Canvas
   useEffect(() => {
@@ -861,11 +580,25 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     setHoverCoords({ lat, lon });
   };
 
+  // Click / Hover on 3D Globe to inspect and land
+  const getCoordsFromGlobeEvent = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = globeCanvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const px = (e.clientX - rect.left) * scaleX;
+    const py = (e.clientY - rect.top) * scaleY;
+    const { cx, cy, R } = globeGeomRef.current;
+    const tilt = (moon || planet).axialTiltDeg ?? 0;
+    return pickLatLonFromProjectedGlobe(px, py, cx, cy, R, globeYaw, globePitch, tilt);
+  };
+
   const handleDownloadMap = () => {
-    const canvas = mapCanvasRef.current;
+    const canvas = displayMode === 'globe' ? globeCanvasRef.current : mapCanvasRef.current;
     if (!canvas) return;
     const link = document.createElement('a');
-    link.download = `${(moon?.name || planet.planetClass).toLowerCase().replace(/[^a-z0-9]/g, '_')}_surface_map.png`;
+    link.download = `${(moon?.name || planet.planetClass).toLowerCase().replace(/[^a-z0-9]/g, '_')}_${displayMode}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
   };
@@ -880,7 +613,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     >
       {/* Surface Navigation Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-[#151d2c] p-3 rounded-xl border border-slate-800">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
             onClick={() => setDisplayMode('map')}
@@ -892,6 +625,19 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
           >
             <MapIcon className="w-3.5 h-3.5" />
             Cartographic Map
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDisplayMode('globe')}
+            className={`px-3 py-1.5 rounded-lg border font-bold flex items-center gap-1.5 transition cursor-pointer ${
+              displayMode === 'globe'
+                ? 'bg-indigo-950/80 border-indigo-500 text-indigo-200'
+                : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            3D Globe View
           </button>
 
           <button
@@ -908,7 +654,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
           </button>
         </div>
 
-        {displayMode === 'map' ? (
+        {displayMode === 'map' || displayMode === 'globe' ? (
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[10px] text-slate-400 mr-1 flex items-center gap-1">
               <Layers className="w-3 h-3" />
@@ -963,7 +709,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               type="button"
               onClick={handleDownloadMap}
               className="p-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 cursor-pointer ml-1"
-              title="Download High-Res Surface Map"
+              title="Download High-Res Surface Map or Globe"
             >
               <Download className="w-3.5 h-3.5" />
             </button>
@@ -1043,6 +789,136 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
                 {surfaceModel.hasActiveGeology
                   ? `Active Geology (${surfaceModel.volcanoCount} Volcanic Cones)`
                   : 'Click anywhere on surface to deploy landing site'}
+              </span>
+            </div>
+          </div>
+        ) : displayMode === 'globe' ? (
+          <div className="w-full flex flex-col items-center relative">
+            {/* Top 3D Globe Orientation & Spin Controls */}
+            <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 bg-slate-950/80 backdrop-blur-xs px-2 py-1 rounded-lg border border-slate-800 text-[10px]">
+              <button
+                type="button"
+                onClick={() => setAutoSpinGlobe((s) => !s)}
+                className={`px-2 py-0.5 rounded flex items-center gap-1 cursor-pointer transition ${
+                  autoSpinGlobe ? 'bg-sky-600 text-white font-bold' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                {autoSpinGlobe ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                Spin
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAutoSpinGlobe(false);
+                  setGlobeYaw(-0.52);
+                  setGlobePitch(-0.18);
+                }}
+                className="px-1.5 py-0.5 rounded text-amber-300 hover:bg-slate-800 cursor-pointer"
+              >
+                ☀ Dayside
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAutoSpinGlobe(false);
+                  setGlobeYaw(0);
+                  setGlobePitch(0);
+                }}
+                className="px-1.5 py-0.5 rounded text-sky-300 hover:bg-slate-800 cursor-pointer"
+              >
+                ◐ Term
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAutoSpinGlobe(false);
+                  setGlobeYaw(2.55);
+                  setGlobePitch(0.18);
+                }}
+                className="px-1.5 py-0.5 rounded text-indigo-300 hover:bg-slate-800 cursor-pointer"
+              >
+                ☾ Night
+              </button>
+              {(Math.abs(globeYaw) > 0.01 || Math.abs(globePitch) > 0.01) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAutoSpinGlobe(false);
+                    setGlobeYaw(0);
+                    setGlobePitch(0);
+                  }}
+                  className="p-0.5 rounded text-slate-400 hover:text-white cursor-pointer"
+                  title="Reset 3D Globe Orientation"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            <canvas
+              ref={globeCanvasRef}
+              className={`h-80 sm:h-96 w-auto rounded-lg border border-slate-800/80 shadow-2xl transition ${
+                isDraggingGlobe ? 'cursor-grabbing' : 'cursor-grab'
+              }`}
+              onMouseDown={(e) => {
+                if (e.button !== 0) return;
+                setIsDraggingGlobe(true);
+                globeDragRef.current = {
+                  startX: e.clientX,
+                  startY: e.clientY,
+                  startYaw: globeYaw,
+                  startPitch: globePitch,
+                  moved: false,
+                };
+              }}
+              onMouseMove={(e) => {
+                if (isDraggingGlobe && globeDragRef.current) {
+                  const dx = e.clientX - globeDragRef.current.startX;
+                  const dy = e.clientY - globeDragRef.current.startY;
+                  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+                    globeDragRef.current.moved = true;
+                  }
+                  setGlobeYaw(globeDragRef.current.startYaw - dx * 0.014);
+                  setGlobePitch(Math.max(-1.35, Math.min(1.35, globeDragRef.current.startPitch + dy * 0.013)));
+                } else {
+                  const coords = getCoordsFromGlobeEvent(e);
+                  setHoverCoords(coords);
+                }
+              }}
+              onMouseUp={(e) => {
+                if (globeDragRef.current && !globeDragRef.current.moved) {
+                  const coords = getCoordsFromGlobeEvent(e);
+                  if (coords) setSelectedCoords(coords);
+                }
+                setIsDraggingGlobe(false);
+                globeDragRef.current = null;
+              }}
+              onMouseLeave={() => {
+                setIsDraggingGlobe(false);
+                globeDragRef.current = null;
+                setHoverCoords(null);
+              }}
+            />
+
+            {isBlankSurfaceLayer && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-4 text-center">
+                <div className="bg-slate-950/85 border border-slate-700/80 rounded-xl px-4 py-3 shadow-2xl">
+                  <p className="text-sky-300 font-bold text-xs tracking-wide uppercase">
+                    No Solid Surface — Continuous Fluid / Gas Envelope
+                  </p>
+                  <p className="text-slate-400 text-[11px] mt-1">
+                    Switch to Satellite or Atmosphere (100%) to inspect the 3D spherical cloud envelope.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="w-full flex justify-between items-center text-[10px] text-slate-500 px-2 mt-1 flex-wrap gap-2">
+              <span>
+                3D Spherical Surface Projection • Drag to rotate globe • Click globe to deploy landing site
+              </span>
+              <span>
+                {surfaceModel.atmospherePalette.classLabel} (Cloud Opacity {Math.round(surfaceModel.cloudOpacity * 100)}%)
               </span>
             </div>
           </div>
@@ -1126,7 +1002,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               style={{ backgroundColor: currentTelemetry.biomeColor }}
             />
             <b className="text-slate-200 truncate">{currentTelemetry.biome}</b>
-            {displayMode === 'map' && (
+            {displayMode !== 'horizon' && (
               <button
                 type="button"
                 onClick={() => setDisplayMode('horizon')}
@@ -1141,4 +1017,5 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     </div>
   );
 };
+
 
