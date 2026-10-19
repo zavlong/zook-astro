@@ -696,8 +696,8 @@ export function getSolventSeaPalette(solventRaw: string | undefined | null): Sol
     return {
       solventKey: 'Silicate Magma',
       displayName: 'Silicate Magma',
-      freezingPointK: 850.0,
-      iceBiomeName: 'Solidified Basalt Crust',
+      freezingPointK: 800.0,
+      iceBiomeName: 'Solidified Basalt Rock Crust',
       trenchRgb: [215, 78, 8],
       deepRgb: [248, 138, 14],
       shallowRgb: [255, 214, 46],
@@ -1812,10 +1812,12 @@ export function generatePlanetarySurfaceModel(
         : (hNorm - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized);
       const localPressureBar = pBarAtmo * Math.exp(-altitudeKm / baseScaleHeightKm);
       const localBoilingPointK = computeLocalBoilingPointK(seaPalette, localPressureBar);
+      const isMoltenMagmaTemp = !isNoSurface && Tlocal >= 800;
       const isBelowFreezing = freezingPointK > 0 && Tlocal < freezingPointK;
       const isAboveBoiling =
         !isNoSurface &&
         !isMoltenWorld &&
+        !isMoltenMagmaTemp &&
         (hasLiquid || pBarAtmo >= 0.005) &&
         Tlocal > localBoilingPointK;
 
@@ -1826,14 +1828,38 @@ export function generatePlanetarySurfaceModel(
         biomeGrid[idx] = 20; // Gas Giant Cloud Deck
       } else if (volcVal > 1.1) {
         biomeGrid[idx] = 15; // Active Lava Caldera & Fissure (yellow-orange)
+      } else if (isMoltenMagmaTemp) {
+        // Local temperature >= 800 K -> Rock melts into liquid Silicate Magma!
+        if (isBelowSeaLevel && seaPalette.solventKey === 'Silicate Magma') {
+          const waterDepthRatio = (seaLevelNormalized - hNorm) / Math.max(0.001, seaLevelNormalized);
+          if (waterDepthRatio > 0.6) {
+            biomeGrid[idx] = 0; // Abyssal Magma Trench
+          } else if (waterDepthRatio > 0.25) {
+            biomeGrid[idx] = 1; // Deep Magma Ocean
+          } else {
+            biomeGrid[idx] = 2; // Shallow Magma Sea
+          }
+        } else {
+          biomeGrid[idx] = 15; // Molten Silicate Magma / Lava Surface
+        }
       } else if (volcVal > 0.38) {
-        biomeGrid[idx] = 22; // Active Volcanic Shield & Basalt Edifice
+        biomeGrid[idx] = 22; // Active Volcanic Shield & Basalt Edifice (solid rock cone at T < 800 K)
+      } else if (isMoltenWorld || seaPalette.solventKey === 'Silicate Magma') {
+        // Local temperature < 800 K on a magma/molten world -> Magma solidifies into solid Rock!
+        if (isBelowSeaLevel) {
+          biomeGrid[idx] = 14; // Solidified Basalt Crust in cooled magma sea basin
+        } else if (altRatio > 0.72) {
+          biomeGrid[idx] = 12; // Solidified Mountain Cordillera
+        } else if (altRatio > 0.42) {
+          biomeGrid[idx] = 11; // Solidified High Plateau / Badlands
+        } else if (craterGrid[idx] > 0.35 && pBarAtmo < 0.3) {
+          biomeGrid[idx] = 16; // Cratered Basalt Regolith
+        } else {
+          biomeGrid[idx] = 14; // Solidified Basalt Volcanic Rock Crust
+        }
       } else if (isBelowFreezing) {
         // Local temperature dropped below the liquid's freezing point -> replace biome here with Ice!
-        if (isMoltenWorld) {
-          // Solidified silicate magma crust (with incandescent lava rifts along active fractures)
-          biomeGrid[idx] = fractureGrid[idx] > 0.22 ? 15 : 14;
-        } else if (fractureGrid[idx] > 0.28 && (isIcyWorld || isBelowSeaLevel)) {
+        if (fractureGrid[idx] > 0.28 && (isIcyWorld || isBelowSeaLevel)) {
           biomeGrid[idx] = 21; // Cryotectonic Ice Fissure (Linea)
         } else if (isIcyWorld && Tlocal < 95 && !hasLiquid) {
           biomeGrid[idx] = 18; // Cryovolcanic Nitrogen Plains
@@ -1848,7 +1874,7 @@ export function generatePlanetarySurfaceModel(
         // Local temperature rose above the liquid's local boiling point -> replace biome here with Desert!
         biomeGrid[idx] = 10; // Hyper-Arid Dunes / Desert
       } else if (isBelowSeaLevel) {
-        // Unfrozen liquid sea/ocean (Tlocal >= freezingPointK)
+        // Unfrozen liquid sea/ocean (freezingPointK <= Tlocal <= localBoilingPointK)
         const waterDepthRatio = (seaLevelNormalized - hNorm) / Math.max(0.001, seaLevelNormalized);
         if (waterDepthRatio > 0.6) {
           biomeGrid[idx] = 0; // Abyssal Trench (colored by seaPalette)
@@ -1858,16 +1884,10 @@ export function generatePlanetarySurfaceModel(
           biomeGrid[idx] = 2; // Continental Shelf / Shallows (colored by seaPalette)
         }
       } else {
-        // Dry Land / Unfrozen Crust Biomes (Tlocal >= freezingPointK)
+        // Dry Land / Unfrozen Crust Biomes (Tlocal >= freezingPointK and Tlocal < 800 K)
         const pBar = pBarAtmo;
 
-        if (isMoltenWorld) {
-          if (fractureGrid[idx] > 0.22 || altRatio > 0.74) {
-            biomeGrid[idx] = 15; // Active Lava Caldera & Fissure (yellow-orange)
-          } else {
-            biomeGrid[idx] = 14; // Basalt Volcanic Crust
-          }
-        } else if (pBar < 0.005) {
+        if (pBar < 0.005) {
           // Vacuum rocky worlds (Moon / Mercury / Io)
           if (Tlocal > 650 || bodyClassLower.includes('volcanic') || bodyClassLower.includes('io')) {
             biomeGrid[idx] = altRatio > 0.68 ? 13 : altRatio > 0.36 ? 11 : 4; // Sulfur/Silicate peaks, plateaus, or plains
@@ -2179,14 +2199,15 @@ export function evaluateSurfaceMapTexel(
   const dhdx = isFrozenSeaIce ? rawDhdx * 0.22 : rawDhdx;
   const dhdy = isFrozenSeaIce ? rawDhdy * 0.22 : rawDhdy;
 
+  const Tlocal = temperatureGrid[idx];
   let r = 0;
   let g = 0;
   let b = 0;
-  let isSelfLuminous = volcVal > 1.1;
+  let isSelfLuminous = volcVal > 1.1 || biomeId === 15;
 
   if (activeLayer === 'satellite' || activeLayer === 'biomes') {
     if (isWater) {
-      if (isMoltenWorld) isSelfLuminous = true;
+      if (isMoltenWorld || seaPalette.solventKey === 'Silicate Magma') isSelfLuminous = true;
       const depthRatio = Math.max(0, Math.min(1, (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized)));
       if (activeLayer === 'biomes') {
         const rgb = biomeId === 0 ? seaPalette.trenchRgb : biomeId === 1 ? seaPalette.deepRgb : seaPalette.shallowRgb;
@@ -2213,13 +2234,29 @@ export function evaluateSurfaceMapTexel(
       g = parseInt(hex.slice(3, 5), 16);
       b = parseInt(hex.slice(5, 7), 16);
 
+      if (activeLayer === 'satellite' && biomeId === 15 && volcVal <= 1.1) {
+        // Melted silicate magma surface (Tlocal >= 800 K): incandescent yellow-orange thermal gradient
+        const meltHeat = Math.max(0, Math.min(1, (Tlocal - 800) / 420 + (1 - h) * 0.25));
+        if (meltHeat < 0.45) {
+          const t = meltHeat / 0.45;
+          r = 215 + (248 - 215) * t;
+          g = 78 + (138 - 78) * t;
+          b = 8 + (14 - 8) * t;
+        } else {
+          const t = (meltHeat - 0.45) / 0.55;
+          r = 248 + (255 - 248) * t;
+          g = 138 + (214 - 138) * t;
+          b = 14 + (46 - 14) * t;
+        }
+      }
+
       if (volcVal > 0.15) {
         if (volcVal > 1.1) {
           const calderaT = Math.min(1.0, (volcVal - 1.1) / 0.8);
           r = Math.round(238 + 17 * calderaT);
           g = Math.round(108 + 116 * calderaT);
           b = Math.round(14 + 34 * calderaT);
-        } else {
+        } else if (Tlocal < 800) {
           const coneT = Math.min(1.0, volcVal / 0.95);
           const basaltR = coneT > 0.78 ? 148 : 46;
           const basaltG = coneT > 0.78 ? 58 : 34;
@@ -2232,7 +2269,7 @@ export function evaluateSurfaceMapTexel(
       }
 
       const crackVal = fractureGrid[idx];
-      if (isMoltenWorld && crackVal > 0.08) {
+      if (Tlocal >= 800 && crackVal > 0.08) {
         if (crackVal > 0.25) isSelfLuminous = true;
         const t = Math.min(1.0, crackVal / 0.8);
         if (t < 0.45) {
@@ -2246,6 +2283,12 @@ export function evaluateSurfaceMapTexel(
           g = 98 + (212 - 98) * c;
           b = 12 + (42 - 12) * c;
         }
+      } else if ((isMoltenWorld || seaPalette.solventKey === 'Silicate Magma') && Tlocal < 800 && crackVal > 0.08) {
+        // Cooled, solidified basalt tectonic fractures where local temperature < 800 K
+        const t = Math.min(1.0, crackVal / 0.85) * 0.42;
+        r = r * (1 - t) + 24 * t;
+        g = g * (1 - t) + 18 * t;
+        b = b * (1 - t) + 16 * t;
       } else if ((isIcyWorld || isFrozenSeaIce) && crackVal > 0.08) {
         const t = Math.min(1.0, crackVal / 0.85);
         if (t < 0.4) {
@@ -2261,7 +2304,7 @@ export function evaluateSurfaceMapTexel(
         }
       }
 
-      if (activeLayer === 'satellite' && !isNoSurface && volcVal <= 1.1) {
+      if (activeLayer === 'satellite' && !isNoSurface && volcVal <= 1.1 && biomeId !== 15) {
         const altRatio = isFrozenSeaIce
           ? 0.15
           : Math.max(0, (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized));
@@ -2274,7 +2317,7 @@ export function evaluateSurfaceMapTexel(
 
     if (activeLayer === 'satellite') {
       if (applyReliefInSatellite) {
-        const bumpScale = isWater ? 14 : 46;
+        const bumpScale = isWater ? 14 : biomeId === 15 ? 24 : 46;
         const nx = -dhdx * bumpScale;
         const ny = -dhdy * bumpScale;
         const nz = 1.0;
@@ -2283,8 +2326,10 @@ export function evaluateSurfaceMapTexel(
         const reliefShade =
           volcVal > 1.1
             ? 1.0
+            : biomeId === 15
+            ? 0.95 + (NdotL - Lz) * 0.55
             : isWater
-            ? isMoltenWorld
+            ? isMoltenWorld || seaPalette.solventKey === 'Silicate Magma'
               ? 0.96 + (NdotL - Lz) * 0.45
               : 0.88 + (NdotL - Lz) * 0.65
             : 0.94 + (NdotL - Lz) * 1.35;
@@ -2935,6 +2980,14 @@ export function sampleSurfacePoint(
     }
   } else if (isBoiledSeaBasin) {
     biomeName = `Desiccated Evaporite Desert Basin (${model.compositionPalette.compositionLabel})`;
+  } else if (biomeId === 15) {
+    biomeName =
+      model.fractureGrid[idx] > 0.22
+        ? 'Active Magma Rift & Lava Surface (T ≥ 800 K)'
+        : 'Molten Silicate Magma Surface (T ≥ 800 K)';
+    biomeColor = '#ffa21a';
+  } else if (biomeId === 14 && isFrozenSea && (model.isMoltenWorld || model.seaPalette.solventKey === 'Silicate Magma')) {
+    biomeName = `Solidified Magma Sea — Basalt Rock Crust (${model.compositionPalette.compositionLabel})`;
   } else if (biomeId === 8 || biomeId === 13) {
     if (isFrozenSea) {
       biomeName = `Frozen Sea Ice — ${model.seaPalette.iceBiomeName}`;
@@ -2967,10 +3020,7 @@ export function sampleSurfacePoint(
       // Sterile world: barren mineral/rocky plains colored by planetary composition
       biomeName = `${biomeDef.name} (${model.compositionPalette.compositionLabel})`;
     }
-  } else if (model.isMoltenWorld && model.fractureGrid[idx] > 0.22) {
-    biomeName = 'Active Lava Fissure (Magma Rift)';
-    biomeColor = '#ffb703';
-  } else if ((model.isIcyWorld || isFrozenSea) && model.fractureGrid[idx] > 0.28) {
+  } else if ((model.isIcyWorld || isFrozenSea) && model.fractureGrid[idx] > 0.28 && biomeId !== 14) {
     biomeName = 'Cryotectonic Ice Fissure (Linea)';
     biomeColor = '#3b7ea1';
   } else if (model.craterGrid[idx] > 0.35) {
