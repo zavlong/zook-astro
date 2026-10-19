@@ -27,7 +27,7 @@ interface PlanetarySurfaceExplorerProps {
   stars: RealisticStarNode[];
 }
 
-type MapLayer = 'satellite' | 'biomes' | 'topography' | 'temperature' | 'moisture' | 'plates';
+type MapLayer = 'satellite' | 'clouds' | 'biomes' | 'topography' | 'temperature' | 'moisture' | 'plates';
 type DisplayMode = 'map' | 'horizon';
 
 export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> = ({
@@ -38,6 +38,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 }) => {
   const [displayMode, setDisplayMode] = useState<DisplayMode>('map');
   const [activeLayer, setActiveLayer] = useState<MapLayer>('satellite');
+  const [showCloudsOverlay, setShowCloudsOverlay] = useState<boolean>(true);
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lon: number }>({ lat: 0, lon: 0 });
   const [hoverCoords, setHoverCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [timeOfDayDeg, setTimeOfDayDeg] = useState<number>(45); // 0 = Sunrise, 90 = Noon, 180 = Sunset, 270 = Midnight
@@ -57,6 +58,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const coords = hoverCoords || selectedCoords;
     return sampleSurfacePoint(surfaceModel, planet, moon, coords.lat, coords.lon);
   }, [surfaceModel, planet, moon, hoverCoords, selectedCoords]);
+
+  const isBlankSurfaceLayer =
+    surfaceModel.isNoSurface &&
+    (activeLayer === 'biomes' || activeLayer === 'topography' || activeLayer === 'moisture' || activeLayer === 'plates');
 
   // Render 2D Cartographic Surface Map
   useEffect(() => {
@@ -80,8 +85,13 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       biomeGrid,
       craterGrid,
       fractureGrid,
+      volcanoGrid,
+      cloudGrid,
+      cloudOpacity,
+      atmospherePalette,
+      floraPalette,
       seaLevelNormalized,
-      isGasGiant,
+      isNoSurface,
       isIcyWorld,
       isMoltenWorld,
       hasLiquid,
@@ -101,8 +111,91 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       for (let x = 0; x < width; x++) {
         const idx = y * width + x;
         const pIdx = idx * 4;
+
+        // 1. Gas Giants, Ice Giants, & Supercritical Water Worlds have NO solid surface:
+        // Solid surface layers (biomes, topography, moisture, plates) are blank!
+        if (isBlankSurfaceLayer) {
+          data[pIdx] = 10;
+          data[pIdx + 1] = 15;
+          data[pIdx + 2] = 26;
+          data[pIdx + 3] = 255;
+          continue;
+        }
+
+        // 2. Dedicated Cloud & Atmosphere Layer OR No-Surface World in Satellite/Clouds view (100% Cloud/Atmosphere Opacity)
+        if (activeLayer === 'clouds' || (isNoSurface && activeLayer === 'satellite')) {
+          if (cloudOpacity <= 0.001 && !isNoSurface) {
+            // Vacuum world in Clouds layer: empty dark space canvas
+            data[pIdx] = 8;
+            data[pIdx + 1] = 12;
+            data[pIdx + 2] = 22;
+            data[pIdx + 3] = 255;
+            continue;
+          }
+
+          const cVal = cloudGrid[idx];
+          const xLeft = (x + width - 1) % width;
+          const xRight = (x + 1) % width;
+          const dcdx = (cloudGrid[y * width + xRight] - cloudGrid[y * width + xLeft]) * 0.5;
+          const dcdy = (cloudGrid[yDown * width + x] - cloudGrid[yUp * width + x]) * 0.5;
+
+          let r = 0;
+          let g = 0;
+          let b = 0;
+
+          if (isNoSurface) {
+            // 100% Opacity Sudarsky Class I-V or Supercritical Water World (Class II water clouds in blue water atmosphere)
+            if (surfaceModel.isSupercritical) {
+              // Blue water atmosphere base with swirling white~grey water clouds
+              const cloudCover = Math.max(0, Math.min(1, (cVal - 0.18) / 0.78));
+              const greyShade = 0.76 + 0.24 * Math.sin(cVal * Math.PI);
+              const cr = atmospherePalette.bandLightRgb[0] * greyShade;
+              const cg = atmospherePalette.bandLightRgb[1] * greyShade;
+              const cb = atmospherePalette.bandLightRgb[2] * greyShade;
+              r = atmospherePalette.atmoRgb[0] * (1 - cloudCover * 0.88) + cr * (cloudCover * 0.88);
+              g = atmospherePalette.atmoRgb[1] * (1 - cloudCover * 0.88) + cg * (cloudCover * 0.88);
+              b = atmospherePalette.atmoRgb[2] * (1 - cloudCover * 0.88) + cb * (cloudCover * 0.88);
+            } else {
+              // Sudarsky Class I-V & Ice Giant zonal cloud bands
+              r = atmospherePalette.bandDarkRgb[0] + (atmospherePalette.bandLightRgb[0] - atmospherePalette.bandDarkRgb[0]) * cVal;
+              g = atmospherePalette.bandDarkRgb[1] + (atmospherePalette.bandLightRgb[1] - atmospherePalette.bandDarkRgb[1]) * cVal;
+              b = atmospherePalette.bandDarkRgb[2] + (atmospherePalette.bandLightRgb[2] - atmospherePalette.bandDarkRgb[2]) * cVal;
+            }
+
+            // Soft 3D cloud-top relief shading
+            const cnx = -dcdx * 14;
+            const cny = -dcdy * 14;
+            const invLen = 1.0 / Math.sqrt(cnx * cnx + cny * cny + 1.0);
+            const NdotL = (cnx * Lx + cny * Ly + Lz) * invLen;
+            const cloudRelief = 0.95 + (NdotL - Lz) * 0.65;
+            r = Math.max(0, Math.min(255, Math.round(r * cloudRelief)));
+            g = Math.max(0, Math.min(255, Math.round(g * cloudRelief)));
+            b = Math.max(0, Math.min(255, Math.round(b * cloudRelief)));
+          } else {
+            // Solid-surface planet's Cloud & Atmosphere layer rendered over dark telemetry backdrop with proportional opacity
+            const bgR = 10;
+            const bgG = 15;
+            const bgB = 26;
+            const localAlpha = Math.min(1.0, cloudOpacity * (0.35 + 0.65 * cVal));
+            const cr = atmospherePalette.atmoRgb[0] * (1 - cVal) + atmospherePalette.cloudRgb[0] * cVal;
+            const cg = atmospherePalette.atmoRgb[1] * (1 - cVal) + atmospherePalette.cloudRgb[1] * cVal;
+            const cb = atmospherePalette.atmoRgb[2] * (1 - cVal) + atmospherePalette.cloudRgb[2] * cVal;
+
+            r = Math.round(bgR * (1 - localAlpha) + cr * localAlpha);
+            g = Math.round(bgG * (1 - localAlpha) + cg * localAlpha);
+            b = Math.round(bgB * (1 - localAlpha) + cb * localAlpha);
+          }
+
+          data[pIdx] = r;
+          data[pIdx + 1] = g;
+          data[pIdx + 2] = b;
+          data[pIdx + 3] = 255;
+          continue;
+        }
+
         const h = hypsometry[idx];
-        const isWater = !isGasGiant && hasLiquid && h <= seaLevelNormalized;
+        const volcVal = volcanoGrid[idx];
+        const isWater = !isNoSurface && hasLiquid && h <= seaLevelNormalized && volcVal < 0.35;
 
         // Compute horizontal & vertical elevation gradients for normal map
         const xLeft = (x + width - 1) % width;
@@ -140,11 +233,38 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             }
           } else {
             const biomeId = biomeGrid[idx];
-            const def = BIOMES.find((bm) => bm.id === biomeId) || BIOMES[4];
-            const hex = def.color;
+            // Biomes 3, 4, 5, 6 use dynamic floraPalette (green ONLY for water-based life around F & G stars; barren tan if sterile)
+            let hex = (BIOMES.find((bm) => bm.id === biomeId) || BIOMES[4]).color;
+            if (biomeId === 3) hex = floraPalette.marshHex;
+            else if (biomeId === 4) hex = floraPalette.plainsHex;
+            else if (biomeId === 5) hex = floraPalette.woodlandHex;
+            else if (biomeId === 6) hex = floraPalette.taigaHex;
+
             r = parseInt(hex.slice(1, 3), 16);
             g = parseInt(hex.slice(3, 5), 16);
             b = parseInt(hex.slice(5, 7), 16);
+
+            // Discrete Volcanoes on worlds with active geology (Earth, Venus, Io, etc.):
+            // Dark basaltic volcanic cone slopes rising to a glowing yellow-orange central lava caldera
+            if (volcVal > 0.15) {
+              if (volcVal > 1.1) {
+                // Incandescent yellow-orange summit lava caldera
+                const calderaT = Math.min(1.0, (volcVal - 1.1) / 0.8);
+                r = Math.round(238 + 17 * calderaT);
+                g = Math.round(108 + 116 * calderaT);
+                b = Math.round(14 + 34 * calderaT);
+              } else {
+                // Dark volcanic basalt/tephra cone edifice with warm rim glow near summit
+                const coneT = Math.min(1.0, volcVal / 0.95);
+                const basaltR = coneT > 0.78 ? 148 : 46;
+                const basaltG = coneT > 0.78 ? 58 : 34;
+                const basaltB = coneT > 0.78 ? 22 : 30;
+                const blend = Math.min(0.88, coneT * 0.9);
+                r = r * (1 - blend) + basaltR * blend;
+                g = g * (1 - blend) + basaltG * blend;
+                b = b * (1 - blend) + basaltB * blend;
+              }
+            }
 
             const crackVal = fractureGrid[idx];
             if (isMoltenWorld && crackVal > 0.08) {
@@ -165,13 +285,11 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               // Blend Europan mineral-stained double-ridge margins & deep cryo-blue chasm cores
               const t = Math.min(1.0, crackVal / 0.85);
               if (t < 0.4) {
-                // Flanking oxidized salt/tholin margin tint
                 const m = t / 0.4;
                 r = r * (1 - m * 0.35) + 155 * (m * 0.35);
                 g = g * (1 - m * 0.35) + 125 * (m * 0.35);
                 b = b * (1 - m * 0.35) + 115 * (m * 0.35);
               } else {
-                // Deep glacial cyan-blue fissure interior
                 const c = (t - 0.4) / 0.6;
                 r = r * (1 - c * 0.72) + 38 * (c * 0.72);
                 g = g * (1 - c * 0.65) + 108 * (c * 0.65);
@@ -179,7 +297,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               }
             }
 
-            if (activeLayer === 'satellite' && !isGasGiant) {
+            if (activeLayer === 'satellite' && !isNoSurface && volcVal <= 1.1) {
               // Subtle hypsometric tinting + crater ejecta brightening on land
               const altRatio = Math.max(0, (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized));
               const craterBoost = craterGrid[idx] * 14;
@@ -191,72 +309,98 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
           // Apply 3D Normal-Map Relief Overlay in 'satellite' mode
           if (activeLayer === 'satellite') {
-            const bumpScale = isGasGiant ? 10 : isWater ? 14 : 46;
+            const bumpScale = isWater ? 14 : 46;
             const nx = -dhdx * bumpScale;
             const ny = -dhdy * bumpScale;
             const nz = 1.0;
             const invLen = 1.0 / Math.sqrt(nx * nx + ny * ny + nz * nz);
             const NdotL = (nx * Lx + ny * Ly + nz * Lz) * invLen;
-            // Normal-map illumination relative to flat surface (Lz = 0.62)
-            const reliefShade = isWater
-              ? isMoltenWorld
-                ? 0.96 + (NdotL - Lz) * 0.45
-                : 0.88 + (NdotL - Lz) * 0.65
-              : 0.94 + (NdotL - Lz) * 1.35;
+            // Lava calderas remain self-luminous
+            const reliefShade =
+              volcVal > 1.1
+                ? 1.0
+                : isWater
+                ? isMoltenWorld
+                  ? 0.96 + (NdotL - Lz) * 0.45
+                  : 0.88 + (NdotL - Lz) * 0.65
+                : 0.94 + (NdotL - Lz) * 1.35;
 
             r = Math.max(0, Math.min(255, Math.round(r * reliefShade)));
             g = Math.max(0, Math.min(255, Math.round(g * reliefShade)));
             b = Math.max(0, Math.min(255, Math.round(b * reliefShade)));
+
+            // Composite Cloud & Atmosphere Layer on top of Satellite surface with opacity proportional to atmospheric density
+            if (showCloudsOverlay && cloudOpacity > 0.001) {
+              const cVal = cloudGrid[idx];
+              // Atmosphere Rayleigh/haze tint + swirling cloud decks
+              const atmoTintWeight = cloudOpacity * 0.24;
+              r = r * (1 - atmoTintWeight) + atmospherePalette.atmoRgb[0] * atmoTintWeight;
+              g = g * (1 - atmoTintWeight) + atmospherePalette.atmoRgb[1] * atmoTintWeight;
+              b = b * (1 - atmoTintWeight) + atmospherePalette.atmoRgb[2] * atmoTintWeight;
+
+              const cloudAlpha = Math.min(0.95, cloudOpacity * Math.pow(cVal, 0.85) * 0.92);
+              r = Math.round(r * (1 - cloudAlpha) + atmospherePalette.cloudRgb[0] * cloudAlpha);
+              g = Math.round(g * (1 - cloudAlpha) + atmospherePalette.cloudRgb[1] * cloudAlpha);
+              b = Math.round(b * (1 - cloudAlpha) + atmospherePalette.cloudRgb[2] * cloudAlpha);
+            }
           }
         } else if (activeLayer === 'topography') {
           if (isWater) {
-            // Underwater depth tinted by solvent palette
             const depthRatio = (seaLevelNormalized - h) / Math.max(0.001, seaLevelNormalized);
             r = Math.round(seaPalette.trenchRgb[0] + (seaPalette.shallowRgb[0] - seaPalette.trenchRgb[0]) * (1 - depthRatio) * 0.75);
             g = Math.round(seaPalette.trenchRgb[1] + (seaPalette.shallowRgb[1] - seaPalette.trenchRgb[1]) * (1 - depthRatio) * 0.75);
             b = Math.round(seaPalette.trenchRgb[2] + (seaPalette.shallowRgb[2] - seaPalette.trenchRgb[2]) * (1 - depthRatio) * 0.75);
+          } else if (volcVal > 1.1) {
+            // Active volcanic lava caldera in topography view
+            r = 251; g = 191; b = 36;
           } else {
-            // Land elevation
+            // Land elevation: Only use green in lowland band if water-based life around F/G star! Otherwise use flora pigment or warm ochre/tan
             const altRatio = (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized);
-            if (altRatio < 0.25) {
-              r = 45; g = 100 + altRatio * 100; b = 45;
+            if (altRatio < 0.28) {
+              const t = altRatio / 0.28;
+              r = Math.round(floraPalette.lowRgb[0] * (1 - t * 0.3) + 145 * (t * 0.3));
+              g = Math.round(floraPalette.lowRgb[1] * (1 - t * 0.3) + 115 * (t * 0.3));
+              b = Math.round(floraPalette.lowRgb[2] * (1 - t * 0.3) + 75 * (t * 0.3));
             } else if (altRatio < 0.6) {
-              r = 140 + (altRatio - 0.25) * 150; g = 110 + (altRatio - 0.25) * 80; b = 50;
+              const t = (altRatio - 0.28) / 0.32;
+              r = Math.round(145 + t * 40);
+              g = Math.round(112 + t * 25);
+              b = Math.round(68 - t * 12);
             } else if (altRatio < 0.85) {
-              r = 110; g = 95; b = 90;
+              r = 115; g = 98; b = 90;
             } else {
-              r = 230; g = 240; b = 250; // Snow/Ice caps
+              r = 230; g = 238; b = 248;
             }
           }
-          // Add hillshading to topography layer as well so craters and ridges are sharp
+          // Add hillshading to topography layer so craters, cracks, and volcanic cones are sharp
           const nx = -dhdx * 36;
           const ny = -dhdy * 36;
           const invLen = 1.0 / Math.sqrt(nx * nx + ny * ny + 1.0);
           const NdotL = (nx * Lx + ny * Ly + Lz) * invLen;
-          const topoShade = 0.94 + (NdotL - Lz) * 1.15;
+          const topoShade = volcVal > 1.1 ? 1.0 : 0.94 + (NdotL - Lz) * 1.15;
           r = Math.max(0, Math.min(255, Math.round(r * topoShade)));
           g = Math.max(0, Math.min(255, Math.round(g * topoShade)));
           b = Math.max(0, Math.min(255, Math.round(b * topoShade)));
         } else if (activeLayer === 'temperature') {
           const T = temperatureGrid[idx];
-          // Gradient from frozen (blue/purple) to temperate (green/yellow) to scorching (red/white)
+          // Thermal palette from cryo-violet/blue to amber/red/white (no misleading green)
           if (T < 200) {
-            r = 30; g = 20; b = 120;
+            r = 32; g = 24; b = 128;
           } else if (T < 273.15) {
             const t = (T - 200) / 73.15;
-            r = Math.round(30 + t * 40);
-            g = Math.round(50 + t * 140);
-            b = Math.round(180 + t * 60);
-          } else if (T < 315) {
-            const t = (T - 273.15) / 41.85;
-            r = Math.round(70 + t * 170);
-            g = Math.round(190 + t * 50);
-            b = Math.round(60 - t * 40);
+            r = Math.round(32 + t * 56);
+            g = Math.round(52 + t * 128);
+            b = Math.round(180 + t * 65);
+          } else if (T < 320) {
+            const t = (T - 273.15) / 46.85;
+            r = Math.round(140 + t * 105);
+            g = Math.round(185 + t * 25);
+            b = Math.round(190 - t * 150);
           } else {
-            const t = Math.min(1.0, (T - 315) / 250);
-            r = Math.round(240 + t * 15);
-            g = Math.round(80 - t * 70);
-            b = Math.round(20 - t * 15);
+            const t = Math.min(1.0, (T - 320) / 250);
+            r = Math.round(245 + t * 10);
+            g = Math.round(140 - t * 110);
+            b = Math.round(35 - t * 25);
           }
         } else if (activeLayer === 'moisture') {
           const absLat = Math.abs(lat);
@@ -265,19 +409,26 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             r = seaPalette.shallowRgb[0];
             g = seaPalette.shallowRgb[1];
             b = seaPalette.shallowRgb[2];
-          } else if (isHadleyDry) {
-            r = 180; g = 140; b = 60; // Arid desert
+          } else if (!hasLiquid || isHadleyDry) {
+            r = 182; g = 138; b = 68; // Arid
           } else {
             const moist = Math.max(0.1, Math.min(1.0, Math.cos((absLat * Math.PI) / 180)));
-            r = Math.round(40 + (1 - moist) * 100);
-            g = Math.round(80 + moist * 120);
-            b = Math.round(60 + moist * 140);
+            // Use cyan-blue hydrosphere moisture scale unless water-based F/G chlorophyll life is present
+            if (floraPalette.hasWaterLife && surfaceModel.starTeff >= 5100 && surfaceModel.starTeff <= 6800) {
+              r = Math.round(45 + (1 - moist) * 95);
+              g = Math.round(85 + moist * 115);
+              b = Math.round(65 + moist * 125);
+            } else {
+              r = Math.round(135 - moist * 85);
+              g = Math.round(115 + moist * 55);
+              b = Math.round(90 + moist * 135);
+            }
           }
         } else if (activeLayer === 'plates') {
           const pId = (Math.imul(Math.floor(x / 40), 7) + Math.imul(Math.floor(y / 30), 11) + surfaceModel.seed) % 8;
           const colors = [
-            [220, 50, 50], [50, 180, 50], [50, 80, 220], [220, 180, 40],
-            [180, 50, 220], [50, 220, 200], [220, 120, 50], [120, 120, 120]
+            [220, 60, 60], [60, 140, 220], [220, 170, 45], [175, 65, 215],
+            [55, 195, 205], [225, 115, 50], [145, 120, 95], [115, 125, 145]
           ];
           const col = colors[Math.abs(pId) % colors.length];
           r = col[0]; g = col[1]; b = col[2];
@@ -343,7 +494,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     ctx.beginPath();
     ctx.arc(markerX, markerY, 1.5, 0, Math.PI * 2);
     ctx.fill();
-  }, [displayMode, activeLayer, surfaceModel, showGrid, selectedCoords]);
+  }, [displayMode, activeLayer, showCloudsOverlay, isBlankSurfaceLayer, surfaceModel, showGrid, selectedCoords]);
 
   // Render First-Person Horizon Vista Canvas
   useEffect(() => {
@@ -367,7 +518,13 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const isSunset = Math.abs(sunAltitude) < 0.25;
 
     const skyGrad = ctx.createLinearGradient(0, 0, 0, horizonY);
-    if (isNight) {
+    if (surfaceModel.isNoSurface) {
+      const pal = surfaceModel.atmospherePalette;
+      const topRgb = isNight ? pal.atmoRgb.map((c) => Math.round(c * 0.25)) : pal.atmoRgb;
+      const botRgb = isNight ? pal.bandDarkRgb.map((c) => Math.round(c * 0.35)) : pal.bandLightRgb;
+      skyGrad.addColorStop(0, `rgb(${topRgb[0]}, ${topRgb[1]}, ${topRgb[2]})`);
+      skyGrad.addColorStop(1, `rgb(${botRgb[0]}, ${botRgb[1]}, ${botRgb[2]})`);
+    } else if (isNight) {
       skyGrad.addColorStop(0, '#020308');
       skyGrad.addColorStop(1, '#090e1c');
     } else if (isSunset) {
@@ -382,14 +539,14 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     ctx.fillRect(0, 0, w, horizonY);
 
     // 2. Stars at night or in thin atmosphere
-    const activePressure = (moon || planet).pressureBar ?? 0;
+    const activePressure = surfaceModel.isNoSurface ? 100 : ((moon || planet).pressureBar ?? 0);
     if (isNight || activePressure < 0.05) {
       ctx.fillStyle = '#ffffff';
       const starCount = isNight ? 180 : 80;
       for (let i = 0; i < starCount; i++) {
         const sx = ((i * 137.5 + cameraPanDeg * 3) % w + w) % w;
         const sy = (i * 93.7) % (horizonY - 10);
-        const sSize = (i % 3 === 0 ? 1.5 : 0.8);
+        const sSize = i % 3 === 0 ? 1.5 : 0.8;
         const sAlpha = 0.3 + ((i * 17) % 70) / 100;
         ctx.globalAlpha = sAlpha;
         ctx.fillRect(sx, sy, sSize, sSize);
@@ -397,11 +554,28 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       ctx.globalAlpha = 1.0;
     }
 
+    // 2b. Atmospheric Cloud Layer in Sky (opacity proportional to atmospheric density)
+    if (surfaceModel.cloudOpacity > 0.02) {
+      ctx.save();
+      const cRgb = surfaceModel.atmospherePalette.cloudRgb;
+      const skyCloudAlpha = isNight ? surfaceModel.cloudOpacity * 0.25 : surfaceModel.cloudOpacity * 0.65;
+      ctx.fillStyle = `rgba(${cRgb[0]}, ${cRgb[1]}, ${cRgb[2]}, ${skyCloudAlpha.toFixed(2)})`;
+      for (let c = 0; c < 9; c++) {
+        const cx = (((c * 115 + cameraPanDeg * 2.2) % (w + 160)) + (w + 160)) % (w + 160) - 80;
+        const cy = 38 + (c % 4) * 36;
+        const cw = 95 + (c % 3) * 45;
+        const ch = 14 + (c % 2) * 8;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, cw, ch, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
     // 3. Planetary Rings in the Sky (Magnificent arch over the horizon)
     if (surfaceModel.hasRings) {
       ctx.save();
       const latRad = (selectedCoords.lat * Math.PI) / 180;
-      // Ring arch curvature depends on latitude
       const archHeight = horizonY - 40 - Math.abs(Math.sin(latRad)) * 140;
       const ringAlpha = isNight ? 0.35 : 0.75;
 
@@ -426,7 +600,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
     // 4. Moons in the Sky
     surfaceModel.moonsInSky.forEach((m) => {
-      const moonX = ((m.azimuthDeg + cameraPanDeg) % 360 / 360) * w;
+      const moonX = (((m.azimuthDeg + cameraPanDeg) % 360) / 360) * w;
       const moonY = horizonY - (m.altitudeDeg / 90) * (horizonY * 0.85);
       if (moonY < horizonY) {
         const radiusPx = Math.max(3, m.angularDiameterDeg * 16);
@@ -468,7 +642,39 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       ctx.fill();
     }
 
-    // 6. Horizon Distant Mountain Ranges (Backdrop Layer)
+    if (surfaceModel.isNoSurface) {
+      // Gas Giant, Ice Giant, or Supercritical Water World: Continuous swirling cloud deck below horizon (No Solid Surface)
+      const pal = surfaceModel.atmospherePalette;
+      const deckGrad = ctx.createLinearGradient(0, horizonY, 0, h);
+      const lightRgb = isNight ? pal.bandLightRgb.map((c) => Math.round(c * 0.35)) : pal.bandLightRgb;
+      const darkRgb = isNight ? pal.atmoRgb.map((c) => Math.round(c * 0.25)) : pal.atmoRgb;
+      deckGrad.addColorStop(0, `rgb(${lightRgb[0]}, ${lightRgb[1]}, ${lightRgb[2]})`);
+      deckGrad.addColorStop(1, `rgb(${darkRgb[0]}, ${darkRgb[1]}, ${darkRgb[2]})`);
+      ctx.fillStyle = deckGrad;
+      ctx.fillRect(0, horizonY, w, h - horizonY);
+
+      // Swirling cloud bands across the abyssal envelope
+      for (let bIdx = 0; bIdx < 8; bIdx++) {
+        const by = horizonY + 12 + bIdx * 22;
+        ctx.fillStyle =
+          bIdx % 2 === 0
+            ? `rgba(${pal.bandLightRgb[0]}, ${pal.bandLightRgb[1]}, ${pal.bandLightRgb[2]}, ${isNight ? 0.18 : 0.42})`
+            : `rgba(${pal.bandDarkRgb[0]}, ${pal.bandDarkRgb[1]}, ${pal.bandDarkRgb[2]}, ${isNight ? 0.22 : 0.45})`;
+        ctx.beginPath();
+        ctx.moveTo(0, by);
+        for (let x = 0; x <= w; x += 24) {
+          const waveY = by + Math.sin((x + cameraPanDeg * 3 + bIdx * 40) * 0.02) * 8;
+          ctx.lineTo(x, waveY);
+        }
+        ctx.lineTo(w, by + 16);
+        ctx.lineTo(0, by + 16);
+        ctx.closePath();
+        ctx.fill();
+      }
+      return;
+    }
+
+    // 6. Horizon Distant Mountain Ranges & Active Volcano Cones (Backdrop Layer)
     ctx.fillStyle = isNight ? '#0b1320' : '#1e293b';
     ctx.beginPath();
     ctx.moveTo(0, horizonY);
@@ -479,6 +685,49 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     ctx.lineTo(w, horizonY);
     ctx.closePath();
     ctx.fill();
+
+    // 6b. Distant Smoking Volcano Cones with Glowing Lava Calderas on Worlds with Active Geology
+    if (surfaceModel.hasActiveGeology) {
+      const volcPositions = [160, 490];
+      volcPositions.forEach((baseVx, vIdx) => {
+        const vx = (((baseVx - cameraPanDeg * 2.5) % (w + 120)) + (w + 120)) % (w + 120) - 60;
+        const coneH = vIdx === 0 ? 54 : 42;
+        const coneHalfW = vIdx === 0 ? 78 : 62;
+        const calderaHalfW = vIdx === 0 ? 12 : 9;
+
+        // Rising ash/SO2 plume from caldera
+        const plumeGrad = ctx.createRadialGradient(vx, horizonY - coneH - 18, 4, vx, horizonY - coneH - 55, 48);
+        plumeGrad.addColorStop(0, surfaceModel.isMoltenWorld ? 'rgba(251, 146, 60, 0.45)' : 'rgba(148, 163, 184, 0.35)');
+        plumeGrad.addColorStop(1, 'rgba(15, 23, 42, 0)');
+        ctx.fillStyle = plumeGrad;
+        ctx.beginPath();
+        ctx.arc(vx, horizonY - coneH - 32, 48, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Conical volcanic edifice
+        ctx.fillStyle = isNight ? '#090d16' : '#261c1a';
+        ctx.beginPath();
+        ctx.moveTo(vx - coneHalfW, horizonY);
+        ctx.lineTo(vx - calderaHalfW, horizonY - coneH);
+        ctx.lineTo(vx + calderaHalfW, horizonY - coneH);
+        ctx.lineTo(vx + coneHalfW, horizonY);
+        ctx.closePath();
+        ctx.fill();
+
+        // Glowing yellow-orange summit lava caldera & overflow lava stream
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath();
+        ctx.ellipse(vx, horizonY - coneH + 1, calderaHalfW, 3.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#ea580c';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.moveTo(vx - 2, horizonY - coneH + 3);
+        ctx.quadraticCurveTo(vx + 6, horizonY - coneH * 0.5, vx + 14, horizonY - 8);
+        ctx.stroke();
+      });
+    }
 
     // 7. Midground Hills / Ridges
     ctx.fillStyle = isNight ? '#080d17' : '#141e2e';
@@ -496,8 +745,6 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     // 8. Foreground Ground / Ocean Surface
     const groundGrad = ctx.createLinearGradient(0, horizonY, 0, h);
     if (currentTelemetry.isOcean) {
-      // Liquid Ocean / Sea with Solvent-Specific Palette & Specular Reflections
-      // Molten lava oceans remain incandescent yellow-orange even at night
       groundGrad.addColorStop(
         0,
         surfaceModel.isMoltenWorld ? '#fbbf24' : isNight ? '#040b17' : surfaceModel.seaPalette.horizonTopHex
@@ -509,7 +756,6 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       ctx.fillStyle = groundGrad;
       ctx.fillRect(0, horizonY, w, h - horizonY);
 
-      // Specular Sun Trail on Water / Glowing Lava Ripples
       if (!isNight || surfaceModel.isMoltenWorld) {
         const sunTrailX = w * 0.5 + Math.cos(radTOD) * (w * 0.4);
         ctx.fillStyle = surfaceModel.isMoltenWorld ? 'rgba(254, 240, 138, 0.45)' : 'rgba(255, 255, 255, 0.25)';
@@ -519,8 +765,8 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         }
       }
     } else {
-      // Solid Land / Ice Shell / Basalt Crust Ground
-      const bColor = currentTelemetry.biomeColor || '#3d6738';
+      // Solid Land / Ice Shell / Basalt Crust Ground (never defaults to green unless F/G water life)
+      const bColor = currentTelemetry.biomeColor || surfaceModel.floraPalette.plainsHex;
       groundGrad.addColorStop(0, isNight && !surfaceModel.isMoltenWorld ? '#060a12' : bColor);
       groundGrad.addColorStop(1, isNight && !surfaceModel.isMoltenWorld ? '#020408' : '#101724');
       ctx.fillStyle = groundGrad;
@@ -531,7 +777,6 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         ctx.save();
         for (let c = 0; c < 6; c++) {
           const baseStartX = (((c * 135 + cameraPanDeg * 3.5 + selectedCoords.lon * 4) % w) + w) % w;
-          // Flanking margin glow / double-ridge highlight
           ctx.strokeStyle = surfaceModel.isMoltenWorld
             ? 'rgba(234, 88, 12, 0.75)'
             : isNight
@@ -549,7 +794,6 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
           }
           ctx.stroke();
 
-          // Fissure core (incandescent yellow-orange lava or deep cryo-cyan ice chasm)
           ctx.strokeStyle = surfaceModel.isMoltenWorld ? '#facc15' : isNight ? '#082f49' : '#0369a1';
           ctx.lineWidth = 2.2;
           ctx.stroke();
@@ -579,7 +823,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         ? 'rgba(251, 146, 60, 0.28)'
         : isNight
         ? 'rgba(10, 16, 30, 0.4)'
-        : 'rgba(255, 255, 255, 0.15)'
+        : `rgba(255, 255, 255, ${(0.08 + surfaceModel.cloudOpacity * 0.22).toFixed(2)})`
     );
     hazeGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = hazeGrad;
@@ -670,20 +914,37 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               <Layers className="w-3 h-3" />
               LAYER:
             </span>
-            {(['satellite', 'biomes', 'topography', 'temperature', 'moisture', 'plates'] as MapLayer[]).map((layer) => (
+            {(['satellite', 'clouds', 'biomes', 'topography', 'temperature', 'moisture', 'plates'] as MapLayer[]).map(
+              (layer) => (
+                <button
+                  key={layer}
+                  type="button"
+                  onClick={() => setActiveLayer(layer)}
+                  className={`px-2 py-1 rounded text-[11px] font-bold border transition capitalize cursor-pointer ${
+                    activeLayer === layer
+                      ? 'bg-indigo-950/80 border-indigo-400 text-indigo-200'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {layer === 'clouds' ? `Atmosphere (${Math.round(surfaceModel.cloudOpacity * 100)}%)` : layer}
+                </button>
+              )
+            )}
+
+            {activeLayer === 'satellite' && !surfaceModel.isNoSurface && surfaceModel.cloudOpacity > 0.001 && (
               <button
-                key={layer}
                 type="button"
-                onClick={() => setActiveLayer(layer)}
-                className={`px-2 py-1 rounded text-[11px] font-bold border transition capitalize cursor-pointer ${
-                  activeLayer === layer
-                    ? 'bg-indigo-950/80 border-indigo-400 text-indigo-200'
-                    : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200'
+                onClick={() => setShowCloudsOverlay(!showCloudsOverlay)}
+                className={`px-2 py-1 rounded text-[11px] border font-bold cursor-pointer transition ${
+                  showCloudsOverlay
+                    ? 'bg-sky-950/80 border-sky-500 text-sky-200'
+                    : 'bg-slate-900 border-slate-800 text-slate-400'
                 }`}
+                title="Toggle Atmospheric & Cloud Deck Overlay on Satellite View"
               >
-                {layer}
+                Clouds: {showCloudsOverlay ? `${Math.round(surfaceModel.cloudOpacity * 100)}%` : 'Off'}
               </button>
-            ))}
+            )}
 
             <button
               type="button"
@@ -750,7 +1011,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       {/* Main Visual Display Area */}
       <div className="relative bg-[#0c121d] rounded-xl border border-slate-800 p-2 overflow-hidden flex flex-col items-center">
         {displayMode === 'map' ? (
-          <div className="w-full flex flex-col items-center">
+          <div className="w-full flex flex-col items-center relative">
             <canvas
               ref={mapCanvasRef}
               onClick={handleMapClick}
@@ -759,9 +1020,30 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               className="w-full max-w-4xl h-auto rounded-lg border border-slate-800/80 shadow-inner cursor-crosshair transition"
               style={{ imageRendering: 'pixelated' }}
             />
-            <div className="w-full flex justify-between items-center text-[10px] text-slate-500 px-2 mt-1">
-              <span>Equirectangular Cylindrical Projection (360° × 180°)</span>
-              <span>Click anywhere on surface to deploy landing site</span>
+            {isBlankSurfaceLayer && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-4 text-center">
+                <div className="bg-slate-950/85 border border-slate-700/80 rounded-xl px-4 py-3 shadow-2xl">
+                  <p className="text-sky-300 font-bold text-xs tracking-wide uppercase">
+                    No Solid Surface — Continuous Fluid / Gas Envelope
+                  </p>
+                  <p className="text-slate-400 text-[11px] mt-1">
+                    {surfaceModel.isSupercritical
+                      ? 'Supercritical water worlds lack a solid crust; switch to Satellite or Atmosphere (100%) to inspect the Class II water cloud deck.'
+                      : `Gas and ice giants lack a solid surface; switch to Satellite or Atmosphere (100%) to inspect the ${surfaceModel.atmospherePalette.classLabel}.`}
+                  </p>
+                </div>
+              </div>
+            )}
+            <div className="w-full flex justify-between items-center text-[10px] text-slate-500 px-2 mt-1 flex-wrap gap-2">
+              <span>
+                Equirectangular Projection (360° × 180°) • {surfaceModel.atmospherePalette.classLabel} (Opacity{' '}
+                {Math.round(surfaceModel.cloudOpacity * 100)}%)
+              </span>
+              <span>
+                {surfaceModel.hasActiveGeology
+                  ? `Active Geology (${surfaceModel.volcanoCount} Volcanic Cones)`
+                  : 'Click anywhere on surface to deploy landing site'}
+              </span>
             </div>
           </div>
         ) : (
@@ -792,19 +1074,25 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
           <span className="text-slate-400 block text-[10px]">ELEVATION</span>
           <b
             className={
-              currentTelemetry.isOcean
+              surfaceModel.isNoSurface
+                ? 'text-slate-400'
+                : currentTelemetry.isOcean
                 ? surfaceModel.isMoltenWorld
                   ? 'text-amber-400'
                   : 'text-sky-300'
-                : 'text-emerald-300'
+                : 'text-amber-200'
             }
           >
-            {currentTelemetry.elevationMeters > 0
+            {surfaceModel.isNoSurface
+              ? 'No Solid Surface'
+              : currentTelemetry.elevationMeters > 0
               ? `+${currentTelemetry.elevationMeters.toLocaleString()} m`
               : `${currentTelemetry.elevationMeters.toLocaleString()} m`}
           </b>
           <span className="text-[9px] text-slate-400 block">
-            {currentTelemetry.isOcean
+            {surfaceModel.isNoSurface
+              ? '100% Cloud Envelope'
+              : currentTelemetry.isOcean
               ? surfaceModel.isMoltenWorld
                 ? 'Magma Depth'
                 : 'Abyssal Depth'
@@ -820,9 +1108,13 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         </div>
 
         <div>
-          <span className="text-slate-400 block text-[10px]">BAROMETRIC PRESSURE</span>
+          <span className="text-slate-400 block text-[10px]">ATMOSPHERE & CLOUDS</span>
           <b className="text-white">
-            {currentTelemetry.pressureBar > 0 ? `${currentTelemetry.pressureBar} bar` : 'Vacuum (0 bar)'}
+            {surfaceModel.isNoSurface
+              ? '100% Opaque Deck'
+              : currentTelemetry.pressureBar > 0
+              ? `${currentTelemetry.pressureBar} bar (${Math.round(surfaceModel.cloudOpacity * 100)}% cloud)`
+              : 'Vacuum (0% cloud)'}
           </b>
         </div>
 
@@ -849,3 +1141,4 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     </div>
   );
 };
+

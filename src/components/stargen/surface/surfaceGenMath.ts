@@ -25,11 +25,38 @@ export interface SolventSeaPalette {
   horizonBotHex: string;
 }
 
+export interface FloraPigmentPalette {
+  hasWaterLife: boolean;
+  hasAnyLife: boolean;
+  pigmentName: string;
+  plainsHex: string;
+  woodlandHex: string;
+  taigaHex: string;
+  marshHex: string;
+  lowRgb: [number, number, number];
+  highRgb: [number, number, number];
+}
+
+export interface AtmosphereCloudPalette {
+  classLabel: string;
+  atmoRgb: [number, number, number];
+  bandLightRgb: [number, number, number];
+  bandDarkRgb: [number, number, number];
+  cloudRgb: [number, number, number];
+}
+
 export interface PlanetarySurfaceModel {
   seed: number;
   isGasGiant: boolean;
+  isIceGiant: boolean;
+  isSupercritical: boolean;
+  isNoSurface: boolean;
   isIcyWorld: boolean;
   isMoltenWorld: boolean;
+  hasActiveGeology: boolean;
+  hasBiosphere: boolean;
+  hasWaterLife: boolean;
+  floraPalette: FloraPigmentPalette;
   hasLiquid: boolean;
   seaLevelNormalized: number;
   minElevationKm: number;
@@ -39,6 +66,11 @@ export interface PlanetarySurfaceModel {
   biomeGrid: Uint8Array; // Biome index grid
   craterGrid: Float32Array; // Impact crater rim/bowl intensity
   fractureGrid: Float32Array; // Cryotectonic ice crack or tectonic lava fissure intensity
+  volcanoGrid: Float32Array; // Discrete volcanic cone slope (0..1) and active lava caldera (>1.0)
+  volcanoCount: number;
+  cloudGrid: Float32Array; // Cloud & atmospheric swirl density [0, 1]
+  cloudOpacity: number; // Overall cloud/atmosphere layer opacity [0, 1] proportional to atmospheric density
+  atmospherePalette: AtmosphereCloudPalette;
   tectonicPlateGrid: Uint8Array; // Plate IDs
   platesCount: number;
   solvent: string;
@@ -68,6 +100,103 @@ export interface PlanetarySurfaceModel {
 function rgbToHex(rgb: [number, number, number]): string {
   const [r, g, b] = rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))));
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+/**
+ * Determines vegetation/flora pigment colors based on biosphere status, solvent, and host star Teff.
+ * Green is ONLY used on worlds with water-based life orbiting F and G type stars (5100 K <= Teff <= 6800 K).
+ * Sterile worlds use strictly barren rocky/mineral tones (tan, ochre, brown, slate)—never green.
+ */
+export function getFloraPigmentPalette(
+  hasBiosphere: boolean,
+  solventKey: string,
+  starTeff: number
+): FloraPigmentPalette {
+  const isWaterSolvent = solventKey === 'H2O' || solventKey === 'H2O + CO2';
+
+  if (!hasBiosphere) {
+    return {
+      hasWaterLife: false,
+      hasAnyLife: false,
+      pigmentName: 'None (Sterile Regolith)',
+      plainsHex: '#8c7355',
+      woodlandHex: '#786248',
+      taigaHex: '#6c5a49',
+      marshHex: '#5e5044',
+      lowRgb: [140, 115, 85],
+      highRgb: [120, 98, 72],
+    };
+  }
+
+  if (!isWaterSolvent) {
+    // Exotic non-water life (e.g., Ammonia NH3-H2O biosphere)
+    return {
+      hasWaterLife: false,
+      hasAnyLife: true,
+      pigmentName: 'Cryo-Ammonia Polyphenols (Violet-Teal)',
+      plainsHex: '#6d328f',
+      woodlandHex: '#512373',
+      taigaHex: '#38687a',
+      marshHex: '#2f5466',
+      lowRgb: [109, 50, 143],
+      highRgb: [56, 104, 122],
+    };
+  }
+
+  // Water-based life: pigment depends on host star spectral type (Teff)
+  if (starTeff < 3900) {
+    // M-type Red Dwarf: Near-IR absorbing purple-burgundy / near-black bacteriochlorophyll & retinal
+    return {
+      hasWaterLife: true,
+      hasAnyLife: true,
+      pigmentName: 'IR-Absorbing Bacteriochlorophyll (M-Star Purple/Black)',
+      plainsHex: '#5a2666',
+      woodlandHex: '#3d194a',
+      taigaHex: '#2a1236',
+      marshHex: '#472052',
+      lowRgb: [90, 38, 102],
+      highRgb: [42, 18, 54],
+    };
+  } else if (starTeff < 5100) {
+    // K-type Orange Dwarf: Autumnal amber-orange / golden-ochre carotenoids & phycoerythrin
+    return {
+      hasWaterLife: true,
+      hasAnyLife: true,
+      pigmentName: 'Xanthophyll / Carotenoid Flora (K-Star Amber-Gold)',
+      plainsHex: '#b87b28',
+      woodlandHex: '#94581e',
+      taigaHex: '#784418',
+      marshHex: '#8a5a24',
+      lowRgb: [184, 123, 40],
+      highRgb: [148, 88, 30],
+    };
+  } else if (starTeff <= 6800) {
+    // G & F type stars (5100 K - 6800 K): Classic Chlorophyll A/B Green!
+    return {
+      hasWaterLife: true,
+      hasAnyLife: true,
+      pigmentName: 'Chlorophyll A/B (F/G-Star Green)',
+      plainsHex: '#3d7a42',
+      woodlandHex: '#255c2d',
+      taigaHex: '#1d462b',
+      marshHex: '#1b523e',
+      lowRgb: [61, 122, 66],
+      highRgb: [37, 92, 45],
+    };
+  } else {
+    // A / B / O hot stars (> 6800 K): UV-reflecting cyan-turquoise / silvery-blue phycocyanin
+    return {
+      hasWaterLife: true,
+      hasAnyLife: true,
+      pigmentName: 'UV-Shielding Phycocyanin (A-Star Cyan-Teal)',
+      plainsHex: '#2a8c91',
+      woodlandHex: '#1e6b73',
+      taigaHex: '#19545c',
+      marshHex: '#22747a',
+      lowRgb: [42, 140, 145],
+      highRgb: [30, 107, 115],
+    };
+  }
 }
 
 export function getSolventSeaPalette(solventRaw: string | undefined | null): SolventSeaPalette {
@@ -100,11 +229,11 @@ export function getSolventSeaPalette(solventRaw: string | undefined | null): Sol
     return {
       solventKey: 'H2SO4',
       displayName: 'Sulfuric Acid (H2SO4)',
-      trenchRgb: [34, 52, 8],
-      deepRgb: [74, 108, 16],
-      shallowRgb: [158, 212, 42],
-      horizonTopHex: '#a3e635',
-      horizonBotHex: '#3f6212',
+      trenchRgb: [58, 52, 10],
+      deepRgb: [112, 98, 18],
+      shallowRgb: [198, 178, 36],
+      horizonTopHex: '#eab308',
+      horizonBotHex: '#713f12',
     };
   }
   if (s === 'SO2' || sLower.includes('sulfur dioxide') || sLower.includes('so2')) {
@@ -122,11 +251,11 @@ export function getSolventSeaPalette(solventRaw: string | undefined | null): Sol
     return {
       solventKey: 'CO2',
       displayName: 'Liquid CO2',
-      trenchRgb: [6, 38, 36],
-      deepRgb: [14, 88, 82],
-      shallowRgb: [42, 182, 158],
-      horizonTopHex: '#2dd4bf',
-      horizonBotHex: '#115e59',
+      trenchRgb: [6, 38, 46],
+      deepRgb: [14, 78, 92],
+      shallowRgb: [42, 152, 178],
+      horizonTopHex: '#38bdf8',
+      horizonBotHex: '#155e75',
     };
   }
   if (s === 'H2O + CO2' || (sLower.includes('h2o') && sLower.includes('co2'))) {
@@ -135,9 +264,9 @@ export function getSolventSeaPalette(solventRaw: string | undefined | null): Sol
       displayName: 'Carbonated H2O + CO2',
       trenchRgb: [5, 28, 44],
       deepRgb: [12, 65, 95],
-      shallowRgb: [24, 148, 168],
-      horizonTopHex: '#14b8a6',
-      horizonBotHex: '#0f766e',
+      shallowRgb: [24, 142, 172],
+      horizonTopHex: '#0ea5e9',
+      horizonBotHex: '#0369a1',
     };
   }
   if (sLower.includes('magma') || sLower.includes('silicate') || sLower.includes('lava') || sLower.includes('molten')) {
@@ -154,12 +283,12 @@ export function getSolventSeaPalette(solventRaw: string | undefined | null): Sol
   if (sLower.includes('supercritical')) {
     return {
       solventKey: 'Supercritical H2O',
-      displayName: 'Supercritical Fluid',
-      trenchRgb: [18, 34, 68],
-      deepRgb: [38, 78, 128],
-      shallowRgb: [95, 175, 220],
-      horizonTopHex: '#38bdf8',
-      horizonBotHex: '#1e3a8a',
+      displayName: 'Supercritical Water Fluid',
+      trenchRgb: [22, 68, 148],
+      deepRgb: [38, 102, 188],
+      shallowRgb: [215, 226, 238],
+      horizonTopHex: '#e2e8f0',
+      horizonBotHex: '#1d4ed8',
     };
   }
   // Default H2O marine ocean
@@ -174,17 +303,18 @@ export function getSolventSeaPalette(solventRaw: string | undefined | null): Sol
   };
 }
 
+// Note: Biomes 3, 4, 5, 6 dynamically adapt their color & name via floraPalette in sampleSurfacePoint and map rendering!
 export const BIOMES = [
   { id: 0, name: 'Abyssal Trench', color: '#041230', isWater: true },
   { id: 1, name: 'Deep Ocean', color: '#0a306c', isWater: true },
   { id: 2, name: 'Continental Shelf / Shallows', color: '#1880c6', isWater: true },
-  { id: 3, name: 'Coastal Marsh / Estuary', color: '#1b4d3e', isWater: false },
-  { id: 4, name: 'Lowland Plains', color: '#3d6738', isWater: false },
-  { id: 5, name: 'Temperate Woodland', color: '#25522b', isWater: false },
-  { id: 6, name: 'Boreal Taiga / Alien Flora', color: '#1d3e2b', isWater: false },
-  { id: 7, name: 'Tundra / Permafrost', color: '#68776b', isWater: false },
+  { id: 3, name: 'Coastal Alluvial Basin', color: '#6b5b47', isWater: false },
+  { id: 4, name: 'Lowland Silicate Plains', color: '#8c7355', isWater: false },
+  { id: 5, name: 'Temperate Continental Basin', color: '#786248', isWater: false },
+  { id: 6, name: 'High-Latitude Rocky Steppe', color: '#6c5a49', isWater: false },
+  { id: 7, name: 'Tundra / Permafrost', color: '#706b63', isWater: false },
   { id: 8, name: 'Polar Glacial Ice', color: '#dce8f5', isWater: false },
-  { id: 9, name: 'Arid Savannah', color: '#9d8744', isWater: false },
+  { id: 9, name: 'Arid Steppe / Scrub', color: '#9d7c44', isWater: false },
   { id: 10, name: 'Hyper-Arid Dunes / Desert', color: '#c49a4f', isWater: false },
   { id: 11, name: 'High Plateau / Badlands', color: '#885834', isWater: false },
   { id: 12, name: 'Mountain Cordillera', color: '#605553', isWater: false },
@@ -194,9 +324,10 @@ export const BIOMES = [
   { id: 16, name: 'Regolith Impact Craterlands', color: '#5b6472', isWater: false },
   { id: 17, name: 'Hydrocarbon Methane Sea', color: '#4a260b', isWater: true },
   { id: 18, name: 'Cryovolcanic Nitrogen Plains', color: '#c8d3e0', isWater: false },
-  { id: 19, name: 'Supercritical Fluid Abyssal Deck', color: '#264e80', isWater: true },
-  { id: 20, name: 'Jovian Cloud Deck / Continuous Envelope', color: '#b88656', isWater: false },
+  { id: 19, name: 'Supercritical Water Cloud Deck (Class II)', color: '#dbeafe', isWater: false },
+  { id: 20, name: 'Gas Giant Cloud Deck (Continuous Envelope)', color: '#b88656', isWater: false },
   { id: 21, name: 'Cryotectonic Ice Fissure (Linea)', color: '#3b7ea1', isWater: false },
+  { id: 22, name: 'Active Volcanic Shield & Lava Caldera', color: '#f97316', isWater: false },
 ];
 
 // Fast PRNG
@@ -273,8 +404,8 @@ interface SphericalCrater {
  * Generates a realistic population of circular 3D impact craters on the unit sphere
  * for airless and thin-atmosphere worlds.
  */
-function generateSphericalCraters(seed: number, pressureBar: number | null | undefined, isGasGiant: boolean): SphericalCrater[] {
-  if (isGasGiant) return [];
+function generateSphericalCraters(seed: number, pressureBar: number | null | undefined, isNoSurface: boolean): SphericalCrater[] {
+  if (isNoSurface) return [];
   const pBar = pressureBar ?? 0;
   // Airless (< 0.01 bar) gets heavy cratering; thin atmosphere (< 0.6 bar) gets moderate cratering
   if (pBar >= 0.6) return [];
@@ -319,6 +450,55 @@ function generateSphericalCraters(seed: number, pressureBar: number | null | und
   }
 
   return craters;
+}
+
+interface SphericalVolcano {
+  cx: number;
+  cy: number;
+  cz: number;
+  coneRadiusRad: number;
+  cosConeRadius: number;
+  coneHeight: number;
+}
+
+/**
+ * Generates discrete 3D volcanic shield/stratovolcano peaks with glowing central lava calderas
+ * dotted around the surface of worlds with active geology (Earth, Venus, Io, tidal/tectonic worlds).
+ */
+function generateSphericalVolcanoes(
+  seed: number,
+  hasActiveGeology: boolean,
+  isExtremeVolcanic: boolean
+): SphericalVolcano[] {
+  if (!hasActiveGeology) return [];
+
+  const volcPrng = createPrng(seed ^ 0x7f4a7c15);
+  const count = isExtremeVolcanic ? 34 : 18;
+  const volcanoes: SphericalVolcano[] = [];
+
+  for (let i = 0; i < count; i++) {
+    // Cluster volcanoes slightly along tectonic belts while keeping global distribution
+    const u = (volcPrng() * 2 - 1) * 0.92;
+    const theta = volcPrng() * Math.PI * 2;
+    const rxy = Math.sqrt(Math.max(0, 1 - u * u));
+    const cx = rxy * Math.cos(theta);
+    const cy = u;
+    const cz = rxy * Math.sin(theta);
+
+    const coneRadiusRad = 0.042 + volcPrng() * 0.038; // ~2.4 deg to 4.6 deg radius
+    const coneHeight = 0.22 + volcPrng() * 0.18;
+
+    volcanoes.push({
+      cx,
+      cy,
+      cz,
+      coneRadiusRad,
+      cosConeRadius: Math.cos(coneRadiusRad),
+      coneHeight,
+    });
+  }
+
+  return volcanoes;
 }
 
 interface SphericalIceCrack {
@@ -425,6 +605,209 @@ function generateSphericalSurfaceCracks(
 }
 
 /**
+ * Computes Sudarsky Gas Giant class / Ice Giant / Supercritical Water World / Rocky Atmosphere
+ * cloud & atmosphere colors and opacity proportional to atmospheric density.
+ */
+export function deriveAtmosphereAndCloudPalette(
+  pressureBar: number | null | undefined,
+  gases: Record<string, number>,
+  isGasGiant: boolean,
+  isIceGiant: boolean,
+  isSupercritical: boolean,
+  isMoltenWorld: boolean,
+  sudarskyClass: string | null | undefined,
+  Tbase: number
+): { palette: AtmosphereCloudPalette; opacity: number } {
+  // 1. Supercritical Water Worlds: always 100% opacity, white~grey water clouds in a blue water atmosphere (Sudarsky Class II appearance)
+  if (isSupercritical) {
+    return {
+      opacity: 1.0,
+      palette: {
+        classLabel: 'Supercritical Water Envelope (Class II Water Clouds)',
+        atmoRgb: [28, 96, 184],       // Deep azure-blue water vapor atmosphere
+        bandLightRgb: [242, 246, 252], // Brilliant white water cloud decks
+        bandDarkRgb: [168, 182, 200],  // Stormy slate-grey water cloud bands
+        cloudRgb: [238, 244, 250],
+      },
+    };
+  }
+
+  // 2. Gas Giants & Ice Giants: 100% opacity with colors matching Sudarsky Class I - V at their temperature
+  if (isGasGiant) {
+    let sClass = sudarskyClass;
+    if (!sClass) {
+      if (Tbase >= 1400) sClass = 'V';
+      else if (Tbase >= 900) sClass = 'IV';
+      else if (Tbase >= 350) sClass = 'III';
+      else if (Tbase >= 150) sClass = 'II';
+      else sClass = 'I';
+    }
+
+    // Cold/temperate Ice Giants (Uranus/Neptune methane cyan-blue) when cooler than Class III
+    if (isIceGiant && sClass !== 'III' && sClass !== 'IV' && sClass !== 'V' && Tbase < 220) {
+      return {
+        opacity: 1.0,
+        palette: {
+          classLabel: `Ice Giant Methane Envelope (Sudarsky Class ${sClass})`,
+          atmoRgb: [32, 138, 192],
+          bandLightRgb: [145, 232, 252],
+          bandDarkRgb: [28, 118, 168],
+          cloudRgb: [195, 244, 255],
+        },
+      };
+    }
+
+    if (sClass === 'V') {
+      return {
+        opacity: 1.0,
+        palette: {
+          classLabel: 'Sudarsky Class V (Silicate & Iron Clouds)',
+          atmoRgb: [96, 26, 18],
+          bandLightRgb: [245, 108, 36],
+          bandDarkRgb: [98, 28, 20],
+          cloudRgb: [255, 148, 52],
+        },
+      };
+    }
+    if (sClass === 'IV') {
+      return {
+        opacity: 1.0,
+        palette: {
+          classLabel: 'Sudarsky Class IV (Alkali Metal Vapor)',
+          atmoRgb: [42, 36, 88],
+          bandLightRgb: [122, 76, 152],
+          bandDarkRgb: [38, 32, 82],
+          cloudRgb: [148, 98, 178],
+        },
+      };
+    }
+    if (sClass === 'III') {
+      return {
+        opacity: 1.0,
+        palette: {
+          classLabel: 'Sudarsky Class III (Cloudless Azure)',
+          atmoRgb: [22, 68, 168],
+          bandLightRgb: [64, 128, 232],
+          bandDarkRgb: [18, 56, 148],
+          cloudRgb: [92, 156, 245],
+        },
+      };
+    }
+    if (sClass === 'II') {
+      // Sudarsky Class II (150 - 250 K): White~grey water clouds in a blue atmosphere
+      return {
+        opacity: 1.0,
+        palette: {
+          classLabel: 'Sudarsky Class II (Water Cloud Decks)',
+          atmoRgb: [34, 98, 182],
+          bandLightRgb: [242, 246, 252],
+          bandDarkRgb: [176, 190, 208],
+          cloudRgb: [240, 245, 252],
+        },
+      };
+    }
+    // Default Sudarsky Class I (< 150 K): Ammonia clouds (Jovian ochre, cream, & russet bands)
+    return {
+      opacity: 1.0,
+      palette: {
+        classLabel: 'Sudarsky Class I (Ammonia Cloud Decks)',
+        atmoRgb: [176, 118, 62],
+        bandLightRgb: [244, 220, 182],
+        bandDarkRgb: [186, 122, 58],
+        cloudRgb: [248, 228, 196],
+      },
+    };
+  }
+
+  // 3. Solid-Surface Worlds: Opacity is proportional to atmospheric density / pressure
+  const pBar = pressureBar ?? 0;
+  if (pBar <= 0.001) {
+    return {
+      opacity: 0.0,
+      palette: {
+        classLabel: 'Vacuum (No Atmosphere)',
+        atmoRgb: [0, 0, 0],
+        bandLightRgb: [255, 255, 255],
+        bandDarkRgb: [180, 180, 180],
+        cloudRgb: [255, 255, 255],
+      },
+    };
+  }
+
+  // Smoothly scale cloud/atmosphere opacity with surface pressure:
+  // ~0.06 at 0.01 bar (Mars-like wispy haze)
+  // ~0.46 at 1.0 bar (Earth-like partial clouds + Rayleigh scattering)
+  // ~0.78 at 10 bar (thick hazy atmosphere)
+  // ~0.95 at 90+ bar (Venusian nearly opaque cloud deck)
+  const opacity = Math.min(0.96, Math.max(0.04, 1.0 - Math.exp(-0.55 * Math.pow(pBar, 0.58))));
+
+  const hasSO2 = (gases.SO2 || 0) > 0.01;
+  const hasCH4 = (gases.CH4 || 0) > 0.02;
+  const hasCO2 = (gases.CO2 || 0) > 0.4;
+
+  if (isMoltenWorld) {
+    return {
+      opacity: Math.min(0.75, opacity),
+      palette: {
+        classLabel: 'Volcanic Silicate & Sulfur Ash Plumes',
+        atmoRgb: [120, 42, 12],
+        bandLightRgb: [235, 135, 48],
+        bandDarkRgb: [68, 32, 22],
+        cloudRgb: [195, 98, 38],
+      },
+    };
+  }
+  if (hasCO2 && pBar >= 3.0) {
+    return {
+      opacity: Math.max(0.82, opacity),
+      palette: {
+        classLabel: 'Dense Sulfuric Acid & CO2 Overcast',
+        atmoRgb: [188, 158, 82],
+        bandLightRgb: [238, 214, 138],
+        bandDarkRgb: [168, 138, 68],
+        cloudRgb: [232, 208, 132],
+      },
+    };
+  }
+  if (hasCH4 && pBar >= 0.3) {
+    return {
+      opacity: Math.max(0.68, opacity),
+      palette: {
+        classLabel: 'Hydrocarbon Tholin Smog & Methane Clouds',
+        atmoRgb: [172, 102, 38],
+        bandLightRgb: [224, 154, 72],
+        bandDarkRgb: [138, 78, 24],
+        cloudRgb: [218, 148, 66],
+      },
+    };
+  }
+  if (hasSO2) {
+    return {
+      opacity,
+      palette: {
+        classLabel: 'Sulfurous Volcanic Haze (SO2)',
+        atmoRgb: [168, 154, 52],
+        bandLightRgb: [232, 218, 98],
+        bandDarkRgb: [136, 122, 38],
+        cloudRgb: [228, 212, 92],
+      },
+    };
+  }
+
+  // Standard Water Vapor / Nitrogen-Oxygen / Thin CO2 clouds
+  return {
+    opacity,
+    palette: {
+      classLabel: pBar < 0.1 ? 'Thin Atmospheric Dust & Ice Wisps' : 'Water Vapor Clouds & Rayleigh Atmosphere',
+      atmoRgb: pBar < 0.1 ? [178, 136, 104] : [56, 138, 224],
+      bandLightRgb: [246, 250, 255],
+      bandDarkRgb: [184, 198, 216],
+      cloudRgb: pBar < 0.1 ? [228, 204, 184] : [244, 248, 254],
+    },
+  };
+}
+
+/**
  * Derives realistic sky color and horizon scattering based on atmospheric pressure,
  * dominant gases, and star spectral type.
  */
@@ -436,11 +819,12 @@ export function deriveAtmosphericSkyColors(
   isMoltenWorld: boolean,
   starTeff: number
 ): { zenith: string; horizon: string; hazeFactor: number } {
+  if (isSupercritical) {
+    // Supercritical water world: blue water atmosphere with white-grey water cloud horizon
+    return { zenith: '#1d4ed8', horizon: '#cbd5e1', hazeFactor: 0.95 };
+  }
   if (isGasGiant) {
     return { zenith: '#2a4463', horizon: '#8ca8c8', hazeFactor: 0.9 };
-  }
-  if (isSupercritical) {
-    return { zenith: '#41223e', horizon: '#7d4a63', hazeFactor: 0.95 };
   }
   if (isMoltenWorld) {
     // Volcanic silicate/alkali vapor or smoldering lava horizon
@@ -457,7 +841,7 @@ export function deriveAtmosphericSkyColors(
   const hasSO2 = (gases.SO2 || 0) > 0.01;
 
   if (hasSO2) {
-    return { zenith: '#3a4425', horizon: '#788c42', hazeFactor: 0.85 };
+    return { zenith: '#4a4218', horizon: '#9c8c38', hazeFactor: 0.85 };
   }
   if (hasCH4 && p >= 0.5) {
     // Titan-like orange-brown hydrocarbon tholin smog
@@ -495,7 +879,7 @@ export function deriveAtmosphericSkyColors(
 
 /**
  * Builds the complete planetary surface model including topography, biomes,
- * climate grid, and sky horizon parameters.
+ * climate grid, volcanoes, cloud/atmosphere layer, and sky horizon parameters.
  */
 export function generatePlanetarySurfaceModel(
   planet: RealisticPlanetBody,
@@ -505,19 +889,38 @@ export function generatePlanetarySurfaceModel(
 ): PlanetarySurfaceModel {
   const isMoon = Boolean(moon);
   const activeBody = moon || planet;
-  const isGasGiant = !isMoon && (planet.gasFrac >= 0.015 || planet.massEarth >= 15);
-  const hydro = activeBody.hydrosphere as RealisticHydrosphere | null | undefined;
-  const hasLiquid = Boolean(hydro && (hydro.coveragePct ?? 0) > 0 && hydro.solvent !== 'None');
-  const coverageFrac = hasLiquid && hydro && hydro.coveragePct ? hydro.coveragePct / 100 : 0;
-
   const bodyClass = isMoon ? (moon?.moonClass || '') : planet.planetClass;
   const bodyClassLower = bodyClass.toLowerCase();
+
+  const isGasGiant = !isMoon && (planet.gasFrac >= 0.015 || planet.massEarth >= 15);
+  const isIceGiant =
+    isGasGiant &&
+    (bodyClassLower.includes('ice giant') ||
+      bodyClassLower.includes('neptune') ||
+      ((planet.iceFrac ?? 0) > (planet.gasFrac ?? 0) && planet.massEarth < 65));
+
+  const hydro = activeBody.hydrosphere as RealisticHydrosphere | null | undefined;
+  const solventRaw = hydro?.solvent || 'None';
+  const solventLower = solventRaw.toLowerCase();
+
+  // Supercritical water worlds & gas/ice giants have no solid surface
+  const isSupercritical =
+    !isGasGiant &&
+    (solventLower.includes('supercritical') ||
+      bodyClassLower.includes('supercritical') ||
+      bodyClassLower.includes('steam world') ||
+      bodyClassLower.includes('water giant') ||
+      (activeBody.pressureBar === null && !isMoon));
+  const isNoSurface = isGasGiant || isSupercritical;
+
+  const hasLiquid = Boolean(!isNoSurface && hydro && (hydro.coveragePct ?? 0) > 0 && hydro.solvent !== 'None');
+  const coverageFrac = hasLiquid && hydro && hydro.coveragePct ? hydro.coveragePct / 100 : 0;
+
   const Tbase = activeBody.surfaceTempK || activeBody.T_eq || 288;
-  const solventLower = (hydro?.solvent || '').toLowerCase();
 
   // Detect Molten / Lava / Scorched Volcanic worlds
   const isMoltenWorld =
-    !isGasGiant &&
+    !isNoSurface &&
     (Tbase >= 750 ||
       bodyClassLower.includes('molten') ||
       bodyClassLower.includes('lava') ||
@@ -526,7 +929,8 @@ export function generatePlanetarySurfaceModel(
       solventLower.includes('silicate'));
 
   const hasSubsurfaceOcean = Boolean(
-    !isMoltenWorld &&
+    !isNoSurface &&
+      !isMoltenWorld &&
       Tbase < 273.15 &&
       hydro &&
       (((hydro.iceKm ?? 0) > 0 && (hydro.liqKm ?? 0) > 0) ||
@@ -535,7 +939,7 @@ export function generatePlanetarySurfaceModel(
 
   // Determine whether this world has a predominantly icy surface / cryosphere (strictly freezing Tbase < 270 K)
   const isIcyWorld =
-    !isGasGiant &&
+    !isNoSurface &&
     !isMoltenWorld &&
     Tbase < 270 &&
     !bodyClassLower.includes('venusian') &&
@@ -549,6 +953,21 @@ export function generatePlanetarySurfaceModel(
       bodyClassLower.includes('glacial') ||
       (Tbase < 225 && (activeBody.rockFrac ?? 1) < 0.85));
 
+  // Host star telemetry
+  const star = stars[0] || { Teff: 5778, colorHex: '#fff4e6', radius: 1.0, lumNum: 1.0 };
+  const starTeff = star.Teff || 5778;
+  const starDistAU = Math.max(0.02, planet.a);
+  const starRadiusAU = (star.radius || 1.0) * 0.00465047;
+  const starAngularDiameterDeg = +(2 * Math.atan(starRadiusAU / (2 * starDistAU)) * (180 / Math.PI)).toFixed(2);
+
+  // Solvent-specific sea color palette (force Silicate Magma palette on molten worlds)
+  const seaPalette = getSolventSeaPalette(isMoltenWorld ? 'Silicate Magma' : hydro?.solvent);
+
+  // Biosphere & star-specific flora pigments (Green ONLY on water-life worlds around F & G stars)
+  const hasBiosphere = Boolean(!isNoSurface && hydro?.biosphere);
+  const floraPalette = getFloraPigmentPalette(hasBiosphere, seaPalette.solventKey, starTeff);
+  const hasWaterLife = floraPalette.hasWaterLife;
+
   // Deterministic seed
   const bodyKey = isMoon
     ? (moon?.id || moon?.name || 'moon')
@@ -559,19 +978,33 @@ export function generatePlanetarySurfaceModel(
   }
   const prng = createPrng(seed);
 
-  // Host star telemetry
-  const star = stars[0] || { Teff: 5778, colorHex: '#fff4e6', radius: 1.0, lumNum: 1.0 };
-  const starDistAU = Math.max(0.02, planet.a);
-  const starRadiusAU = (star.radius || 1.0) * 0.00465047;
-  const starAngularDiameterDeg = +(2 * Math.atan(starRadiusAU / (2 * starDistAU)) * (180 / Math.PI)).toFixed(2);
+  // Plate tectonics & active geology parameters
+  const platesCount = isNoSurface
+    ? 0
+    : activeBody.rockFrac > 0.4 && activeBody.gravityG > 0.38
+    ? 7 + Math.floor(prng() * 6)
+    : 0;
 
-  // Plate tectonics parameters
-  const platesCount = isGasGiant ? 0 : activeBody.rockFrac > 0.4 && activeBody.gravityG > 0.4 ? 7 + Math.floor(prng() * 6) : 0;
+  const tidalW = (activeBody as { tidalW?: number }).tidalW ?? 0;
+  const isExtremeVolcanic =
+    isMoltenWorld ||
+    tidalW >= 0.4 ||
+    bodyClassLower.includes('volcanic') ||
+    bodyClassLower.includes('io') ||
+    bodyClassLower.includes('venusian') ||
+    bodyClassLower.includes('sulfur');
 
-  // Maximum elevation depends inversely on gravity (low-g worlds have towering volcanic shields & deep crater walls)
+  const hasActiveGeology =
+    !isNoSurface &&
+    (isExtremeVolcanic ||
+      platesCount > 0 ||
+      tidalW >= 0.1 ||
+      (activeBody.massEarth >= 0.35 && (activeBody.rockFrac ?? 0) >= 0.45));
+
+  // Maximum elevation depends inversely on gravity
   const gClamped = Math.max(0.05, activeBody.gravityG);
-  const maxElevKm = isGasGiant ? 0 : +(Math.min(28, 7.5 / Math.sqrt(gClamped)) * (0.8 + prng() * 0.4)).toFixed(1);
-  const minElevKm = isGasGiant ? 0 : +(-maxElevKm * 0.75).toFixed(1);
+  const maxElevKm = isNoSurface ? 0 : +(Math.min(28, 7.5 / Math.sqrt(gClamped)) * (0.8 + prng() * 0.4)).toFixed(1);
+  const minElevKm = isNoSurface ? 0 : +(-maxElevKm * 0.75).toFixed(1);
 
   // Hypsometry resolution: 360 lon x 180 lat
   const width = 360;
@@ -581,14 +1014,15 @@ export function generatePlanetarySurfaceModel(
   const biomeGrid = new Uint8Array(width * height);
   const craterGrid = new Float32Array(width * height);
   const fractureGrid = new Float32Array(width * height);
+  const volcanoGrid = new Float32Array(width * height);
+  const cloudGrid = new Float32Array(width * height);
   const tectonicPlateGrid = new Uint8Array(width * height);
 
   // Pre-generate 3D spherical impact craters for airless and thin-atmosphere worlds
-  // Young cryotectonic ice shells with subsurface oceans (like Europa/Enceladus) or active molten worlds resurface over old craters
   const craters = generateSphericalCraters(
     seed,
     hasSubsurfaceOcean || isMoltenWorld ? 0.42 : activeBody.pressureBar,
-    isGasGiant
+    isNoSurface
   );
 
   // Pre-generate 3D spherical cracks (cryotectonic ice lineae on icy worlds, or glowing magma fissures on molten worlds)
@@ -598,10 +1032,27 @@ export function generatePlanetarySurfaceModel(
     hasSubsurfaceOcean || isMoltenWorld
   );
 
-  // Generate elevation samples
+  // Pre-generate discrete 3D volcanoes for worlds with active geology (Earth, Venus, Io, etc.)
+  const volcanoes = generateSphericalVolcanoes(seed, hasActiveGeology, isExtremeVolcanic);
+
+  // Derive cloud/atmosphere palette & opacity proportional to atmospheric density
+  const sudarskyClass = !isMoon ? planet.sudarskyClass : null;
+  const { palette: atmospherePalette, opacity: cloudOpacity } = deriveAtmosphereAndCloudPalette(
+    activeBody.pressureBar,
+    activeBody.gases || {},
+    isGasGiant,
+    isIceGiant,
+    isSupercritical,
+    isMoltenWorld,
+    sudarskyClass,
+    Tbase
+  );
+
+  // Generate elevation & cloud samples
   const allElevations: number[] = [];
   for (let y = 0; y < height; y++) {
     const lat = 90 - y; // 90 to -90
+    const latRad = (lat * Math.PI) / 180;
     const phi = ((90 - lat) * Math.PI) / 180;
     const sinPhi = Math.sin(phi);
     const cosPhi = Math.cos(phi);
@@ -610,16 +1061,35 @@ export function generatePlanetarySurfaceModel(
       const lon = x - 180; // -180 to 180
       const idx = y * width + x;
 
-      if (isGasGiant) {
-        // Banded zonal jet streams
-        const latRad = (lat * Math.PI) / 180;
-        const bands = Math.sin(latRad * 14) * 0.25 + Math.sin(latRad * 28) * 0.1;
-        const swirl = fbm2D(lon * 0.05, lat * 0.1, seed, 4) * 0.25;
-        hypsometry[idx] = Math.max(0, Math.min(1, 0.5 + bands + swirl));
+      // 1. Compute swirling atmospheric / cloud field for all worlds with an atmosphere
+      if (isNoSurface) {
+        // Zonal banded jet streams + cyclonic storms for Gas Giants, Ice Giants, & Supercritical Water Worlds
+        const bandFreq = isSupercritical ? 9 : isIceGiant ? 8 : 14;
+        const swirl = sphericalFbm(lat * 1.4, lon * 0.9, seed + 701, 4);
+        const jetWave = Math.sin(latRad * bandFreq + (swirl - 0.5) * 3.6) * 0.5 + 0.5;
+        const fineBands = Math.cos(latRad * bandFreq * 2.1 - swirl * 2.4) * 0.22;
+        const vortex = Math.max(0, 1.0 - Math.hypot((lat + 22) * 0.08, ((lon - 35 + 540) % 360 - 180) * 0.045));
+        cloudGrid[idx] = Math.max(0, Math.min(1, jetWave * 0.72 + fineBands + swirl * 0.28 + vortex * 0.35));
+        hypsometry[idx] = 0.5; // Blank solid surface
         continue;
+      } else if (cloudOpacity > 0) {
+        // Terrestrial / Venusian / Titan swirling weather systems & trade-wind cloud bands
+        const atmoSwirl = sphericalFbm(lat * 1.6, lon * 1.2, seed + 887, 4);
+        const shearedCloud = sphericalFbm(
+          lat * 2.1 + (atmoSwirl - 0.5) * 28,
+          lon * 1.7 + Math.cos(latRad * 3) * 22,
+          seed + 991,
+          5
+        );
+        // ITCZ equatorial & mid-latitude storm track enhancement
+        const latStormBelt = 0.85 + 0.22 * Math.cos(latRad * 4);
+        // On dense overcast worlds (e.g. Venus/Titan), cloud cover is a nearly continuous deck with banded contrast
+        const baseDeck = cloudOpacity > 0.75 ? 0.55 : 0.0;
+        const rawCloud = Math.max(0, (shearedCloud * latStormBelt - 0.36) / 0.64);
+        cloudGrid[idx] = Math.max(0, Math.min(1, baseDeck + rawCloud * (1 - baseDeck * 0.5)));
       }
 
-      // Base spherical tectonic terrain
+      // 2. Solid Surface Topography
       let elev = sphericalFbm(lat, lon, seed, 6);
 
       // Add mountain ridges using ridged multifractal
@@ -680,7 +1150,6 @@ export function generatePlanetarySurfaceModel(
 
         for (let k = 0; k < surfaceCracks.length; k++) {
           const ic = surfaceCracks[k];
-          // Quick bounding check before computing atan2
           const rawPlaneDist = nx * ic.px + ny * ic.py + nz * ic.pz - ic.planeOffset;
           if (Math.abs(rawPlaneDist) < ic.halfWidthRad * 2.5 + ic.warpAmp * 1.6) {
             const projU = nx * ic.ux + ny * ic.uy + nz * ic.uz;
@@ -724,6 +1193,41 @@ export function generatePlanetarySurfaceModel(
         fractureGrid[idx] = Math.min(1.5, crackIntensity);
       }
 
+      // Apply discrete 3D Volcanic Cones & Glowing Lava Calderas on worlds with active geology
+      if (volcanoes.length > 0) {
+        let volcDelta = 0;
+        let volcVal = 0;
+
+        for (let vIdx = 0; vIdx < volcanoes.length; vIdx++) {
+          const v = volcanoes[vIdx];
+          const dot = nx * v.cx + ny * v.cy + nz * v.cz;
+          if (dot > v.cosConeRadius) {
+            const angDist = Math.acos(Math.min(1, Math.max(-1, dot)));
+            const u = angDist / v.coneRadiusRad; // 0 at summit center, 1 at base of volcanic edifice
+
+            if (u < 1.0) {
+              if (u < 0.24) {
+                // Summit lava caldera depression with incandescent magma lake
+                const calderaNorm = u / 0.24;
+                volcDelta += v.coneHeight * (0.76 + 0.24 * calderaNorm * calderaNorm);
+                volcVal = Math.max(volcVal, 1.5 + (1.0 - calderaNorm) * 0.5); // > 1.0 marks glowing lava caldera
+              } else {
+                // Steep conical stratovolcano / shield slope rising toward summit rim
+                const slopeNorm = 1.0 - (u - 0.24) / 0.76;
+                volcDelta += v.coneHeight * Math.pow(slopeNorm, 1.55);
+                volcVal = Math.max(volcVal, slopeNorm * 0.95);
+              }
+            }
+          }
+        }
+
+        if (volcVal > 0) {
+          // Ensure volcanic peaks rise above sea level as volcanic islands or continental stratovolcanoes
+          elev = Math.max(elev + volcDelta, 0.55 + volcDelta * 0.85);
+          volcanoGrid[idx] = volcVal;
+        }
+      }
+
       hypsometry[idx] = Math.max(0.01, Math.min(0.99, elev));
       allElevations.push(hypsometry[idx]);
     }
@@ -731,14 +1235,11 @@ export function generatePlanetarySurfaceModel(
 
   // Determine exact sea-level threshold to match coveragePct
   let seaLevelNormalized = 0.42;
-  if (!isGasGiant && hasLiquid && allElevations.length > 0) {
+  if (!isNoSurface && hasLiquid && allElevations.length > 0) {
     allElevations.sort((a, b) => a - b);
     const splitIndex = Math.min(allElevations.length - 1, Math.floor(allElevations.length * coverageFrac));
     seaLevelNormalized = allElevations[splitIndex];
   }
-
-  // Solvent-specific sea color palette (force Silicate Magma palette on molten worlds)
-  const seaPalette = getSolventSeaPalette(isMoltenWorld ? 'Silicate Magma' : hydro?.solvent);
 
   const isTidallyLocked = activeBody.spinState?.toLowerCase().includes('locked') || activeBody.spinState?.includes('1:1');
 
@@ -750,33 +1251,44 @@ export function generatePlanetarySurfaceModel(
       const lon = x - 180;
       const idx = y * width + x;
       const hNorm = hypsometry[idx];
-      const isWater = !isGasGiant && hasLiquid && hNorm <= seaLevelNormalized;
+      const volcVal = volcanoGrid[idx];
+      // Active volcanic cones/calderas breach the surface even if surrounded by ocean
+      const isWater = !isNoSurface && hasLiquid && hNorm <= seaLevelNormalized && volcVal < 0.35;
 
       // Solar insolation gradient
       let Tlocal = Tbase;
       if (isTidallyLocked) {
-        // Substellar hotspot at (0, 0)
         const distFromSubstellar = Math.sqrt(lat * lat + lon * lon) / 180; // 0 to 1
         Tlocal = Tbase * (1.28 - distFromSubstellar * 0.65);
       } else {
-        // Planetary latitude drop: hot equator, cold poles
         const latCos = Math.cos((absLat * Math.PI) / 180);
         Tlocal = Tbase * (0.65 + 0.55 * Math.pow(latCos, 0.7));
       }
 
       // Altitude lapse cooling
-      if (!isWater && !isGasGiant) {
+      if (!isWater && !isNoSurface) {
         const altitudeRatio = Math.max(0, (hNorm - seaLevelNormalized) / (1 - seaLevelNormalized));
         const altitudeKm = altitudeRatio * maxElevKm;
         const lapse = 6.2 * activeBody.gravityG; // K per km
         Tlocal -= altitudeKm * lapse;
       }
 
+      // Active volcanic caldera thermal anomaly
+      if (volcVal > 1.1) {
+        Tlocal = Math.max(Tlocal, 1150);
+      }
+
       temperatureGrid[idx] = Math.max(15, Tlocal);
 
       // Biome assignment
-      if (isGasGiant) {
-        biomeGrid[idx] = 20; // Jovian Cloud Deck
+      if (isSupercritical) {
+        biomeGrid[idx] = 19; // Supercritical Water Cloud Deck (Class II)
+      } else if (isGasGiant) {
+        biomeGrid[idx] = 20; // Gas Giant Cloud Deck
+      } else if (volcVal > 1.1) {
+        biomeGrid[idx] = 15; // Active Lava Caldera & Fissure (yellow-orange)
+      } else if (volcVal > 0.38) {
+        biomeGrid[idx] = 22; // Active Volcanic Shield & Basalt Edifice
       } else if (isWater) {
         const waterDepthRatio = (seaLevelNormalized - hNorm) / Math.max(0.001, seaLevelNormalized);
         if (waterDepthRatio > 0.6) {
@@ -792,7 +1304,6 @@ export function generatePlanetarySurfaceModel(
         const altRatio = (hNorm - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized);
 
         if (isMoltenWorld) {
-          // Molten / Lava worlds: dark basalt volcanic crust with glowing yellow-orange lava fissures & calderas
           if (fractureGrid[idx] > 0.22 || altRatio > 0.74) {
             biomeGrid[idx] = 15; // Active Lava Caldera & Fissure (yellow-orange)
           } else {
@@ -801,11 +1312,10 @@ export function generatePlanetarySurfaceModel(
         } else if (fractureGrid[idx] > 0.28 && isIcyWorld) {
           biomeGrid[idx] = 21; // Cryotectonic Ice Fissure (Linea)
         } else if (isIcyWorld) {
-          // Global Ice Shell (Europa, Enceladus, Ganymede, Callisto, Triton, Ice Worlds)
           if (Tlocal < 95) {
             biomeGrid[idx] = 18; // Cryovolcanic Nitrogen Plains
           } else if (craterGrid[idx] > 0.45 && (activeBody.iceFrac ?? 0) < 0.45) {
-            biomeGrid[idx] = 16; // Dirty dark cratered regolith-ice mix (Callisto-like)
+            biomeGrid[idx] = 16; // Dirty dark cratered regolith-ice mix
           } else {
             biomeGrid[idx] = 8; // Glacial Water-Ice Shell
           }
@@ -819,7 +1329,6 @@ export function generatePlanetarySurfaceModel(
             biomeGrid[idx] = 16; // Regolith Craterlands
           }
         } else if (Tlocal < 260 && Tbase < 380) {
-          // Freezing (only on non-scorched worlds)
           if (Tlocal < 235 || altRatio > 0.7) {
             biomeGrid[idx] = 8; // Polar Glacial Ice
           } else if (craterGrid[idx] > 0.35 && pBar < 0.3) {
@@ -828,14 +1337,13 @@ export function generatePlanetarySurfaceModel(
             biomeGrid[idx] = 7; // Tundra
           }
         } else if (Tlocal > 370 || Tbase > 420) {
-          // Extreme scorching / Venusian / Sulfuric / Volcanic
           if (bodyClassLower.includes('volcanic') || bodyClassLower.includes('sulfuric') || bodyClassLower.includes('venusian')) {
             biomeGrid[idx] = altRatio > 0.65 ? 12 : 11; // Badlands / Mountainous Basalt
           } else {
             biomeGrid[idx] = 10; // Hyper-Arid Desert
           }
         } else {
-          // Temperate habitable ranges
+          // Temperate ranges
           const isAqueousOrAmmonia =
             seaPalette.solventKey === 'H2O' ||
             seaPalette.solventKey === 'H2O + CO2' ||
@@ -848,18 +1356,17 @@ export function generatePlanetarySurfaceModel(
           } else if (altRatio > 0.35) {
             biomeGrid[idx] = 11; // High Plateau / Badlands
           } else {
-            // Moisture / Hadley cell belts (deserts around 20-30 deg latitude)
             const isHadleyDesert = absLat >= 18 && absLat <= 32 && Math.sin(lon * 0.1) > 0.1;
             if (isHadleyDesert || !isAqueousOrAmmonia) {
               biomeGrid[idx] = 10; // Hyper-Arid Dunes
             } else if (absLat > 50) {
-              biomeGrid[idx] = 6; // Boreal Taiga / Alien Flora
-            } else if (hasLiquid && hydro?.biosphere) {
-              biomeGrid[idx] = 5; // Alien Woodland
+              biomeGrid[idx] = 6; // Boreal Taiga (if biosphere) or High-Latitude Rocky Steppe (if sterile)
+            } else if (hasLiquid && hasBiosphere) {
+              biomeGrid[idx] = altRatio < 0.06 ? 3 : 5; // Coastal Marsh or Woodland (colored by floraPalette)
             } else if (hasLiquid) {
-              biomeGrid[idx] = 4; // Lowland Plains
+              biomeGrid[idx] = 4; // Lowland Plains (colored by floraPalette: green only if F/G water life, else barren tan)
             } else {
-              biomeGrid[idx] = 9; // Arid Savannah
+              biomeGrid[idx] = 9; // Arid Steppe
             }
           }
         }
@@ -872,9 +1379,9 @@ export function generatePlanetarySurfaceModel(
     activeBody.pressureBar,
     activeBody.gases || {},
     isGasGiant,
-    Boolean(hydro?.solvent?.includes('Supercritical')),
+    isSupercritical,
     isMoltenWorld,
-    star.Teff
+    starTeff
   );
 
   // Moons in the sky (if viewing host planet)
@@ -901,8 +1408,15 @@ export function generatePlanetarySurfaceModel(
   return {
     seed,
     isGasGiant,
+    isIceGiant,
+    isSupercritical,
+    isNoSurface,
     isIcyWorld,
     isMoltenWorld,
+    hasActiveGeology,
+    hasBiosphere,
+    hasWaterLife,
+    floraPalette,
     hasLiquid,
     seaLevelNormalized,
     minElevationKm: minElevKm,
@@ -912,6 +1426,11 @@ export function generatePlanetarySurfaceModel(
     biomeGrid,
     craterGrid,
     fractureGrid,
+    volcanoGrid,
+    volcanoCount: volcanoes.length,
+    cloudGrid,
+    cloudOpacity,
+    atmospherePalette,
     tectonicPlateGrid,
     platesCount,
     solvent: isMoltenWorld && hasLiquid ? 'Silicate Magma' : hydro?.solvent || 'None',
@@ -921,7 +1440,7 @@ export function generatePlanetarySurfaceModel(
     skyHorizonHex: skyColors.horizon,
     starAngularDiameterDeg,
     starColorHex: star.colorHex || '#fff4e6',
-    starTeff: star.Teff || 5778,
+    starTeff,
     ambientIllumination: Math.min(1.0, Math.max(0.1, (zone.a_in || 1) / (planet.a || 1))),
     hasRings,
     ringInnerRp: ringSys?.innerRadiusRp || 1.25,
@@ -951,10 +1470,11 @@ export function sampleSurfacePoint(
   const idx = y * 360 + x;
 
   const hNorm = model.hypsometry[idx];
-  const isOcean = !model.isGasGiant && model.hasLiquid && hNorm <= model.seaLevelNormalized;
+  const volcVal = model.volcanoGrid[idx];
+  const isOcean = !model.isNoSurface && model.hasLiquid && hNorm <= model.seaLevelNormalized && volcVal < 0.35;
 
   let elevationKm = 0;
-  if (!model.isGasGiant) {
+  if (!model.isNoSurface) {
     if (isOcean) {
       const depthRatio = (model.seaLevelNormalized - hNorm) / Math.max(0.001, model.seaLevelNormalized);
       elevationKm = +(depthRatio * model.minElevationKm).toFixed(2);
@@ -973,7 +1493,16 @@ export function sampleSurfacePoint(
   let biomeName = biomeDef.name;
   let biomeColor = biomeDef.color;
 
-  if (isOcean) {
+  if (model.isNoSurface) {
+    biomeName = model.atmospherePalette.classLabel;
+    biomeColor = rgbToHex(model.atmospherePalette.bandLightRgb);
+  } else if (volcVal > 1.1) {
+    biomeName = 'Active Volcanic Lava Caldera';
+    biomeColor = '#fbbf24';
+  } else if (volcVal > 0.38) {
+    biomeName = 'Volcanic Shield Cone (Basalt Edifice)';
+    biomeColor = '#4a2518';
+  } else if (isOcean) {
     const pal = model.seaPalette;
     if (biomeId === 0) {
       biomeName = `Abyssal Trench (${pal.solventKey} Sea)`;
@@ -984,6 +1513,27 @@ export function sampleSurfacePoint(
     } else {
       biomeName = `Shallow ${pal.solventKey} Shelf`;
       biomeColor = rgbToHex(pal.shallowRgb);
+    }
+  } else if (biomeId >= 3 && biomeId <= 6) {
+    // Dynamic flora or sterile regolith biome naming & coloring
+    const fp = model.floraPalette;
+    if (fp.hasAnyLife) {
+      if (biomeId === 3) {
+        biomeName = `Coastal Marsh (${fp.pigmentName})`;
+        biomeColor = fp.marshHex;
+      } else if (biomeId === 4) {
+        biomeName = `Vegetated Lowland Plains (${fp.pigmentName})`;
+        biomeColor = fp.plainsHex;
+      } else if (biomeId === 5) {
+        biomeName = `Temperate Forest / Flora (${fp.pigmentName})`;
+        biomeColor = fp.woodlandHex;
+      } else {
+        biomeName = `High-Latitude Boreal Flora (${fp.pigmentName})`;
+        biomeColor = fp.taigaHex;
+      }
+    } else {
+      // Sterile world: barren mineral/rocky plains
+      biomeColor = biomeId === 3 ? fp.marshHex : biomeId === 4 ? fp.plainsHex : biomeId === 5 ? fp.woodlandHex : fp.taigaHex;
     }
   } else if (model.isMoltenWorld && model.fractureGrid[idx] > 0.22) {
     biomeName = 'Active Lava Fissure (Magma Rift)';
@@ -996,13 +1546,17 @@ export function sampleSurfacePoint(
   }
 
   // Barometric pressure at altitude: P(h) = P0 * exp(-h / H)
-  const P0 = activeBody.pressureBar ?? 0;
+  const P0 = model.isNoSurface ? 100 : (activeBody.pressureBar ?? 0);
   const scaleHeightKm = Math.max(2, (8.314 * T_K) / (0.029 * activeBody.gravityG * 9.81 * 1000));
   const pressureBar = +(P0 * Math.exp(-Math.max(0, elevationKm) / scaleHeightKm)).toFixed(3);
 
   // Generate plausible procedural name for geographical feature
   const hemisphere = clampedLat >= 0 ? 'Northern' : 'Southern';
-  const prefix = isOcean
+  const prefix = model.isNoSurface
+    ? 'Zonal Band'
+    : volcVal > 0.38
+    ? 'Tholus / Mons'
+    : isOcean
     ? 'Mare'
     : model.fractureGrid[idx] > 0.25
     ? model.isMoltenWorld
@@ -1031,3 +1585,4 @@ export function sampleSurfacePoint(
     featureName,
   };
 }
+
