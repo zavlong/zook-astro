@@ -732,6 +732,46 @@ export function getSolventSeaPalette(solventRaw: string | undefined | null): Sol
   };
 }
 
+/**
+ * Computes the local pressure-dependent boiling point T_boil(P_local) in Kelvin
+ * via the Clausius-Clapeyron relation for the active solvent.
+ */
+export function computeLocalBoilingPointK(
+  seaPalette: SolventSeaPalette,
+  localPressureBar: number
+): number {
+  const P = Math.max(0.0001, localPressureBar);
+  const key = seaPalette.solventKey;
+
+  if (key === 'Supercritical H2O') return 10000;
+  if (key === 'Silicate Magma') {
+    return Math.min(4200, 2800 / Math.max(0.35, 1 - Math.log(P / 1.01325) / 16.0));
+  }
+  if (key === 'CO2') {
+    // Liquid CO2 requires P >= 5.18 bar (triple point 216.6 K); critical point is 304.1 K at 73.8 bar
+    if (P < 5.0) return 216.6;
+    return Math.min(304.1, 216.6 / Math.max(0.5, 1 - Math.log(P / 5.18) / 9.2));
+  }
+  if (key === 'CH4-C2H6') {
+    if (P < 0.012) return 90.7;
+    return Math.min(240.0, 122.0 / Math.max(0.45, 1 - Math.log(P / 1.01325) / 9.8));
+  }
+  if (key === 'NH3-H2O') {
+    if (P < 0.06) return 176.0;
+    return Math.min(405.5, 245.0 / Math.max(0.45, 1 - Math.log(P / 1.01325) / 11.2));
+  }
+  if (key === 'SO2') {
+    if (P < 0.016) return 197.7;
+    return Math.min(430.8, 263.15 / Math.max(0.45, 1 - Math.log(P / 1.01325) / 10.5));
+  }
+  if (key === 'H2SO4') {
+    return Math.min(925.0, 610.0 / Math.max(0.45, 1 - Math.log(Math.max(0.01, P) / 1.01325) / 14.5));
+  }
+  // Default H2O & H2O + CO2: 373.15 K at 1.01325 bar, triple point at 0.0061 bar, critical point at 647.1 K
+  if (P < 0.0061) return 273.15;
+  return Math.min(647.1, 373.15 / Math.max(0.45, 1 - Math.log(P / 1.01325) / 13.1));
+}
+
 // Note: Biomes 3, 4, 5, 6 dynamically adapt their color & name via floraPalette in sampleSurfacePoint and map rendering!
 export const BIOMES = [
   { id: 0, name: 'Abyssal Trench', color: '#041230', isWater: true },
@@ -1711,6 +1751,7 @@ export function generatePlanetarySurfaceModel(
 
   // Compute thermal and biome grid
   const pBarAtmo = activeBody.pressureBar ?? 0;
+  const baseScaleHeightKm = Math.max(2, (8.314 * Tbase) / (0.029 * Math.max(0.05, activeBody.gravityG) * 9.81 * 1000));
   // Thicker atmospheres transport heat more efficiently from equator to poles / dayside to nightside
   const thermalDiffFactor = Math.max(0.12, Math.min(0.42, 0.34 / Math.pow(1 + pBarAtmo * 0.35, 0.35)));
   const freezingPointK = hasLiquid
@@ -1749,10 +1790,11 @@ export function generatePlanetarySurfaceModel(
         Tlocal = Tbase * (1.0 + (Math.pow(latCos, 1.15) - 0.74) * thermalDiffFactor * 1.15) + climateWave;
       }
 
-      // Altitude lapse cooling above sea level
+      // Altitude lapse cooling & barometric pressure above sea level
+      let altitudeKm = 0;
       if (!isBelowSeaLevel && !isNoSurface) {
         const altitudeRatio = Math.max(0, (hNorm - seaLevelNormalized) / (1 - seaLevelNormalized));
-        const altitudeKm = altitudeRatio * maxElevKm;
+        altitudeKm = altitudeRatio * maxElevKm;
         const lapse = 6.2 * activeBody.gravityG; // K per km
         Tlocal -= altitudeKm * lapse;
       }
@@ -1768,7 +1810,14 @@ export function generatePlanetarySurfaceModel(
       const altRatio = isBelowSeaLevel
         ? 0
         : (hNorm - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized);
+      const localPressureBar = pBarAtmo * Math.exp(-altitudeKm / baseScaleHeightKm);
+      const localBoilingPointK = computeLocalBoilingPointK(seaPalette, localPressureBar);
       const isBelowFreezing = freezingPointK > 0 && Tlocal < freezingPointK;
+      const isAboveBoiling =
+        !isNoSurface &&
+        !isMoltenWorld &&
+        (hasLiquid || pBarAtmo >= 0.005) &&
+        Tlocal > localBoilingPointK;
 
       // Biome assignment
       if (isSupercritical) {
@@ -1795,6 +1844,9 @@ export function generatePlanetarySurfaceModel(
         } else {
           biomeGrid[idx] = 8; // Polar / Sea Glacial Ice
         }
+      } else if (isAboveBoiling) {
+        // Local temperature rose above the liquid's local boiling point -> replace biome here with Desert!
+        biomeGrid[idx] = 10; // Hyper-Arid Dunes / Desert
       } else if (isBelowSeaLevel) {
         // Unfrozen liquid sea/ocean (Tlocal >= freezingPointK)
         const waterDepthRatio = (seaLevelNormalized - hNorm) / Math.max(0.001, seaLevelNormalized);
@@ -2112,12 +2164,18 @@ export function evaluateSurfaceMapTexel(
   const h = hypsometry[idx];
   const volcVal = volcanoGrid[idx];
   const biomeId = biomeGrid[idx];
-  // Only unfrozen ocean cells (biomeId 0, 1, 2) are liquid water; frozen seas (biomeId 8, 14, 21) render as solid ice/crust!
+  // Only unfrozen ocean cells (biomeId 0, 1, 2) are liquid water; frozen seas (biomeId 8, 13, 18, 21) render as ice, while boiled seas (biomeId 10) render as desert!
   const isWater = !isNoSurface && hasLiquid && (biomeId === 0 || biomeId === 1 || biomeId === 2);
-  const isFrozenSeaIce = !isNoSurface && hasLiquid && !isWater && h <= seaLevelNormalized && volcVal < 0.35;
+  const isFrozenSeaIce =
+    !isNoSurface &&
+    hasLiquid &&
+    !isWater &&
+    (biomeId === 8 || biomeId === 13 || biomeId === 18 || biomeId === 21) &&
+    h <= seaLevelNormalized &&
+    volcVal < 0.35;
   const rawDhdx = (hypsometry[gy * width + xRight] - hypsometry[gy * width + xLeft]) * 0.5;
   const rawDhdy = (hypsometry[yDown * width + gx] - hypsometry[yUp * width + gx]) * 0.5;
-  // Floating sea ice pack over deep ocean is relatively flat compared to continental mountain topography
+  // Floating sea ice pack over deep ocean is relatively flat compared to continental or desiccated basin topography
   const dhdx = isFrozenSeaIce ? rawDhdx * 0.22 : rawDhdx;
   const dhdy = isFrozenSeaIce ? rawDhdy * 0.22 : rawDhdy;
 
@@ -2817,11 +2875,25 @@ export function sampleSurfacePoint(
   const volcVal = model.volcanoGrid[idx];
   const biomeId = model.biomeGrid[idx];
   const isOcean = !model.isNoSurface && model.hasLiquid && (biomeId === 0 || biomeId === 1 || biomeId === 2);
-  const isFrozenSea = !model.isNoSurface && model.hasLiquid && !isOcean && hNorm <= model.seaLevelNormalized && volcVal < 0.35;
+  const isFrozenSea =
+    !model.isNoSurface &&
+    model.hasLiquid &&
+    !isOcean &&
+    (biomeId === 8 || biomeId === 13 || biomeId === 18 || biomeId === 21 || biomeId === 14) &&
+    hNorm <= model.seaLevelNormalized &&
+    volcVal < 0.35;
+  const isBoiledSeaBasin =
+    !model.isNoSurface &&
+    model.hasLiquid &&
+    !isOcean &&
+    !isFrozenSea &&
+    biomeId === 10 &&
+    hNorm <= model.seaLevelNormalized &&
+    volcVal < 0.35;
 
   let elevationKm = 0;
   if (!model.isNoSurface) {
-    if (isOcean) {
+    if (isOcean || isBoiledSeaBasin) {
       const depthRatio = (model.seaLevelNormalized - hNorm) / Math.max(0.001, model.seaLevelNormalized);
       elevationKm = +(depthRatio * model.minElevationKm).toFixed(2);
     } else if (isFrozenSea) {
@@ -2861,6 +2933,8 @@ export function sampleSurfacePoint(
       biomeName = `Shallow ${pal.solventKey} Shelf`;
       biomeColor = rgbToHex(pal.shallowRgb);
     }
+  } else if (isBoiledSeaBasin) {
+    biomeName = `Desiccated Evaporite Desert Basin (${model.compositionPalette.compositionLabel})`;
   } else if (biomeId === 8 || biomeId === 13) {
     if (isFrozenSea) {
       biomeName = `Frozen Sea Ice — ${model.seaPalette.iceBiomeName}`;
