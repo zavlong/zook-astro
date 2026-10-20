@@ -41,13 +41,6 @@ interface LocalVertex {
   nx: number; // Smooth vertex normal X
   ny: number; // Smooth vertex normal Y
   nz: number; // Smooth vertex normal Z
-  r: number;
-  g: number;
-  b: number;
-  isWaterSurface: boolean;
-  isLavaGlow: boolean;
-  waterDepth: number;
-  cloudShadow: number; // [0..1] shadow cast onto ground by overhead 3D clouds
 }
 
 interface LocalTri {
@@ -125,11 +118,56 @@ function ridgedFbm2D(x: number, y: number, seed: number, octaves = 5): number {
   return val / (norm || 1);
 }
 
+// Fast 2D cellular / Worley feature evaluator for tree crowns, boulders, and micro-craters
+function cellularFeature2D(
+  x: number,
+  y: number,
+  seed: number
+): { dist: number; dx: number; dy: number; cellHash: number } {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  let bestDistSq = 99.0;
+  let bestDx = 0;
+  let bestDy = 0;
+  let bestHash = 0.5;
+
+  for (let oy = -1; oy <= 1; oy++) {
+    for (let ox = -1; ox <= 1; ox++) {
+      const cx = ix + ox;
+      const cy = iy + oy;
+      const h1 = hash2(cx, cy, seed);
+      const h2 = hash2(cx, cy, seed + 137);
+      const px = cx + 0.18 + h1 * 0.64;
+      const py = cy + 0.18 + h2 * 0.64;
+      const dx = x - px;
+      const dy = y - py;
+      const dSq = dx * dx + dy * dy;
+      if (dSq < bestDistSq) {
+        bestDistSq = dSq;
+        bestDx = dx;
+        bestDy = dy;
+        bestHash = h1;
+      }
+    }
+  }
+  return {
+    dist: Math.sqrt(bestDistSq),
+    dx: bestDx,
+    dy: bestDy,
+    cellHash: bestHash,
+  };
+}
+
 function compassLabelFromAzimuth(azDeg: number): string {
   const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
   const idx = Math.round((((azDeg % 360) + 360) % 360) / 45) % 8;
   return dirs[idx];
 }
+
+// Texture bitflags
+const FLAG_WATER = 1;
+const FLAG_LAVA = 2;
+const FLAG_ICE_SPEC = 4;
 
 export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
   surfaceModel,
@@ -143,6 +181,11 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
   onBackToGlobe,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const zBufferRef = useRef<Float32Array | null>(null);
+  const colorBufferRef = useRef<Uint32Array | null>(null);
+  const imageDataRef = useRef<ImageData | null>(null);
+
   const [rotYaw, setRotYaw] = useState<number>(0.62); // ~35 deg isometric angle
   const [rotPitch, setRotPitch] = useState<number>(0.54); // ~31 deg immersive biome tilt
   const [zoom, setZoom] = useState<number>(1.28); // Default zoomed-in so the tile fills the viewport like a full biome
@@ -170,254 +213,245 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     }));
   }, [activeTile, goldbergGrid]);
 
-  // Build high-detail 3D Hexagonal / Pentagonal Biome Mesh (40 concentric rings -> ~9,600 triangles) + 3D Cloud Canopy
+  // Build 3D Hexagonal/Pentagonal Mesh + 512x512 High-Resolution Procedural Biome Texture & Micro-Bump Normal Map
   const meshData = useMemo(() => {
     const sides = activeTile.isPentagon ? 5 : 6;
-    const rings = 40; // High-density mesh: 6 * 40^2 = 9,600 triangles for rich micro-terrain detail!
+    const rings = 36; // Smooth 3D macro mesh (7,776 triangles) paired with 512x512 per-pixel texture & bump map
     const tileSeed = (surfaceModel.seed * 1664525 + activeTile.tileId * 1013904223) & 0x7fffffff;
 
     // Corner angles in local (x, z) plane aligned with neighbor compass directions
     const corners: [number, number][] = [];
     for (let s = 0; s < sides; s++) {
-      const angleRad = ((s - 0.5) * 2 * Math.PI) / sides;
-      corners.push([Math.cos(angleRad), Math.sin(angleRad)]);
+      const ang = (s * 2 * Math.PI) / sides - Math.PI / 2;
+      corners.push([Math.cos(ang), Math.sin(ang)]);
     }
 
-    // Generate deterministic local craters if tile has craterIntensity
-    const craterList: { cx: number; cz: number; radius: number; depth: number; hasCentralPeak: boolean }[] = [];
-    if (!surfaceModel.isNoSurface && !activeTile.isOcean && (activeTile.craterIntensity > 0.04 || pBarAtmo < 0.05)) {
-      const effCrater = Math.max(activeTile.craterIntensity, pBarAtmo < 0.02 ? 0.35 : 0);
-      const numCraters = Math.min(11, Math.max(2, Math.round(effCrater * 18)));
-      for (let c = 0; c < numCraters; c++) {
+    // Generate local craters if tile has craterIntensity > 0.08
+    const craters: { cx: number; cz: number; rad: number; depth: number; hasCentralPeak: boolean }[] = [];
+    if (activeTile.craterIntensity > 0.08 && !surfaceModel.isNoSurface) {
+      const count = Math.min(18, Math.round(activeTile.craterIntensity * 20));
+      for (let c = 0; c < count; c++) {
         const angle = hash2(c, 1, tileSeed) * Math.PI * 2;
-        const dist = 0.08 + hash2(c, 2, tileSeed) * 0.68;
-        const radius = 0.065 + hash2(c, 3, tileSeed) * 0.15;
-        craterList.push({
+        const dist = Math.sqrt(hash2(c, 2, tileSeed)) * 0.76;
+        const rad = 0.045 + hash2(c, 3, tileSeed) * 0.16;
+        craters.push({
           cx: Math.cos(angle) * dist,
           cz: Math.sin(angle) * dist,
-          radius,
-          depth: 0.065 + effCrater * 0.11,
-          hasCentralPeak: radius > 0.14,
+          rad,
+          depth: rad * (0.34 + hash2(c, 4, tileSeed) * 0.24),
+          hasCentralPeak: rad > 0.13,
         });
       }
     }
 
-    // Generate deterministic volcanic cones if tile has volcanoIntensity > 0.32 or volcanic biome
-    const volcanoes: { vx: number; vz: number; radius: number; height: number; activeLava: boolean }[] = [];
-    if (
+    // Volcanic cones for volcanic / tectonic worlds
+    const volcanicCones: { vx: number; vz: number; rad: number; height: number }[] = [];
+    const hasVolcanoes =
       !surfaceModel.isNoSurface &&
-      (activeTile.volcanoIntensity > 0.32 || activeTile.biomeId === 15 || activeTile.biomeId === 22 || surfaceModel.isMoltenWorld)
-    ) {
-      const count = activeTile.biomeId === 15 || surfaceModel.isMoltenWorld ? 2 : 1;
-      for (let v = 0; v < count; v++) {
-        volcanoes.push({
-          vx: (hash2(v * 11 + 3, 17, tileSeed) - 0.5) * 0.52,
-          vz: (hash2(v * 19 + 7, 31, tileSeed) - 0.5) * 0.52,
-          radius: v === 0 ? 0.44 : 0.30,
-          height: v === 0 ? 0.38 : 0.25,
-          activeLava: activeTile.volcanoIntensity > 0.8 || activeTile.biomeId === 15 || surfaceModel.isMoltenWorld,
+      (activeTile.biomeId === 15 || activeTile.volcanoIntensity > 0.22 || surfaceModel.isMoltenWorld);
+    if (hasVolcanoes) {
+      const vCount = activeTile.biomeId === 15 ? 3 : 2;
+      for (let v = 0; v < vCount; v++) {
+        const vDist = v === 0 ? 0.18 : 0.35 + hash2(v, 19, tileSeed) * 0.28;
+        const vAng = hash2(v, 23, tileSeed) * Math.PI * 2;
+        volcanicCones.push({
+          vx: Math.cos(vAng) * vDist,
+          vz: Math.sin(vAng) * vDist,
+          rad: v === 0 ? 0.34 : 0.18 + hash2(v, 29, tileSeed) * 0.12,
+          height: v === 0 ? 0.38 : 0.22 + hash2(v, 31, tileSeed) * 0.12,
         });
       }
     }
 
-    // Palette colors for rich multi-zone biome texturing
-    const baseRgb = hexToRgb(activeTile.biomeColor);
-    const marshRgb = hexToRgb(
-      resolveSolidBiomeColorHex(3, surfaceModel.floraPalette, surfaceModel.compositionPalette)
-    );
-    const plainsRgb = hexToRgb(
-      resolveSolidBiomeColorHex(4, surfaceModel.floraPalette, surfaceModel.compositionPalette)
-    );
-    const forestRgb = hexToRgb(
-      resolveSolidBiomeColorHex(5, surfaceModel.floraPalette, surfaceModel.compositionPalette)
-    );
-    const plateauRgb = hexToRgb(
-      resolveSolidBiomeColorHex(11, surfaceModel.floraPalette, surfaceModel.compositionPalette)
-    );
-    const highRgb = hexToRgb(
-      resolveSolidBiomeColorHex(12, surfaceModel.floraPalette, surfaceModel.compositionPalette)
-    );
-    const peakRgb = hexToRgb(
-      resolveSolidBiomeColorHex(13, surfaceModel.floraPalette, surfaceModel.compositionPalette)
-    );
-    const basaltRgb = hexToRgb(surfaceModel.compositionPalette.basaltHex);
-    const iceRgb = hexToRgb(surfaceModel.compositionPalette.iceHex);
+    // Meandering river valley on liquid-bearing land biomes (Marsh, Plains, Forest, Taiga, Tundra)
+    const hasRiverValley =
+      !surfaceModel.isNoSurface &&
+      surfaceModel.hasLiquid &&
+      !activeTile.isOcean &&
+      !activeTile.isIce &&
+      ((activeTile.biomeId >= 3 && activeTile.biomeId <= 7) || activeTile.moisture > 0.45);
+    const riverAngle = hash2(31, 37, tileSeed) * Math.PI;
+    const riverCos = Math.cos(riverAngle);
+    const riverSin = Math.sin(riverAngle);
 
-    // Cloud field helper so ground vertices can receive realistic overhead cloud shadows
+    // Base biome palette and secondary sub-biome palettes for rich local color variation
+    const baseHex =
+      activeTile.biomeColor ||
+      resolveSolidBiomeColorHex(activeTile.biomeId, surfaceModel.floraPalette, surfaceModel.compositionPalette);
+    const baseRgb = hexToRgb(baseHex);
+    const highRgb = hexToRgb(surfaceModel.compositionPalette.mountainHex);
+    const peakRgb = hexToRgb(surfaceModel.compositionPalette.peakHex);
+    const basaltRgb = hexToRgb(surfaceModel.compositionPalette.basaltHex);
+    const plateauRgb = hexToRgb(surfaceModel.compositionPalette.plateauHex);
+    const alluvialRgb = hexToRgb(surfaceModel.compositionPalette.alluvialHex);
+    const iceRgb = hexToRgb(surfaceModel.compositionPalette.iceHex);
+    const marshRgb = hexToRgb(surfaceModel.floraPalette.marshHex);
+    const plainsRgb = hexToRgb(surfaceModel.floraPalette.plainsHex);
+    const forestRgb = hexToRgb(surfaceModel.floraPalette.woodlandHex);
+
+    // Cloud field parameters for 3D clouds + ground shadows
     const effCloudCover = surfaceModel.isNoSurface
-      ? 1.0
-      : Math.min(1.0, activeTile.cloudCover * 0.65 + surfaceModel.cloudOpacity * 0.55);
-    const sampleCloudDensityAt = (x: number, z: number): number => {
-      if (effCloudCover <= 0.02 || surfaceModel.cloudOpacity <= 0.01) return 0;
-      const swirl = fbm2D(x * 1.9 + 5, z * 1.9 - 3, tileSeed + 701, 4);
-      const billow = fbm2D(
-        x * 3.1 + (swirl - 0.5) * 0.85,
-        z * 2.7 + (swirl - 0.5) * 0.85,
-        tileSeed + 787,
-        5
-      );
-      const threshold = Math.max(0.18, 0.66 - effCloudCover * 0.46);
-      return Math.max(0, Math.min(1, (billow - threshold) / (1 - threshold)));
+      ? 0.85
+      : Math.max(activeTile.cloudCover, surfaceModel.cloudOpacity * 0.55);
+
+    const sampleCloudDensityAt = (px: number, pz: number): number => {
+      if (!hasAtmosphere || surfaceModel.cloudOpacity <= 0.015 || effCloudCover <= 0.03) return 0;
+      const warpX = fbm2D(px * 2.4 + 4.1, pz * 2.4 - 1.7, tileSeed + 701, 3) * 0.35;
+      const warpZ = fbm2D(px * 2.4 - 2.9, pz * 2.4 + 3.3, tileSeed + 733, 3) * 0.35;
+      const n = fbm2D((px + warpX) * 2.8, (pz + warpZ) * 2.8, tileSeed + 787, 4);
+      const threshold = 0.62 - effCloudCover * 0.42;
+      if (n <= threshold) return 0;
+      return Math.min(1, (n - threshold) / (1 - threshold));
     };
 
-    const sampleHeightOnly = (px: number, pz: number, edgeFrac: number, wedgeIdx: number): {
-      hLocal: number;
-      craterRimTint: number;
-      isCalderaLava: boolean;
-      isLavaRiver: boolean;
-      isFissureFloor: boolean;
-      isRiverChannel: boolean;
-      baseFbm: number;
-      ridge: number;
-      fine: number;
-      micro: number;
-    } => {
+    // Pure elevation evaluator
+    const sampleHeightOnly = (px: number, pz: number) => {
+      const distR = Math.min(1, Math.hypot(px, pz));
+      const ang = Math.atan2(pz, px) + Math.PI / 2;
+      const normAng = ((ang % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      const wedgeFloat = (normAng / (Math.PI * 2)) * sides;
+      const wedgeIdx = Math.floor(wedgeFloat) % sides;
+
       if (surfaceModel.isNoSurface) {
-        const wave =
-          Math.sin(pz * 8.5 + fbm2D(px * 2.8, pz * 2.8, tileSeed, 4) * 3.5) * 0.055 +
-          (fbm2D(px * 4.5, pz * 4.5, tileSeed + 71, 4) - 0.5) * 0.04;
+        const bandWave = Math.sin(pz * 14 + fbm2D(px * 4, pz * 4, tileSeed, 4) * 3.2);
         return {
-          hLocal: wave,
+          hLocal: bandWave * 0.045,
           craterRimTint: 0,
           isCalderaLava: false,
           isLavaRiver: false,
           isFissureFloor: false,
           isRiverChannel: false,
-          baseFbm: 0.5,
+          baseFbm: bandWave * 0.5 + 0.5,
           ridge: 0.5,
-          fine: 0,
-          micro: 0,
         };
       }
 
-      // Multi-scale domain-warped FBM for rich local biome geomorphology
-      const wx = px + (fbm2D(px * 2.5, pz * 2.5, tileSeed + 13, 3) - 0.5) * 0.38;
-      const wz = pz + (fbm2D(px * 2.5 + 7, pz * 2.5 - 5, tileSeed + 29, 3) - 0.5) * 0.38;
-      const baseFbm = fbm2D(wx * 3.0 + 10, wz * 3.0 + 10, tileSeed + 53, 5);
-      const ridge = ridgedFbm2D(wx * 3.4 - 4, wz * 3.4 + 6, tileSeed + 97, 5);
-      const fine = fbm2D(px * 8.5, pz * 8.5, tileSeed + 149, 4) - 0.5;
-      const micro = fbm2D(px * 18.0, pz * 18.0, tileSeed + 313, 3) - 0.5;
-
       const bId = activeTile.biomeId;
-      let hLocal = 0;
-      let isRiverChannel = false;
+      const nbTile = neighborTiles[wedgeIdx]?.tile;
 
-      if (activeTile.isOcean) {
-        // Detailed bathymetry: abyssal plains, seamount ridges, and coral/cryo-shoals
-        const baseDepth = bId === 0 ? -0.34 : bId === 1 ? -0.20 : -0.08;
-        const seamount = Math.pow(ridge, 1.8) * (bId === 2 ? 0.13 : 0.16);
-        hLocal = baseDepth + (baseFbm - 0.5) * 0.14 + seamount + fine * 0.03;
-      } else if (bId === 12 || bId === 13) {
-        // Towering dendritic Mountain Cordillera & Alpine Peaks with glacial U-valleys
-        const valleyCarve = Math.pow(baseFbm, 1.35);
-        hLocal = 0.08 + Math.pow(ridge, 1.25) * 0.48 + valleyCarve * 0.18 + fine * 0.06 + micro * 0.025;
+      // Neighbor elevation blending near the outer border so adjacent tiles link seamlessly
+      const centerTargetH = activeTile.meanHNorm - surfaceModel.seaLevelNormalized;
+      const neighborTargetH = nbTile ? nbTile.meanHNorm - surfaceModel.seaLevelNormalized : centerTargetH;
+      const edgeBlend = distR > 0.72 ? Math.pow((distR - 0.72) / 0.28, 1.5) * 0.42 : 0;
+      const macroH = centerTargetH * (1 - edgeBlend) + neighborTargetH * edgeBlend;
+
+      // Domain-warped coordinates for natural organic landforms
+      const warpX = (fbm2D(px * 2.6, pz * 2.6, tileSeed + 19, 3) - 0.5) * 0.22;
+      const warpZ = (fbm2D(px * 2.6 + 7.1, pz * 2.6 + 3.4, tileSeed + 23, 3) - 0.5) * 0.22;
+      const wx = px + warpX;
+      const wz = pz + warpZ;
+
+      const baseFbm = fbm2D(wx * 3.2, wz * 3.2, tileSeed, 5);
+      const ridge = ridgedFbm2D(wx * 3.8, wz * 3.8, tileSeed + 79, 4);
+      const fine = fbm2D(px * 11.5, pz * 11.5, tileSeed + 151, 3) - 0.5;
+
+      let hLocal = macroH * 0.52;
+
+      if (bId === 12 || bId === 13) {
+        // Rugged Alpine Mountain Range / Permanent Glaciated Peaks
+        hLocal += (ridge * 0.36 + baseFbm * 0.16 - 0.10) + fine * 0.045;
       } else if (bId === 11) {
-        // Stratified High Plateau / Canyon Mesa Badlands with steep terraced steps & incised gorges
-        const rawPlat = baseFbm * 0.62 + ridge * 0.38;
-        const steps = 5.5;
-        const terraced = (Math.floor(rawPlat * steps) + Math.pow((rawPlat * steps) % 1, 3.0)) / steps;
-        const canyonCheck = Math.abs(fbm2D(wx * 2.2, wz * 2.2, tileSeed + 409, 4) - 0.48);
-        const canyonCut = canyonCheck < 0.045 ? (1.0 - canyonCheck / 0.045) * 0.19 : 0;
-        hLocal = 0.11 + terraced * 0.30 - canyonCut + fine * 0.03;
-        if (canyonCut > 0.12 && surfaceModel.hasLiquid) {
-          hLocal = -0.015;
-          isRiverChannel = true;
-        }
-      } else if (activeTile.isIce) {
-        // Tabular H2O Iceberg / Glacial Ice Sheet with sastrugi waves, pressure ridges, and steep coastal ice cliffs
-        const sastrugi = Math.sin(wx * 16.0 + wz * 9.0 + baseFbm * 4.0) * 0.018;
-        const tabular = bId === 18 ? 0.065 + baseFbm * 0.10 : 0.12 + baseFbm * 0.17 + Math.pow(ridge, 1.5) * 0.15;
-        hLocal = tabular + sastrugi + fine * 0.025;
+        // Tiered Canyon & Flat-Topped Mesa Plateau
+        const raw = baseFbm * 1.18 + fine * 0.08;
+        const steps = 5;
+        const stepped = (Math.floor(raw * steps) + Math.pow((raw * steps) % 1, 3.5)) / steps;
+        const gorge = Math.abs(wx * 0.85 - wz * 0.52 + Math.sin(wz * 4.5) * 0.14);
+        const gorgeCarve = gorge < 0.13 ? (1.0 - Math.pow(gorge / 0.13, 2)) * 0.22 : 0;
+        hLocal += (stepped - 0.32) * 0.34 - gorgeCarve;
       } else if (bId === 10) {
-        // Hyper-Arid Desert: sweeping barchan/transverse sand dunes + exposed rocky yardangs
-        const dunePhase = wx * 12.5 + wz * 5.5 + baseFbm * 4.2;
-        const sinD = Math.sin(dunePhase);
-        // Asymmetric sharp dune crest
-        const duneCrest = Math.pow(1.0 - Math.abs(sinD), 1.65) * 0.075;
-        const rockyOutcrop = ridge > 0.72 ? (ridge - 0.72) * 0.45 : 0;
-        hLocal = 0.04 + (baseFbm - 0.35) * 0.14 + duneCrest + rockyOutcrop + micro * 0.015;
+        // Erg Sand Dunes + Rocky Yardang Outcrops
+        const dunePhase = px * 22.0 + pz * 9.0 + Math.sin(pz * 7.5 + baseFbm * 4.0) * 2.6;
+        const duneWave = Math.pow(Math.sin(dunePhase) * 0.5 + 0.5, 1.65);
+        const yardang = ridge > 0.72 ? (ridge - 0.72) * 0.45 : 0;
+        hLocal += (baseFbm - 0.42) * 0.14 + duneWave * 0.065 + yardang;
+      } else if (bId === 18) {
+        // Precipitated Tabular Iceberg / Floating Ice Shelf
+        const distEdge = 1.0 - distR;
+        const shelf = distEdge > 0.12 ? 1.0 : Math.max(0, distEdge / 0.12);
+        const sastrugi = Math.sin(px * 26 + baseFbm * 5) * 0.012;
+        hLocal = 0.055 * shelf + (ridge - 0.4) * 0.065 * shelf + sastrugi;
+      } else if (bId === 16 || bId === 17 || bId === 21) {
+        // Glacial Ice Sheet / Cryotectonic Chaos
+        const sastrugi = Math.sin(px * 20 - pz * 12 + baseFbm * 4) * 0.015;
+        hLocal += (baseFbm - 0.42) * 0.16 + ridge * 0.09 + sastrugi;
+      } else if (activeTile.isOcean) {
+        // Abyssal Bathymetry + Mid-Ocean Ridges & Seamounts
+        const seamount = ridge > 0.68 ? (ridge - 0.68) * 0.35 : 0;
+        hLocal = Math.min(-0.025, macroH * 0.48 + (baseFbm - 0.52) * 0.22 + seamount + fine * 0.02);
       } else {
-        // Lowland Plains, Forest, Coastal Marsh, Boreal Taiga, Tundra, Arid Steppe
-        const hills = (baseFbm - 0.36) * 0.20 + Math.pow(ridge, 1.4) * 0.12 + fine * 0.035 + micro * 0.015;
-        hLocal = (bId === 3 ? 0.015 : 0.045) + hills;
+        // Rolling Hills, Plains, Forest, Taiga, Tundra, Regolith
+        hLocal += (baseFbm - 0.44) * 0.22 + (ridge - 0.45) * 0.11 + fine * 0.028;
+      }
 
-        // Carve meandering river & wetland channels on liquid-bearing worlds
-        if (surfaceModel.hasLiquid && !surfaceModel.isMoltenWorld && (bId === 3 || bId === 4 || bId === 5 || bId === 6 || bId === 7)) {
-          const riverField = Math.abs(fbm2D(wx * 1.85 + 3.1, wz * 1.85 - 2.4, tileSeed + 613, 4) - 0.50);
-          const riverWidth = bId === 3 ? 0.058 : 0.032;
-          if (riverField < riverWidth) {
-            const bankT = 1.0 - riverField / riverWidth;
-            hLocal -= bankT * (hLocal + 0.028);
-            if (hLocal < 0.002) {
-              hLocal = -0.018 * bankT;
-              isRiverChannel = true;
-            }
+      // Carve meandering river valley & tributary across fertile/temperate land tiles
+      let isRiverChannel = false;
+      if (hasRiverValley) {
+        const uRiver = px * riverCos - pz * riverSin;
+        const vRiver = px * riverSin + pz * riverCos;
+        const meander =
+          Math.sin(uRiver * 5.2 + tileSeed * 0.01) * 0.18 +
+          Math.sin(uRiver * 11.5) * 0.05 +
+          (baseFbm - 0.5) * 0.12;
+        const distMain = Math.abs(vRiver - meander);
+        const tribMeander = uRiver * 0.55 + 0.15 + Math.sin(vRiver * 7.0) * 0.08;
+        const distTrib = vRiver > meander ? Math.abs(uRiver - tribMeander) : 99;
+        const riverDist = Math.min(distMain, distTrib * 1.35);
+
+        const valleyWidth = 0.16;
+        if (riverDist < valleyWidth) {
+          const valleyProfile = 1.0 - Math.pow(riverDist / valleyWidth, 1.8);
+          hLocal -= valleyProfile * 0.14;
+          if (riverDist < 0.036) {
+            isRiverChannel = true;
+            hLocal = Math.min(hLocal, -0.012 - (1.0 - riverDist / 0.036) * 0.025);
           }
         }
       }
 
-      // Blend outer edge (edgeFrac > 0.60) toward the adjacent Goldberg neighbor tile!
-      const nbEntry = neighborTiles[wedgeIdx % neighborTiles.length];
-      if (nbEntry && edgeFrac > 0.60) {
-        const nbTile = nbEntry.tile;
-        const blendT = Math.pow((edgeFrac - 0.60) / 0.40, 1.35) * 0.76;
-        const nbTargetH = nbTile.isOcean
-          ? nbTile.biomeId === 0
-            ? -0.30
-            : nbTile.biomeId === 1
-            ? -0.18
-            : -0.08
-          : nbTile.biomeId === 12 || nbTile.biomeId === 13
-          ? 0.28 + ridge * 0.20
-          : nbTile.biomeId === 11
-          ? 0.22
-          : 0.08 + (baseFbm - 0.4) * 0.12;
-        hLocal = hLocal * (1 - blendT) + nbTargetH * blendT;
-      }
-
-      // Apply 3D Impact Craters (with terraced bowls, raised ejecta rims, and central peaks)
+      // Carve impact craters with raised ejecta rims and central peaks
       let craterRimTint = 0;
-      for (let c = 0; c < craterList.length; c++) {
-        const cr = craterList[c];
-        const dist = Math.hypot(px - cr.cx, pz - cr.cz) / cr.radius;
-        if (dist < 1.38) {
-          if (dist < 0.78) {
-            const bowl = Math.cos((dist / 0.78) * (Math.PI * 0.5));
-            hLocal -= bowl * cr.depth;
-            if (cr.hasCentralPeak && dist < 0.22) {
-              const peak = Math.cos((dist / 0.22) * (Math.PI * 0.5));
-              hLocal += peak * cr.depth * 0.52;
+      for (let c = 0; c < craters.length; c++) {
+        const cr = craters[c];
+        const d = Math.hypot(px - cr.cx, pz - cr.cz);
+        if (d < cr.rad * 1.45) {
+          const u = d / cr.rad;
+          if (u < 0.82) {
+            const bowl = 1.0 - (u / 0.82) * (u / 0.82);
+            hLocal -= cr.depth * bowl;
+            if (cr.hasCentralPeak && u < 0.26) {
+              const pk = 1.0 - (u / 0.26) * (u / 0.26);
+              hLocal += cr.depth * 0.42 * pk;
             }
-          } else if (dist < 1.18) {
-            const rim = Math.sin(((dist - 0.78) / 0.40) * Math.PI);
-            hLocal += rim * cr.depth * 0.46;
+          } else if (u < 1.38) {
+            const rimPhase = (u - 0.82) / 0.56;
+            const rim = Math.sin(rimPhase * Math.PI);
+            hLocal += cr.depth * 0.36 * rim;
             craterRimTint = Math.max(craterRimTint, rim);
           }
         }
       }
 
-      // Apply 3D Volcanic Shield Cones, Summit Lava Calderas & Braided Lava Channels
+      // Add Volcanic Cones, Summit Calderas & Braided Lava Channels
       let isCalderaLava = false;
       let isLavaRiver = false;
-      for (let v = 0; v < volcanoes.length; v++) {
-        const vc = volcanoes[v];
-        const dx = px - vc.vx;
-        const dz = pz - vc.vz;
-        const vDist = Math.hypot(dx, dz);
-        if (vDist < vc.radius) {
-          const calRad = vc.radius * 0.19;
-          if (vDist < calRad) {
-            const calDepth = 1.0 - vDist / calRad;
-            hLocal += vc.height - calDepth * (vc.height * 0.34);
-            if (vDist < calRad * 0.78 && vc.activeLava) {
-              isCalderaLava = true;
-            }
-          } else {
-            const cone = Math.pow(1.0 - (vDist - calRad) / (vc.radius - calRad), 1.52);
-            const radialGully = Math.sin(Math.atan2(dz, dx) * 9.0 + fine * 4.0) * 0.018 * cone;
-            hLocal += cone * vc.height + radialGully;
-            if (vc.activeLava && radialGully < -0.009 && cone > 0.22) {
-              isLavaRiver = true;
+      if (hasVolcanoes) {
+        for (let v = 0; v < volcanicCones.length; v++) {
+          const vc = volcanicCones[v];
+          const dv = Math.hypot(px - vc.vx, pz - vc.vz);
+          if (dv < vc.rad * 1.55) {
+            const uv = dv / vc.rad;
+            if (uv < 0.20) {
+              const pit = 1.0 - (uv / 0.20) * (uv / 0.20);
+              hLocal += vc.height * 0.72 - pit * (vc.height * 0.36);
+              if (uv < 0.14) isCalderaLava = true;
+            } else {
+              const cone = Math.pow(Math.max(0, 1.0 - (uv - 0.20) / 1.35), 1.65);
+              hLocal += vc.height * cone;
+              const lavaAng = Math.atan2(pz - vc.vz, px - vc.vx);
+              const flowChannel = Math.sin(lavaAng * 4 + dv * 14 + baseFbm * 5);
+              if (flowChannel > 0.76 && uv < 1.15) {
+                isLavaRiver = true;
+              }
             }
           }
         }
@@ -447,198 +481,38 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         isRiverChannel,
         baseFbm,
         ridge,
-        fine,
-        micro,
       };
     };
 
-    const mapPointElevationAndColor = (px: number, pz: number, edgeFrac: number, wedgeIdx: number) => {
-      if (surfaceModel.isNoSurface) {
-        const { hLocal } = sampleHeightOnly(px, pz, edgeFrac, wedgeIdx);
-        const pal = surfaceModel.atmospherePalette;
-        const t = Math.max(0, Math.min(1, hLocal * 8 + 0.5));
-        return {
-          y: hLocal,
-          seaFloorY: hLocal,
-          nx: 0,
-          ny: 1,
-          nz: 0,
-          r: Math.round(pal.bandDarkRgb[0] + (pal.bandLightRgb[0] - pal.bandDarkRgb[0]) * t),
-          g: Math.round(pal.bandDarkRgb[1] + (pal.bandLightRgb[1] - pal.bandDarkRgb[1]) * t),
-          b: Math.round(pal.bandDarkRgb[2] + (pal.bandLightRgb[2] - pal.bandDarkRgb[2]) * t),
-          isWaterSurface: false,
-          isLavaGlow: false,
-          waterDepth: 0,
-          cloudShadow: 0,
-        };
-      }
-
-      const centerH = sampleHeightOnly(px, pz, edgeFrac, wedgeIdx);
-      const {
-        hLocal,
-        craterRimTint,
-        isCalderaLava,
-        isLavaRiver,
-        isFissureFloor,
-        isRiverChannel,
-        baseFbm,
-        ridge,
-        fine,
-        micro,
-      } = centerH;
-
-      // Finite-difference local slope magnitude for rock cliff exposure on steep terrain
-      const eps = 0.025;
-      const hx = sampleHeightOnly(px + eps, pz, edgeFrac, wedgeIdx).hLocal;
-      const hz = sampleHeightOnly(px, pz + eps, edgeFrac, wedgeIdx).hLocal;
-      const slope = Math.hypot(hx - hLocal, hz - hLocal) / eps;
-
-      const seaFloorY = hLocal;
-      const hasSeaHere = (surfaceModel.hasLiquid || activeTile.isOcean || isRiverChannel) && hLocal < 0;
-      const finalY = hasSeaHere && showWaterLayer ? 0 : hLocal;
-      const waterDepth = hasSeaHere ? Math.max(0, -hLocal) : 0;
-
-      const bId = activeTile.biomeId;
-      let r = baseRgb[0];
-      let g = baseRgb[1];
-      let b = baseRgb[2];
-      let isLavaGlow = false;
-
-      if (isCalderaLava || isLavaRiver || (isFissureFloor && (surfaceModel.isMoltenWorld || bId === 15))) {
-        const hotT = isCalderaLava ? 1.0 : 0.72;
-        r = 255;
-        g = Math.round(135 + 75 * hotT);
-        b = Math.round(16 + 32 * hotT);
-        isLavaGlow = true;
-      } else if (isFissureFloor && (surfaceModel.isIcyWorld || activeTile.isIce)) {
-        r = 48;
-        g = 138;
-        b = 204;
-      } else if (hasSeaHere && showWaterLayer) {
-        const pal = surfaceModel.seaPalette;
-        const depthT = Math.min(1, waterDepth / 0.26);
-        if (surfaceModel.isMoltenWorld || pal.solventKey === 'Silicate Magma') {
-          r = Math.round(255 - depthT * 35);
-          g = Math.round(168 - depthT * 82);
-          b = Math.round(24 - depthT * 14);
-          isLavaGlow = true;
-        } else {
-          const sh = pal.shallowRgb;
-          const dp = pal.deepRgb;
-          const tr = pal.trenchRgb;
-          if (depthT < 0.45) {
-            const u = depthT / 0.45;
-            r = Math.round(sh[0] + (dp[0] - sh[0]) * u);
-            g = Math.round(sh[1] + (dp[1] - sh[1]) * u);
-            b = Math.round(sh[2] + (dp[2] - sh[2]) * u);
-          } else {
-            const u = (depthT - 0.45) / 0.55;
-            r = Math.round(dp[0] + (tr[0] - dp[0]) * u);
-            g = Math.round(dp[1] + (tr[1] - dp[1]) * u);
-            b = Math.round(dp[2] + (tr[2] - dp[2]) * u);
-          }
-          // Subtle shoreline foam / shoal brightening where waterDepth is very shallow
-          if (waterDepth < 0.022) {
-            const foam = (1.0 - waterDepth / 0.022) * 0.28;
-            r = Math.min(255, Math.round(r + (235 - r) * foam));
-            g = Math.min(255, Math.round(g + (245 - g) * foam));
-            b = Math.min(255, Math.round(b + (255 - b) * foam));
-          }
-        }
-      } else {
-        // Rich solid-biome sub-zone texturing (vegetation patches, sedimentary strata, cliff faces, snow lines)
-        if (activeTile.isIce) {
-          const iceT = Math.max(0, Math.min(1, (hLocal - 0.03) / 0.28 + micro * 0.25));
-          const blueCrevasse = Math.max(0, Math.min(1, (0.35 - baseFbm) * 1.8));
-          r = Math.round(baseRgb[0] * (1 - iceT * 0.35) + iceRgb[0] * (iceT * 0.35) - blueCrevasse * 26);
-          g = Math.round(baseRgb[1] * (1 - iceT * 0.35) + iceRgb[1] * (iceT * 0.35) - blueCrevasse * 10);
-          b = Math.round(baseRgb[2] * (1 - iceT * 0.35) + iceRgb[2] * (iceT * 0.35) + blueCrevasse * 14);
-        } else if (bId >= 3 && bId <= 6 && surfaceModel.floraPalette.hasAnyLife) {
-          // Living biosphere: blend marsh, meadow plains, dense forest canopy, and exposed cliff rock
-          const canopyPatch = Math.max(0, Math.min(1, baseFbm * 1.15 + fine * 0.45 - 0.1));
-          const wetlandPatch = hLocal < 0.055 ? Math.max(0, Math.min(1, (0.055 - hLocal) / 0.055)) : 0;
-          r = Math.round(plainsRgb[0] * (1 - canopyPatch) + forestRgb[0] * canopyPatch);
-          g = Math.round(plainsRgb[1] * (1 - canopyPatch) + forestRgb[1] * canopyPatch);
-          b = Math.round(plainsRgb[2] * (1 - canopyPatch) + forestRgb[2] * canopyPatch);
-          if (wetlandPatch > 0) {
-            r = Math.round(r * (1 - wetlandPatch * 0.7) + marshRgb[0] * (wetlandPatch * 0.7));
-            g = Math.round(g * (1 - wetlandPatch * 0.7) + marshRgb[1] * (wetlandPatch * 0.7));
-            b = Math.round(b * (1 - wetlandPatch * 0.7) + marshRgb[2] * (wetlandPatch * 0.7));
-          }
-        } else if (bId === 11) {
-          // Sedimentary horizontal strata bands on canyon & plateau walls
-          const strataWave = Math.sin(hLocal * 58.0 + fine * 2.5) * 0.5 + 0.5;
-          r = Math.round(plateauRgb[0] * (0.86 + 0.24 * strataWave) + highRgb[0] * 0.06);
-          g = Math.round(plateauRgb[1] * (0.84 + 0.22 * strataWave) + highRgb[1] * 0.06);
-          b = Math.round(plateauRgb[2] * (0.82 + 0.20 * strataWave) + highRgb[2] * 0.06);
-        } else {
-          // Mineral & regolith micro-variation
-          const mineralVar = fine * 0.28 + micro * 0.18;
-          r = Math.round(baseRgb[0] * (1 + mineralVar));
-          g = Math.round(baseRgb[1] * (1 + mineralVar * 0.92));
-          b = Math.round(baseRgb[2] * (1 + mineralVar * 0.85));
-        }
-
-        // Expose steep bedrock cliff faces where terrain slope is high
-        if (slope > 0.55 && !activeTile.isIce) {
-          const cliffT = Math.min(0.85, (slope - 0.55) / 0.95);
-          const cliffRgb = hLocal > 0.22 ? highRgb : basaltRgb;
-          r = Math.round(r * (1 - cliffT) + cliffRgb[0] * cliffT);
-          g = Math.round(g * (1 - cliffT) + cliffRgb[1] * cliffT);
-          b = Math.round(b * (1 - cliffT) + cliffRgb[2] * cliffT);
-        }
-
-        // High-altitude alpine peak / snowline transition
-        if (hLocal > 0.28) {
-          const pkT = Math.min(1, (hLocal - 0.28) / 0.18 + ridge * 0.15);
-          const targetPeak = activeTile.temperatureK < 305 && pBarAtmo >= 0.01 ? iceRgb : peakRgb;
-          r = Math.round(r * (1 - pkT) + targetPeak[0] * pkT);
-          g = Math.round(g * (1 - pkT) + targetPeak[1] * pkT);
-          b = Math.round(b * (1 - pkT) + targetPeak[2] * pkT);
-        } else if (hLocal < 0.032 && surfaceModel.hasLiquid && !activeTile.isIce) {
-          // Coastal littoral beach / alluvial bank near water level
-          const beachRgb = hexToRgb(surfaceModel.compositionPalette.alluvialHex);
-          const cT = Math.max(0, Math.min(1, (0.032 - hLocal) / 0.032));
-          r = Math.round(r * (1 - cT * 0.65) + beachRgb[0] * (cT * 0.65));
-          g = Math.round(g * (1 - cT * 0.65) + beachRgb[1] * (cT * 0.65));
-          b = Math.round(b * (1 - cT * 0.65) + beachRgb[2] * (cT * 0.65));
-        }
-
-        if (craterRimTint > 0.05 && surfaceModel.compositionPalette.iceEjectaBoost > 0) {
-          const ej = craterRimTint * surfaceModel.compositionPalette.iceEjectaBoost * 0.55;
-          r = Math.min(255, Math.round(r + (235 - r) * ej));
-          g = Math.min(255, Math.round(g + (245 - g) * ej));
-          b = Math.min(255, Math.round(b + (255 - b) * ej));
-        }
-      }
-
-      // Compute cloud shadow cast onto ground vertex (offset slightly toward sun direction)
-      const cloudShadow = sampleCloudDensityAt(px + 0.08, pz - 0.06);
-
-      return {
-        y: finalY,
-        seaFloorY,
-        nx: -(hx - hLocal) / eps,
-        ny: 1.0,
-        nz: -(hz - hLocal) / eps,
-        r: Math.max(0, Math.min(255, r)),
-        g: Math.max(0, Math.min(255, g)),
-        b: Math.max(0, Math.min(255, b)),
-        isWaterSurface: hasSeaHere && showWaterLayer,
-        isLavaGlow,
-        waterDepth,
-        cloudShadow,
-      };
-    };
-
-    // Build concentric ring vertices on the hexagon/pentagon
+    // Build 3D vertices and smooth vertex normals
     const vertices: LocalVertex[] = [];
-    const centerSample = mapPointElevationAndColor(0, 0, 0, 0);
-    vertices.push({
-      x: 0,
-      z: 0,
-      ...centerSample,
-    });
+    const buildVertex = (px: number, pz: number): LocalVertex => {
+      const { hLocal, isRiverChannel } = sampleHeightOnly(px, pz);
+      const eps = 0.024;
+      const hx = sampleHeightOnly(px + eps, pz).hLocal;
+      const hz = sampleHeightOnly(px, pz + eps).hLocal;
+      const hasSeaHere =
+        !surfaceModel.isNoSurface &&
+        (surfaceModel.hasLiquid || activeTile.isOcean || isRiverChannel) &&
+        hLocal < 0;
+      const finalY = hasSeaHere && showWaterLayer ? 0 : hLocal;
+
+      let nx = hasSeaHere && showWaterLayer ? 0 : -(hx - hLocal) / eps;
+      let ny = 1.0;
+      let nz = hasSeaHere && showWaterLayer ? 0 : -(hz - hLocal) / eps;
+      const nLen = Math.hypot(nx, ny, nz) || 1;
+      return {
+        x: px,
+        z: pz,
+        y: finalY,
+        seaFloorY: hLocal,
+        nx: nx / nLen,
+        ny: ny / nLen,
+        nz: nz / nLen,
+      };
+    };
+
+    vertices.push(buildVertex(0, 0));
 
     const ringOffsets: number[] = [0];
     for (let r = 1; r <= rings; r++) {
@@ -651,12 +525,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           const t = k / r;
           const px = (cA[0] * (1 - t) + cB[0] * t) * edgeFrac;
           const pz = (cA[1] * (1 - t) + cB[1] * t) * edgeFrac;
-          const ptSample = mapPointElevationAndColor(px, pz, edgeFrac, s);
-          vertices.push({
-            x: px,
-            z: pz,
-            ...ptSample,
-          });
+          vertices.push(buildVertex(px, pz));
         }
       }
     }
@@ -685,11 +554,401 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       }
     }
 
-    // Extract outer perimeter vertex indices (ring = rings) for the 3D cutaway geological skirt
     const perimeterIndices: { vIdx: number; wedgeIdx: number }[] = [];
     for (let s = 0; s < sides; s++) {
       for (let k = 0; k < rings; k++) {
         perimeterIndices.push({ vIdx: ringVertIdx(rings, s, k), wedgeIdx: s });
+      }
+    }
+
+    // ============================================================================
+    // GENERATE 512x512 HIGH-RESOLUTION PROCEDURAL BIOME TEXTURE & BUMP NORMAL MAP
+    // ============================================================================
+    const TEX_RES = 512;
+    const texR = new Uint8Array(TEX_RES * TEX_RES);
+    const texG = new Uint8Array(TEX_RES * TEX_RES);
+    const texB = new Uint8Array(TEX_RES * TEX_RES);
+    const texBumpX = new Int8Array(TEX_RES * TEX_RES);
+    const texBumpZ = new Int8Array(TEX_RES * TEX_RES);
+    const texFlags = new Uint8Array(TEX_RES * TEX_RES);
+    const texCloudShadow = new Uint8Array(TEX_RES * TEX_RES);
+
+    // Precompute a 129x129 macro terrain grid so the 512x512 texture synthesis runs in ~10ms
+    const MACRO_N = 129;
+    const macroHGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroFbmGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroRidgeGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroRimGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroShadowGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroSpecialGrid = new Uint8Array(MACRO_N * MACRO_N); // bit 0: lava, bit 1: fissure, bit 2: river
+
+    for (let mz = 0; mz < MACRO_N; mz++) {
+      const pz = (mz / (MACRO_N - 1)) * 2.0 - 1.0;
+      for (let mx = 0; mx < MACRO_N; mx++) {
+        const px = (mx / (MACRO_N - 1)) * 2.0 - 1.0;
+        const mIdx = mz * MACRO_N + mx;
+        const sh = sampleHeightOnly(px, pz);
+        macroHGrid[mIdx] = sh.hLocal;
+        macroFbmGrid[mIdx] = sh.baseFbm;
+        macroRidgeGrid[mIdx] = sh.ridge;
+        macroRimGrid[mIdx] = sh.craterRimTint;
+        macroShadowGrid[mIdx] = sampleCloudDensityAt(px + 0.08, pz - 0.06);
+        let sp = 0;
+        if (sh.isCalderaLava || sh.isLavaRiver) sp |= 1;
+        if (sh.isFissureFloor) sp |= 2;
+        if (sh.isRiverChannel) sp |= 4;
+        macroSpecialGrid[mIdx] = sp;
+      }
+    }
+
+    const bId = activeTile.biomeId;
+    const hasBioCanopy = bId >= 3 && bId <= 6 && surfaceModel.floraPalette.hasAnyLife;
+    const isDesertTile = bId === 10;
+    const isCanyonTile = bId === 11;
+    const isVolcanicTile = bId === 15 || surfaceModel.isMoltenWorld;
+    const isCraterOrBarrenTile = bId === 8 || bId === 9 || bId === 12 || bId === 13 || bId === 14;
+
+    // Synthesize every pixel of the 512x512 procedural biome texture + bump map
+    for (let tz = 0; tz < TEX_RES; tz++) {
+      const vNorm = tz / (TEX_RES - 1);
+      const pz = vNorm * 2.0 - 1.0;
+      const mfz = vNorm * (MACRO_N - 1);
+      const miz = Math.min(MACRO_N - 2, Math.floor(mfz));
+      const fz = mfz - miz;
+
+      for (let tx = 0; tx < TEX_RES; tx++) {
+        const uNorm = tx / (TEX_RES - 1);
+        const px = uNorm * 2.0 - 1.0;
+        const mfx = uNorm * (MACRO_N - 1);
+        const mix = Math.min(MACRO_N - 2, Math.floor(mfx));
+        const fx = mfx - mix;
+
+        const i00 = miz * MACRO_N + mix;
+        const i10 = i00 + 1;
+        const i01 = i00 + MACRO_N;
+        const i11 = i01 + 1;
+
+        const w00 = (1 - fx) * (1 - fz);
+        const w10 = fx * (1 - fz);
+        const w01 = (1 - fx) * fz;
+        const w11 = fx * fz;
+
+        const hLocal =
+          macroHGrid[i00] * w00 +
+          macroHGrid[i10] * w10 +
+          macroHGrid[i01] * w01 +
+          macroHGrid[i11] * w11;
+        const baseFbm =
+          macroFbmGrid[i00] * w00 +
+          macroFbmGrid[i10] * w10 +
+          macroFbmGrid[i01] * w01 +
+          macroFbmGrid[i11] * w11;
+        const ridge =
+          macroRidgeGrid[i00] * w00 +
+          macroRidgeGrid[i10] * w10 +
+          macroRidgeGrid[i01] * w01 +
+          macroRidgeGrid[i11] * w11;
+        const craterRimTint =
+          macroRimGrid[i00] * w00 +
+          macroRimGrid[i10] * w10 +
+          macroRimGrid[i01] * w01 +
+          macroRimGrid[i11] * w11;
+        const cShadow =
+          macroShadowGrid[i00] * w00 +
+          macroShadowGrid[i10] * w10 +
+          macroShadowGrid[i01] * w01 +
+          macroShadowGrid[i11] * w11;
+
+        // Macro slope from finite difference on macroHGrid
+        const dhx = (macroHGrid[i10] - macroHGrid[i00]) * (MACRO_N * 0.5);
+        const dhz = (macroHGrid[i01] - macroHGrid[i00]) * (MACRO_N * 0.5);
+        const slope = Math.hypot(dhx, dhz);
+
+        const spMask = macroSpecialGrid[i00] | macroSpecialGrid[i10] | macroSpecialGrid[i01] | macroSpecialGrid[i11];
+        const isLavaSpecial = (spMask & 1) !== 0;
+        const isFissureFloor = (spMask & 2) !== 0;
+        const isRiverChannel = (spMask & 4) !== 0;
+
+        // High-frequency micro-texture noises at pixel resolution
+        const fine1 = valueNoise2D(px * 28.0, pz * 28.0, tileSeed + 313);
+        const fine2 = valueNoise2D(px * 64.0, pz * 64.0, tileSeed + 419);
+        const grain = hash2(tx, tz, tileSeed + 521) - 0.5;
+
+        // Micro-normal gradient from fine procedural noise
+        const fineRight = valueNoise2D((px + 0.006) * 42.0, pz * 42.0, tileSeed + 313);
+        const fineDown = valueNoise2D(px * 42.0, (pz + 0.006) * 42.0, tileSeed + 313);
+        let bumpX = (fine1 - fineRight) * 2.2;
+        let bumpZ = (fine1 - fineDown) * 2.2;
+
+        let r = baseRgb[0];
+        let g = baseRgb[1];
+        let b = baseRgb[2];
+        let flags = 0;
+
+        if (surfaceModel.isNoSurface) {
+          const pal = surfaceModel.atmospherePalette;
+          const swirl = Math.sin(pz * 18 + fine1 * 3.5 + fine2 * 1.2) * 0.5 + 0.5;
+          r = Math.round(pal.bandDarkRgb[0] + (pal.bandLightRgb[0] - pal.bandDarkRgb[0]) * swirl);
+          g = Math.round(pal.bandDarkRgb[1] + (pal.bandLightRgb[1] - pal.bandDarkRgb[1]) * swirl);
+          b = Math.round(pal.bandDarkRgb[2] + (pal.bandLightRgb[2] - pal.bandDarkRgb[2]) * swirl);
+        } else {
+          const hasSeaHere = (surfaceModel.hasLiquid || activeTile.isOcean || isRiverChannel) && hLocal < 0;
+          const waterDepth = hasSeaHere ? Math.max(0, -hLocal) : 0;
+
+          if (isLavaSpecial || (isFissureFloor && isVolcanicTile)) {
+            // Incandescent magma channel with dark cooling crust plates & white-hot core veins
+            const crustCrack = valueNoise2D(px * 45, pz * 45, tileSeed + 601);
+            if (crustCrack > 0.32) {
+              const hot = Math.min(1, (crustCrack - 0.32) / 0.55);
+              r = 255;
+              g = Math.round(115 + 125 * hot);
+              b = Math.round(15 + 95 * hot * hot);
+              flags |= FLAG_LAVA;
+            } else {
+              // Dark cooling vesicular basalt crust floating on lava
+              r = Math.round(basaltRgb[0] * 0.55 + 45);
+              g = Math.round(basaltRgb[1] * 0.45 + 15);
+              b = Math.round(basaltRgb[2] * 0.45 + 10);
+            }
+          } else if (hasSeaHere && showWaterLayer) {
+            flags |= FLAG_WATER;
+            const pal = surfaceModel.seaPalette;
+            const depthT = Math.min(1, waterDepth / 0.25);
+
+            if (surfaceModel.isMoltenWorld || pal.solventKey === 'Silicate Magma') {
+              const lavaWave = Math.sin(px * 52 + pz * 38 + fine1 * 5) * 0.5 + 0.5;
+              r = Math.round(255 - depthT * 40);
+              g = Math.round(145 + lavaWave * 55 - depthT * 70);
+              b = Math.round(18 + lavaWave * 28);
+              flags |= FLAG_LAVA;
+            } else {
+              // 3D Ocean / River Capillary Wave Normal Map for realistic water glints
+              const wPhase1 = px * 78.0 + pz * 44.0 + fine1 * 4.2;
+              const wPhase2 = px * 48.0 - pz * 82.0 + fine2 * 3.6;
+              bumpX = Math.cos(wPhase1) * 0.55 + Math.cos(wPhase2) * 0.38;
+              bumpZ = Math.sin(wPhase1) * 0.55 - Math.sin(wPhase2) * 0.38;
+
+              const sh = pal.shallowRgb;
+              const dp = pal.deepRgb;
+              const tr = pal.trenchRgb;
+              if (depthT < 0.45) {
+                const u = depthT / 0.45;
+                r = Math.round(sh[0] + (dp[0] - sh[0]) * u);
+                g = Math.round(sh[1] + (dp[1] - sh[1]) * u);
+                b = Math.round(sh[2] + (dp[2] - sh[2]) * u);
+              } else {
+                const u = (depthT - 0.45) / 0.55;
+                r = Math.round(dp[0] + (tr[0] - dp[0]) * u);
+                g = Math.round(dp[1] + (tr[1] - dp[1]) * u);
+                b = Math.round(dp[2] + (tr[2] - dp[2]) * u);
+              }
+
+              // Shallow subsurface reef/shoal caustics & lacy shoreline breaking surf foam
+              if (waterDepth < 0.045) {
+                const shoalT = (1.0 - waterDepth / 0.045) * 0.48;
+                const caustic = Math.pow(Math.sin(wPhase1 * 0.8 + wPhase2 * 0.8) * 0.5 + 0.5, 2);
+                r = Math.round(r * (1 - shoalT) + (alluvialRgb[0] + caustic * 38) * shoalT);
+                g = Math.round(g * (1 - shoalT) + (alluvialRgb[1] + caustic * 42) * shoalT);
+                b = Math.round(b * (1 - shoalT) + (alluvialRgb[2] + caustic * 35) * shoalT);
+              }
+              if (waterDepth < 0.018) {
+                const surfLine = Math.sin(waterDepth * 650 + fine1 * 5.0) * 0.5 + 0.5;
+                const foam = (1.0 - waterDepth / 0.018) * (0.35 + 0.55 * surfLine);
+                r = Math.min(255, Math.round(r + (242 - r) * foam));
+                g = Math.min(255, Math.round(g + (248 - g) * foam));
+                b = Math.min(255, Math.round(b + (255 - b) * foam));
+              }
+            }
+          } else {
+            // ====================================================================
+            // SOLID BIOME HIGH-RESOLUTION PROCEDURAL SURFACE TEXTURES & BUMP MAPS
+            // ====================================================================
+            if (activeTile.isIce || bId === 16 || bId === 17 || bId === 18 || bId === 21) {
+              // Glacial Ice Sheet / Sastrugi Snow Ridges / Blue Crevasse Fracture Texture
+              flags |= FLAG_ICE_SPEC;
+              const sastrugiWave = Math.sin(px * 65 - pz * 32 + fine1 * 5.5);
+              const crevassePattern = Math.abs(fine1 * 2.0 - 1.0 + (ridge - 0.5) * 0.6);
+              const isCrevasse = crevassePattern < 0.14 || isFissureFloor;
+              bumpX += Math.cos(px * 65 - pz * 32 + fine1 * 5.5) * 0.65;
+              bumpZ -= Math.sin(px * 65 - pz * 32 + fine1 * 5.5) * 0.45;
+
+              if (isCrevasse) {
+                const depthCrev = isFissureFloor ? 0.85 : 1.0 - crevassePattern / 0.14;
+                r = Math.round(baseRgb[0] * (1 - depthCrev * 0.62) + 38 * (depthCrev * 0.62));
+                g = Math.round(baseRgb[1] * (1 - depthCrev * 0.42) + 128 * (depthCrev * 0.42));
+                b = Math.round(baseRgb[2] * (1 - depthCrev * 0.25) + 210 * (depthCrev * 0.25));
+                bumpX *= 1.8;
+              } else {
+                const frostSparkle = sastrugiWave * 14 + grain * 16;
+                r = Math.round(baseRgb[0] * 0.72 + iceRgb[0] * 0.28 + frostSparkle);
+                g = Math.round(baseRgb[1] * 0.72 + iceRgb[1] * 0.28 + frostSparkle);
+                b = Math.round(baseRgb[2] * 0.70 + iceRgb[2] * 0.30 + frostSparkle * 1.1);
+              }
+            } else if (hasBioCanopy) {
+              // Cellular 3D Tree-Crown Canopy, Lush Mossy Clearings, and Wetland Reeds
+              const canopyDensity = Math.max(
+                0,
+                Math.min(1, baseFbm * 1.2 + (bId === 5 ? 0.28 : bId === 6 ? 0.18 : -0.08))
+              );
+              const cell = cellularFeature2D(px * 26.0, pz * 26.0, tileSeed + 809);
+              const crownRadius = 0.28 + canopyDensity * 0.26;
+
+              if (cell.dist < crownRadius && slope < 0.52 && hLocal > 0.018 && hLocal < 0.27) {
+                // Inside an individual 3D tree crown dome!
+                const uCrown = cell.dist / crownRadius;
+                const crownHeightProfile = Math.sqrt(Math.max(0, 1.0 - uCrown * uCrown));
+                // Radial outward foliage micro-normal so each tree crown catches directional sunlight!
+                bumpX = (cell.dx / crownRadius) * 1.45 + (fine2 - 0.5) * 0.45;
+                bumpZ = (cell.dy / crownRadius) * 1.45 + (grain) * 0.45;
+
+                const speciesShade = (cell.cellHash - 0.5) * 26 + crownHeightProfile * 18 - (1 - crownHeightProfile) * 22;
+                const isJungleOrTaiga = bId === 5 || bId === 6;
+                const cRgb = isJungleOrTaiga ? forestRgb : plainsRgb;
+                r = Math.round(cRgb[0] + speciesShade + fine2 * 14);
+                g = Math.round(cRgb[1] + speciesShade * 1.15 + fine2 * 18);
+                b = Math.round(cRgb[2] + speciesShade * 0.7 + fine2 * 10);
+              } else {
+                // Grassy meadow clearing, forest floor undergrowth, or marshy bank
+                const wetlandT = hLocal < 0.055 ? Math.max(0, Math.min(1, (0.055 - hLocal) / 0.055)) : 0;
+                const grassWave = Math.sin(px * 48 + pz * 32 + fine1 * 6) * 10 + grain * 14;
+                r = Math.round(plainsRgb[0] * (1 - wetlandT * 0.7) + marshRgb[0] * (wetlandT * 0.7) + grassWave);
+                g = Math.round(plainsRgb[1] * (1 - wetlandT * 0.7) + marshRgb[1] * (wetlandT * 0.7) + grassWave * 1.1);
+                b = Math.round(plainsRgb[2] * (1 - wetlandT * 0.7) + marshRgb[2] * (wetlandT * 0.7) + grassWave * 0.8);
+              }
+            } else if (isDesertTile) {
+              // Erg Sand Desert: crisp wind-blown sand ripple striations & quartz/iron-oxide grain
+              const ripplePhase = px * 115.0 + pz * 52.0 + Math.sin(pz * 14.0 + baseFbm * 5.0) * 6.5 + fine1 * 4.0;
+              const rippleWave = Math.sin(ripplePhase);
+              bumpX += Math.cos(ripplePhase) * 0.72;
+              bumpZ += Math.sin(ripplePhase) * 0.36;
+
+              const mineralBand = Math.sin(hLocal * 42 + baseFbm * 6.0) * 14 + rippleWave * 9 + grain * 18;
+              r = Math.round(baseRgb[0] + mineralBand * 1.15);
+              g = Math.round(baseRgb[1] + mineralBand * 0.92);
+              b = Math.round(baseRgb[2] + mineralBand * 0.65);
+            } else if (isCanyonTile) {
+              // Sedimentary Canyon & Mesa Strata: sharp horizontal sandstone, ironstone & shale bands
+              const strataPhase = hLocal * 115.0 + fine1 * 2.4 + fine2 * 0.8;
+              const strataBand = Math.sin(strataPhase);
+              const fineLayer = Math.sin(strataPhase * 3.2) * 0.5;
+              const bandContrast = strataBand * 22 + fineLayer * 11 + grain * 12;
+
+              // Terraced ledge micro-normals along contour gradients
+              bumpX += dhx * strataBand * 0.85;
+              bumpZ += dhz * strataBand * 0.85;
+
+              r = Math.round(plateauRgb[0] * 0.88 + highRgb[0] * 0.12 + bandContrast * 1.2);
+              g = Math.round(plateauRgb[1] * 0.88 + highRgb[1] * 0.12 + bandContrast * 0.85);
+              b = Math.round(plateauRgb[2] * 0.88 + highRgb[2] * 0.12 + bandContrast * 0.55);
+            } else if (isVolcanicTile) {
+              // Ropey Pahoehoe Basalt Flows, Scoria Ash, and Glowing Magma Cooling Cracks
+              const pahoehoe = Math.sin(px * 55 + pz * 45 + fine1 * 8.0);
+              const crack = Math.abs(fine1 * 2.0 - 1.0 + (fine2 - 0.5) * 0.5);
+              bumpX += pahoehoe * 0.75;
+              bumpZ -= pahoehoe * 0.65;
+
+              if (crack < 0.065 && (activeTile.volcanoIntensity > 0.35 || surfaceModel.isMoltenWorld)) {
+                // Glowing incandescent magma crack in basalt crust
+                const glow = 1.0 - crack / 0.065;
+                r = Math.round(180 + 75 * glow);
+                g = Math.round(55 + 110 * glow);
+                b = Math.round(12 + 30 * glow);
+                flags |= FLAG_LAVA;
+              } else {
+                const ashVar = pahoehoe * 10 + (fine2 - 0.5) * 24 + grain * 16;
+                r = Math.round(basaltRgb[0] + ashVar);
+                g = Math.round(basaltRgb[1] + ashVar * 0.9);
+                b = Math.round(basaltRgb[2] + ashVar * 0.85);
+              }
+            } else if (isCraterOrBarrenTile) {
+              // Barren Regolith / Highland Rock: Cellular Micro-Craters, Boulder Fields & Fractured Bedrock
+              const cell = cellularFeature2D(px * 22.0, pz * 22.0, tileSeed + 937);
+              let microRelief = (fine1 - 0.5) * 22 + (fine2 - 0.5) * 16 + grain * 18;
+
+              if (cell.dist < 0.26) {
+                const uCr = cell.dist / 0.26;
+                if (cell.cellHash > 0.45 && activeTile.craterIntensity > 0.05) {
+                  // Secondary micro-crater pockmark with depressed bowl and raised rim
+                  if (uCr < 0.75) {
+                    bumpX -= (cell.dx / 0.26) * 1.35;
+                    bumpZ -= (cell.dy / 0.26) * 1.35;
+                    microRelief -= (1 - uCr) * 18;
+                  } else {
+                    bumpX += (cell.dx / 0.26) * 1.15;
+                    bumpZ += (cell.dy / 0.26) * 1.15;
+                    microRelief += 14;
+                  }
+                } else {
+                  // Outcrop boulder / angular breccia block
+                  bumpX += (cell.dx / 0.26) * 1.25;
+                  bumpZ += (cell.dy / 0.26) * 1.25;
+                  microRelief += (1 - uCr) * 16;
+                }
+              }
+
+              r = Math.round(baseRgb[0] + microRelief);
+              g = Math.round(baseRgb[1] + microRelief * 0.95);
+              b = Math.round(baseRgb[2] + microRelief * 0.90);
+            } else {
+              // Tundra / Steppe / General rocky soil texture
+              const texVar = (fine1 - 0.5) * 26 + (fine2 - 0.5) * 18 + grain * 16;
+              r = Math.round(baseRgb[0] + texVar);
+              g = Math.round(baseRgb[1] + texVar * 0.96);
+              b = Math.round(baseRgb[2] + texVar * 0.90);
+            }
+
+            // Steep Craggy Bedrock Cliff Face Texture & Strata where slope is high
+            if (slope > 0.48 && !activeTile.isIce) {
+              const cliffT = Math.min(0.92, (slope - 0.48) / 0.85);
+              const cliffStrata = Math.sin(hLocal * 95.0 + fine1 * 3.0) * 18 + (fine2 - 0.5) * 24;
+              const cliffBase = hLocal > 0.20 ? highRgb : basaltRgb;
+              const cr = cliffBase[0] + cliffStrata;
+              const cg = cliffBase[1] + cliffStrata * 0.92;
+              const cb = cliffBase[2] + cliffStrata * 0.85;
+              r = Math.round(r * (1 - cliffT) + cr * cliffT);
+              g = Math.round(g * (1 - cliffT) + cg * cliffT);
+              b = Math.round(b * (1 - cliffT) + cb * cliffT);
+              bumpX += Math.cos(hLocal * 95.0 + fine1 * 3.0) * cliffT * 0.95;
+              bumpZ += Math.sin(px * 60.0) * cliffT * 0.75;
+            }
+
+            // High-altitude alpine snow / frost cap with irregular wind-scoured snowline
+            const snowThreshold = 0.26 + (fine1 - 0.5) * 0.06 + slope * 0.08;
+            if (hLocal > snowThreshold) {
+              const pkT = Math.min(1, (hLocal - snowThreshold) / 0.14);
+              const targetPeak = activeTile.temperatureK < 308 && pBarAtmo >= 0.008 ? iceRgb : peakRgb;
+              const snowGrain = grain * 14;
+              r = Math.round(r * (1 - pkT) + (targetPeak[0] + snowGrain) * pkT);
+              g = Math.round(g * (1 - pkT) + (targetPeak[1] + snowGrain) * pkT);
+              b = Math.round(b * (1 - pkT) + (targetPeak[2] + snowGrain) * pkT);
+              if (activeTile.temperatureK < 308) flags |= FLAG_ICE_SPEC;
+            } else if (hLocal < 0.034 && surfaceModel.hasLiquid && !activeTile.isIce) {
+              // Coastal littoral pebble/sand beach bank along water edge
+              const cT = Math.max(0, Math.min(1, (0.034 - hLocal) / 0.034)) * 0.72;
+              const sandGrain = grain * 18 + (fine2 - 0.5) * 14;
+              r = Math.round(r * (1 - cT) + (alluvialRgb[0] + sandGrain) * cT);
+              g = Math.round(g * (1 - cT) + (alluvialRgb[1] + sandGrain * 0.95) * cT);
+              b = Math.round(b * (1 - cT) + (alluvialRgb[2] + sandGrain * 0.85) * cT);
+            }
+
+            // Bright crater ejecta blanket rays
+            if (craterRimTint > 0.04 && surfaceModel.compositionPalette.iceEjectaBoost > 0) {
+              const ej = craterRimTint * surfaceModel.compositionPalette.iceEjectaBoost * (0.45 + fine1 * 0.35);
+              r = Math.min(255, Math.round(r + (238 - r) * ej));
+              g = Math.min(255, Math.round(g + (246 - g) * ej));
+              b = Math.min(255, Math.round(b + (255 - b) * ej));
+            }
+          }
+        }
+
+        const tIdx = tz * TEX_RES + tx;
+        texR[tIdx] = Math.max(0, Math.min(255, r));
+        texG[tIdx] = Math.max(0, Math.min(255, g));
+        texB[tIdx] = Math.max(0, Math.min(255, b));
+        texBumpX[tIdx] = Math.max(-127, Math.min(127, Math.round(bumpX * 64)));
+        texBumpZ[tIdx] = Math.max(-127, Math.min(127, Math.round(bumpZ * 64)));
+        texFlags[tIdx] = flags;
+        texCloudShadow[tIdx] = Math.max(0, Math.min(255, Math.round(cShadow * 255)));
       }
     }
 
@@ -731,10 +990,19 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       perimeterIndices,
       cloudPuffs,
       effCloudCover,
+      TEX_RES,
+      texR,
+      texG,
+      texB,
+      texBumpX,
+      texBumpZ,
+      texFlags,
+      texCloudShadow,
+      tileSeed,
     };
-  }, [surfaceModel, activeTile, neighborTiles, showWaterLayer, pBarAtmo]);
+  }, [surfaceModel, activeTile, neighborTiles, showWaterLayer, pBarAtmo, hasAtmosphere]);
 
-  // Render the 3D Isometric / Perspective Hexagonal Biome Block + Atmosphere & 3D Clouds to Canvas
+  // Render the Per-Pixel Textured & Bump-Mapped 3D Hexagonal Biome Block + Atmosphere & 3D Clouds to Canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -743,8 +1011,10 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
 
     const W = 720;
     const H = 440;
-    canvas.width = W;
-    canvas.height = H;
+    if (canvas.width !== W || canvas.height !== H) {
+      canvas.width = W;
+      canvas.height = H;
+    }
 
     // 1. Atmospheric Sky Backdrop & Horizon Scattering Dome
     const radTOD = (timeOfDayDeg * Math.PI) / 180;
@@ -809,7 +1079,6 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const cosP = Math.cos(rotPitch);
     const sinP = Math.sin(rotPitch);
 
-    // Zoomed-in biome scale so the tile fills the canvas with rich detail
     const scale = 250 * zoom;
     const cx = W * 0.5;
     const cy = H * 0.57;
@@ -817,23 +1086,17 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
 
     const project3D = (x: number, yElev: number, z: number) => {
       const y = yElev * verticalExag;
-      // Yaw around Y axis
       const x1 = x * cosY - z * sinY;
       const z1 = x * sinY + z * cosY;
-      // Pitch around X axis (+z1 is front/bottom toward viewer, -z1 is back/top away from viewer)
       const y2 = y * cosP - z1 * sinP;
-      const zCam = y * sinP + z1 * cosP; // +zCam is closer to camera, -zCam is farther from camera
-      const camDepth = camDist - zCam; // Larger camDepth = farther from camera
-
+      const zCam = y * sinP + z1 * cosP;
+      const camDepth = camDist - zCam;
       const persp = camDist / Math.max(1.15, camDepth);
       return {
         sx: cx + x1 * scale * persp,
         sy: cy - y2 * scale * persp,
         persp,
         depth: camDepth,
-        rx: x1,
-        ry: y2,
-        rz: zCam,
       };
     };
 
@@ -846,9 +1109,36 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const ly = lyRaw / lLen;
     const lz = lzRaw / lLen;
 
-    const { vertices, triangles, perimeterIndices, corners, sides, cloudPuffs } = meshData;
+    // Halfway vector for specular water/ice reflections (camera view dir in world space + light dir)
+    const vxWorld = -sinY * cosP;
+    const vyWorld = sinP;
+    const vzWorld = cosY * cosP;
+    const hxRaw = lx + vxWorld;
+    const hyRaw = ly + vyWorld;
+    const hzRaw = lz + vzWorld;
+    const hLen = Math.hypot(hxRaw, hyRaw, hzRaw) || 1;
+    const halfX = hxRaw / hLen;
+    const halfY = hyRaw / hLen;
+    const halfZ = hzRaw / hLen;
 
-    // Atmospheric Rayleigh/Aerosol haze RGB & strength for aerial perspective on distant terrain
+    const {
+      vertices,
+      triangles,
+      perimeterIndices,
+      corners,
+      sides,
+      cloudPuffs,
+      TEX_RES,
+      texR,
+      texG,
+      texB,
+      texBumpX,
+      texBumpZ,
+      texFlags,
+      texCloudShadow,
+      tileSeed,
+    } = meshData;
+
     const hazeRgb = isSunset
       ? [212, 118, 68]
       : isNight
@@ -879,26 +1169,33 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       ctx.fill();
     }
 
-    // Project all top-surface vertices
-    const projVerts = vertices.map((v) => project3D(v.x, v.y, v.z));
-
-    interface DrawFace {
-      x0: number;
-      y0: number;
-      x1: number;
-      y1: number;
-      x2: number;
-      y2: number;
-      x3?: number;
-      y3?: number;
-      depth: number;
-      fillStyle: string;
-      strokeStyle?: string;
+    // ============================================================================
+    // 3. PER-PIXEL TEXTURED & BUMP-MAPPED Z-BUFFER RASTERIZER
+    // ============================================================================
+    if (!offscreenCanvasRef.current) {
+      offscreenCanvasRef.current = document.createElement('canvas');
+    }
+    const offCanvas = offscreenCanvasRef.current;
+    if (offCanvas.width !== W || offCanvas.height !== H) {
+      offCanvas.width = W;
+      offCanvas.height = H;
+      zBufferRef.current = new Float32Array(W * H);
+      imageDataRef.current = new ImageData(W, H);
+      colorBufferRef.current = new Uint32Array(imageDataRef.current.data.buffer);
     }
 
-    const drawFaces: DrawFace[] = [];
+    const zBuffer = zBufferRef.current!;
+    const colorBuffer = colorBufferRef.current!;
+    const imgData = imageDataRef.current!;
+    zBuffer.fill(1e9);
+    colorBuffer.fill(0);
 
-    // A) Top-surface triangles (9,600 fine triangles with smooth normals, cloud shadows, and aerial perspective haze)
+    const projVerts = vertices.map((v) => project3D(v.x, v.y, v.z));
+    const nightDim = isNight ? 0.36 : 1.0;
+    const cloudShadowStrength = showClouds3D ? Math.min(0.42, surfaceModel.cloudOpacity * 0.48) : 0;
+    const texMax = TEX_RES - 1;
+
+    // A) Rasterize all 3D terrain triangles with bilinear texture + per-pixel bump normal shading
     for (let i = 0; i < triangles.length; i++) {
       const tri = triangles[i];
       const v0 = vertices[tri.v0];
@@ -909,96 +1206,288 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       const p1 = projVerts[tri.v1];
       const p2 = projVerts[tri.v2];
 
-      // Blend triangle geometric normal with analytical finite-difference vertex normal for smooth terrain shading
-      const ux = v1.x - v0.x;
-      const uy = (v1.y - v0.y) * verticalExag;
-      const uz = v1.z - v0.z;
-      const vx = v2.x - v0.x;
-      const vy = (v2.y - v0.y) * verticalExag;
-      const vz = v2.z - v0.z;
+      const x0 = p0.sx;
+      const y0 = p0.sy;
+      const x1 = p1.sx;
+      const y1 = p1.sy;
+      const x2 = p2.sx;
+      const y2 = p2.sy;
 
-      let fnx = uy * vz - uz * vy;
-      let fny = uz * vx - ux * vz;
-      let fnz = ux * vy - uy * vx;
-      if (fny < 0) {
-        fnx = -fnx;
-        fny = -fny;
-        fnz = -fnz;
+      const minX = Math.max(0, Math.floor(Math.min(x0, x1, x2)));
+      const maxX = Math.min(W - 1, Math.ceil(Math.max(x0, x1, x2)));
+      const minY = Math.max(0, Math.floor(Math.min(y0, y1, y2)));
+      const maxY = Math.min(H - 1, Math.ceil(Math.max(y0, y1, y2)));
+      if (minX > maxX || minY > maxY) continue;
+
+      const area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+      if (Math.abs(area) < 0.05) continue;
+      const invArea = 1.0 / area;
+
+      // Pre-convert local vertex coordinates [-1, 1] into texture coordinates [0, TEX_RES - 1]
+      const u0 = (v0.x * 0.5 + 0.5) * texMax;
+      const tv0 = (v0.z * 0.5 + 0.5) * texMax;
+      const u1 = (v1.x * 0.5 + 0.5) * texMax;
+      const tv1 = (v1.z * 0.5 + 0.5) * texMax;
+      const u2 = (v2.x * 0.5 + 0.5) * texMax;
+      const tv2 = (v2.z * 0.5 + 0.5) * texMax;
+
+      const d0 = p0.depth;
+      const d1 = p1.depth;
+      const d2 = p2.depth;
+
+      // Step increments per screen X pixel
+      const dw1dx = (y2 - y0) * invArea;
+      const dw2dx = (y0 - y1) * invArea;
+
+      for (let py = minY; py <= maxY; py++) {
+        const sy = py + 0.5;
+        const dx0 = minX + 0.5 - x0;
+        const dy0 = sy - y0;
+
+        let w1 = (dx0 * (y2 - y0) - (x2 - x0) * dy0) * invArea;
+        let w2 = ((x1 - x0) * dy0 - dx0 * (y1 - y0)) * invArea;
+        const rowOffset = py * W;
+
+        for (let px = minX; px <= maxX; px++) {
+          const w0 = 1.0 - w1 - w2;
+          if (w0 >= -0.002 && w1 >= -0.002 && w2 >= -0.002) {
+            const depth = w0 * d0 + w1 * d1 + w2 * d2;
+            const pIdx = rowOffset + px;
+
+            if (depth < zBuffer[pIdx]) {
+              zBuffer[pIdx] = depth;
+
+              // Interpolate texture coordinates (u, v) and sample with bilinear filtering
+              const tu = Math.max(0, Math.min(texMax - 0.001, w0 * u0 + w1 * u1 + w2 * u2));
+              const tv = Math.max(0, Math.min(texMax - 0.001, w0 * tv0 + w1 * tv1 + w2 * tv2));
+              const iu = tu | 0;
+              const iv = tv | 0;
+              const fu = tu - iu;
+              const fv = tv - iv;
+
+              const ti00 = iv * TEX_RES + iu;
+              const ti10 = ti00 + 1;
+              const ti01 = ti00 + TEX_RES;
+              const ti11 = ti01 + 1;
+
+              const tw00 = (1 - fu) * (1 - fv);
+              const tw10 = fu * (1 - fv);
+              const tw01 = (1 - fu) * fv;
+              const tw11 = fu * fv;
+
+              let r = texR[ti00] * tw00 + texR[ti10] * tw10 + texR[ti01] * tw01 + texR[ti11] * tw11;
+              let g = texG[ti00] * tw00 + texG[ti10] * tw10 + texG[ti01] * tw01 + texG[ti11] * tw11;
+              let b = texB[ti00] * tw00 + texB[ti10] * tw10 + texB[ti01] * tw01 + texB[ti11] * tw11;
+
+              const bx =
+                (texBumpX[ti00] * tw00 + texBumpX[ti10] * tw10 + texBumpX[ti01] * tw01 + texBumpX[ti11] * tw11) *
+                (1 / 64);
+              const bz =
+                (texBumpZ[ti00] * tw00 + texBumpZ[ti10] * tw10 + texBumpZ[ti01] * tw01 + texBumpZ[ti11] * tw11) *
+                (1 / 64);
+
+              const flags = texFlags[ti00];
+              const isLava = (flags & FLAG_LAVA) !== 0;
+
+              if (!isLava) {
+                // Combine Gouraud-interpolated macro terrain normal with per-pixel texture bump normal
+                const mnx = (w0 * v0.nx + w1 * v1.nx + w2 * v2.nx) * verticalExag + bx * 0.42;
+                const mny = w0 * v0.ny + w1 * v1.ny + w2 * v2.ny;
+                const mnz = (w0 * v0.nz + w1 * v1.nz + w2 * v2.nz) * verticalExag + bz * 0.42;
+                const invN = 1.0 / (Math.hypot(mnx, mny, mnz) || 1);
+                const nx = mnx * invN;
+                const ny = mny * invN;
+                const nz = mnz * invN;
+
+                const ndotl = Math.max(0, nx * lx + ny * ly + nz * lz);
+                const cShad = (texCloudShadow[ti00] * (1 / 255)) * cloudShadowStrength;
+                const shadowAtten = 1.0 - cShad;
+                const diff = (0.30 + 0.78 * ndotl * shadowAtten) * nightDim;
+
+                r *= diff;
+                g *= diff;
+                b *= diff;
+
+                // Per-pixel specular highlights on water wave facets & crystalline glacial ice facets
+                if (!isNight && (flags & (FLAG_WATER | FLAG_ICE_SPEC)) !== 0) {
+                  const ndoth = Math.max(0, nx * halfX + ny * halfY + nz * halfZ);
+                  const isWater = (flags & FLAG_WATER) !== 0;
+                  const specPow = isWater ? Math.pow(ndoth, 24) * 0.58 : Math.pow(ndoth, 16) * 0.30;
+                  const spec = specPow * shadowAtten;
+                  r += 230 * spec;
+                  g += 244 * spec;
+                  b += 255 * spec;
+                }
+
+                // Distance-based atmospheric aerial perspective haze
+                if (atmoDensityFactor > 0) {
+                  const distNorm = Math.max(0, Math.min(1, (depth - 2.9) / 1.55));
+                  const fog = distNorm * atmoDensityFactor;
+                  r = r * (1 - fog) + hazeRgb[0] * fog;
+                  g = g * (1 - fog) + hazeRgb[1] * fog;
+                  b = b * (1 - fog) + hazeRgb[2] * fog;
+                }
+              }
+
+              const ir = r < 0 ? 0 : r > 255 ? 255 : r | 0;
+              const ig = g < 0 ? 0 : g > 255 ? 255 : g | 0;
+              const ib = b < 0 ? 0 : b > 255 ? 255 : b | 0;
+              colorBuffer[pIdx] = (255 << 24) | (ib << 16) | (ig << 8) | ir;
+            }
+          }
+          w1 += dw1dx;
+          w2 += dw2dx;
+        }
       }
-      const fLen = Math.hypot(fnx, fny, fnz) || 1;
-      fnx /= fLen;
-      fny /= fLen;
-      fnz /= fLen;
-
-      const vnx = (v0.nx + v1.nx + v2.nx) * (verticalExag / 3);
-      const vny = 1.0;
-      const vnz = (v0.nz + v1.nz + v2.nz) * (verticalExag / 3);
-      const vLen = Math.hypot(vnx, vny, vnz) || 1;
-
-      const nx = fnx * 0.45 + (vnx / vLen) * 0.55;
-      const ny = fny * 0.45 + (vny / vLen) * 0.55;
-      const nz = fnz * 0.45 + (vnz / vLen) * 0.55;
-      const nLen = Math.hypot(nx, ny, nz) || 1;
-
-      const ndotl = Math.max(0, (nx * lx + ny * ly + nz * lz) / nLen);
-      const isWaterTri = v0.isWaterSurface && v1.isWaterSurface && v2.isWaterSurface;
-      const isLavaTri = v0.isLavaGlow || v1.isLavaGlow || v2.isLavaGlow;
-
-      // Overhead 3D cloud shadow attenuation on ground
-      const meanCloudShadow = showClouds3D ? (v0.cloudShadow + v1.cloudShadow + v2.cloudShadow) / 3 : 0;
-      const shadowAtten = 1.0 - meanCloudShadow * Math.min(0.42, surfaceModel.cloudOpacity * 0.48);
-
-      const nightDim = isNight ? 0.36 : 1.0;
-      const diff = isLavaTri ? 1.06 : (0.32 + 0.76 * ndotl * shadowAtten) * nightDim;
-
-      let r = Math.round(((v0.r + v1.r + v2.r) / 3) * diff);
-      let g = Math.round(((v0.g + v1.g + v2.g) / 3) * diff);
-      let b = Math.round(((v0.b + v1.b + v2.b) / 3) * diff);
-
-      // Specular highlight on liquid ocean / river / lake surface
-      if (isWaterTri && !isLavaTri && !isNight) {
-        const spec = Math.pow(Math.max(0, (ny / nLen) * ly + (nx / nLen) * lx * 0.5), 18) * 0.44 * shadowAtten;
-        r = Math.min(255, Math.round(r + 225 * spec));
-        g = Math.min(255, Math.round(g + 242 * spec));
-        b = Math.min(255, Math.round(b + 255 * spec));
-      }
-
-      // Distance-based atmospheric aerial perspective haze
-      const triDepth = (p0.depth + p1.depth + p2.depth) / 3;
-      if (atmoDensityFactor > 0 && !isLavaTri) {
-        const distNorm = Math.max(0, Math.min(1, (triDepth - 2.9) / 1.55));
-        const fog = distNorm * atmoDensityFactor;
-        r = Math.round(r * (1 - fog) + hazeRgb[0] * fog);
-        g = Math.round(g * (1 - fog) + hazeRgb[1] * fog);
-        b = Math.round(b * (1 - fog) + hazeRgb[2] * fog);
-      }
-
-      r = Math.max(0, Math.min(255, r));
-      g = Math.max(0, Math.min(255, g));
-      b = Math.max(0, Math.min(255, b));
-
-      const fill = `rgb(${r},${g},${b})`;
-      drawFaces.push({
-        x0: p0.sx,
-        y0: p0.sy,
-        x1: p1.sx,
-        y1: p1.sy,
-        x2: p2.sx,
-        y2: p2.sy,
-        depth: triDepth,
-        fillStyle: fill,
-        strokeStyle: showWireframe ? 'rgba(148, 163, 184, 0.25)' : fill,
-      });
     }
 
-    // B) Cutaway 3D Geological Cross-Section Skirt along the front-facing outer hexagonal/pentagonal perimeter
+    // B) Rasterize Textured Geological Cross-Section Skirt Walls into the Z-buffer
     const baseBottomY = -0.34;
     const crustRgb = hexToRgb(surfaceModel.compositionPalette.plateauHex);
+    const highRockRgb = hexToRgb(surfaceModel.compositionPalette.mountainHex);
     const mantleRgb = surfaceModel.isIcyWorld
-      ? [75, 118, 158]
+      ? [64, 108, 152]
       : surfaceModel.isMoltenWorld
-      ? [185, 58, 18]
-      : [52, 46, 44];
+      ? [195, 58, 18]
+      : [46, 40, 38];
+
+    const rasterizeWallTri = (
+      ax: number,
+      ay: number,
+      ad: number,
+      au: number,
+      aElev: number,
+      bx: number,
+      by: number,
+      bd: number,
+      bu: number,
+      bElev: number,
+      cxPt: number,
+      cyPt: number,
+      cd: number,
+      cu: number,
+      cElev: number,
+      wallShade: number,
+      isWaterWall: boolean
+    ) => {
+      const minX = Math.max(0, Math.floor(Math.min(ax, bx, cxPt)));
+      const maxX = Math.min(W - 1, Math.ceil(Math.max(ax, bx, cxPt)));
+      const minY = Math.max(0, Math.floor(Math.min(ay, by, cyPt)));
+      const maxY = Math.min(H - 1, Math.ceil(Math.max(ay, by, cyPt)));
+      if (minX > maxX || minY > maxY) return;
+
+      const area = (bx - ax) * (cyPt - ay) - (cxPt - ax) * (by - ay);
+      if (Math.abs(area) < 0.05) return;
+      const invArea = 1.0 / area;
+      const dw1dx = (cyPt - ay) * invArea;
+      const dw2dx = (ay - by) * invArea;
+
+      const pal = surfaceModel.seaPalette;
+
+      for (let py = minY; py <= maxY; py++) {
+        const sy = py + 0.5;
+        const dx0 = minX + 0.5 - ax;
+        const dy0 = sy - ay;
+        let w1 = (dx0 * (cyPt - ay) - (cxPt - ax) * dy0) * invArea;
+        let w2 = ((bx - ax) * dy0 - dx0 * (by - ay)) * invArea;
+        const rowOffset = py * W;
+
+        for (let px = minX; px <= maxX; px++) {
+          const w0 = 1.0 - w1 - w2;
+          if (w0 >= -0.002 && w1 >= -0.002 && w2 >= -0.002) {
+            const depth = w0 * ad + w1 * bd + w2 * cd - 0.004;
+            const pIdx = rowOffset + px;
+            if (depth < zBuffer[pIdx]) {
+              const uWall = w0 * au + w1 * bu + w2 * cu;
+              const yElev = w0 * aElev + w1 * bElev + w2 * cElev;
+
+              if (isWaterWall) {
+                // Translucent deep-sea cross-section water wall with internal depth gradient & caustics
+                const waterDepthNorm = Math.max(0, Math.min(1, -yElev / 0.28));
+                const caustic = Math.sin(uWall * 60 + yElev * 80) * 10;
+                const wr = Math.max(
+                  0,
+                  Math.min(
+                    255,
+                    Math.round((pal.shallowRgb[0] * (1 - waterDepthNorm) + pal.trenchRgb[0] * waterDepthNorm + caustic) * wallShade)
+                  )
+                );
+                const wg = Math.max(
+                  0,
+                  Math.min(
+                    255,
+                    Math.round((pal.shallowRgb[1] * (1 - waterDepthNorm) + pal.trenchRgb[1] * waterDepthNorm + caustic) * wallShade)
+                  )
+                );
+                const wb = Math.max(
+                  0,
+                  Math.min(
+                    255,
+                    Math.round((pal.shallowRgb[2] * (1 - waterDepthNorm) + pal.trenchRgb[2] * waterDepthNorm + caustic) * wallShade)
+                  )
+                );
+                zBuffer[pIdx] = depth;
+                colorBuffer[pIdx] = (232 << 24) | (wb << 16) | (wg << 8) | wr;
+              } else {
+                zBuffer[pIdx] = depth;
+                // Procedural Stratified Geological Cross-Section Texture!
+                const depthFrac = Math.max(0, Math.min(1, (-yElev + 0.05) / 0.40));
+                const foldWave = Math.sin(uWall * 14.0 + tileSeed * 0.01) * 0.025;
+                const strataPhase = (yElev + foldWave) * 135.0;
+                const strata = Math.sin(strataPhase) * 0.5 + 0.5;
+                const fineBed = Math.sin(strataPhase * 2.7 + uWall * 45.0) * 0.5 + 0.5;
+                const rockGrain = (hash2(px, py, tileSeed + 99) - 0.5) * 18;
+
+                // Blend upper sedimentary crust strata -> mid highland rock -> deep mantle/basement
+                let r =
+                  (crustRgb[0] * strata + highRockRgb[0] * (1 - strata)) * (1 - depthFrac * 0.68) +
+                  mantleRgb[0] * (depthFrac * 0.68) +
+                  (fineBed - 0.5) * 20 +
+                  rockGrain;
+                let g =
+                  (crustRgb[1] * strata + highRockRgb[1] * (1 - strata)) * (1 - depthFrac * 0.68) +
+                  mantleRgb[1] * (depthFrac * 0.68) +
+                  (fineBed - 0.5) * 16 +
+                  rockGrain;
+                let b =
+                  (crustRgb[2] * strata + highRockRgb[2] * (1 - strata)) * (1 - depthFrac * 0.68) +
+                  mantleRgb[2] * (depthFrac * 0.68) +
+                  (fineBed - 0.5) * 14 +
+                  rockGrain;
+
+                // Bump-shade each horizontal sedimentary stratum ledge
+                const ledgeBump = 0.88 + 0.24 * Math.cos(strataPhase);
+                const totalShade = wallShade * ledgeBump * nightDim;
+                r *= totalShade;
+                g *= totalShade;
+                b *= totalShade;
+
+                // Glowing sub-crustal magma veins near bottom of volcanic/molten tiles
+                if (
+                  (surfaceModel.isMoltenWorld || activeTile.volcanoIntensity > 0.35 || activeTile.biomeId === 15) &&
+                  depthFrac > 0.62
+                ) {
+                  const vein = Math.sin(uWall * 38.0 + yElev * 55.0);
+                  if (vein > 0.72) {
+                    const glow = (vein - 0.72) / 0.28;
+                    r = r * (1 - glow) + 255 * glow;
+                    g = g * (1 - glow) + 125 * glow;
+                    b = b * (1 - glow) + 24 * glow;
+                  }
+                }
+
+                const ir = r < 0 ? 0 : r > 255 ? 255 : r | 0;
+                const ig = g < 0 ? 0 : g > 255 ? 255 : g | 0;
+                const ib = b < 0 ? 0 : b > 255 ? 255 : b | 0;
+                colorBuffer[pIdx] = (255 << 24) | (ib << 16) | (ig << 8) | ir;
+              }
+            }
+          }
+          w1 += dw1dx;
+          w2 += dw2dx;
+        }
+      }
+    };
 
     const pLen = perimeterIndices.length;
     for (let i = 0; i < pLen; i++) {
@@ -1019,9 +1508,10 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       }
       // Backface cull any underground skirt wall facing away from the camera
       const camNz = outNx * sinY + outNz * cosY;
-      if (camNz <= 0.01) {
-        continue;
-      }
+      if (camNz <= 0.01) continue;
+
+      const outLen = Math.hypot(outNx, outNz) || 1;
+      const sideShade = 0.54 + 0.42 * Math.max(-0.35, (outNx / outLen) * lx + (outNz / outLen) * lz);
 
       const topFloorA = showWaterLayer ? vA.seaFloorY : vA.y;
       const topFloorB = showWaterLayer ? vB.seaFloorY : vB.y;
@@ -1031,72 +1521,122 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       const pBotB = project3D(vB.x, baseBottomY, vB.z);
       const pBotA = project3D(vA.x, baseBottomY, vA.z);
 
-      const outLen = Math.hypot(outNx, outNz) || 1;
-      const sideShade = 0.52 + 0.38 * Math.max(-0.4, (outNx / outLen) * lx + (outNz / outLen) * lz);
+      const uA = i / pLen;
+      const uB = (i + 1) / pLen;
 
-      const sr = Math.max(0, Math.min(255, Math.round((crustRgb[0] * 0.55 + mantleRgb[0] * 0.45) * sideShade)));
-      const sg = Math.max(0, Math.min(255, Math.round((crustRgb[1] * 0.55 + mantleRgb[1] * 0.45) * sideShade)));
-      const sb = Math.max(0, Math.min(255, Math.round((crustRgb[2] * 0.55 + mantleRgb[2] * 0.45) * sideShade)));
-
-      drawFaces.push({
-        x0: pTopA.sx,
-        y0: pTopA.sy,
-        x1: pTopB.sx,
-        y1: pTopB.sy,
-        x2: pBotB.sx,
-        y2: pBotB.sy,
-        x3: pBotA.sx,
-        y3: pBotA.sy,
-        depth: (pTopA.depth + pTopB.depth) * 0.5 - 0.01,
-        fillStyle: `rgb(${sr},${sg},${sb})`,
-        strokeStyle: `rgb(${sr},${sg},${sb})`,
-      });
+      rasterizeWallTri(
+        pTopA.sx,
+        pTopA.sy,
+        pTopA.depth,
+        uA,
+        topFloorA,
+        pTopB.sx,
+        pTopB.sy,
+        pTopB.depth,
+        uB,
+        topFloorB,
+        pBotB.sx,
+        pBotB.sy,
+        pBotB.depth,
+        uB,
+        baseBottomY,
+        sideShade,
+        false
+      );
+      rasterizeWallTri(
+        pTopA.sx,
+        pTopA.sy,
+        pTopA.depth,
+        uA,
+        topFloorA,
+        pBotB.sx,
+        pBotB.sy,
+        pBotB.depth,
+        uB,
+        baseBottomY,
+        pBotA.sx,
+        pBotA.sy,
+        pBotA.depth,
+        uA,
+        baseBottomY,
+        sideShade,
+        false
+      );
 
       if (showWaterLayer && (vA.seaFloorY < 0 || vB.seaFloorY < 0)) {
-        const pSeaA = project3D(vA.x, Math.max(0, vA.seaFloorY), vA.z);
-        const pSeaB = project3D(vB.x, Math.max(0, vB.seaFloorY), vB.z);
-        const pal = surfaceModel.seaPalette;
-        const wr = Math.round(pal.deepRgb[0] * 0.85);
-        const wg = Math.round(pal.deepRgb[1] * 0.85);
-        const wb = Math.round(pal.deepRgb[2] * 0.85);
-        drawFaces.push({
-          x0: pSeaA.sx,
-          y0: pSeaA.sy,
-          x1: pSeaB.sx,
-          y1: pSeaB.sy,
-          x2: pTopB.sx,
-          y2: pTopB.sy,
-          x3: pTopA.sx,
-          y3: pTopA.sy,
-          depth: (pSeaA.depth + pSeaB.depth) * 0.5 - 0.015,
-          fillStyle: `rgba(${wr},${wg},${wb},0.78)`,
-        });
+        const seaTopA = Math.max(0, vA.seaFloorY);
+        const seaTopB = Math.max(0, vB.seaFloorY);
+        const pSeaA = project3D(vA.x, seaTopA, vA.z);
+        const pSeaB = project3D(vB.x, seaTopB, vB.z);
+        rasterizeWallTri(
+          pSeaA.sx,
+          pSeaA.sy,
+          pSeaA.depth,
+          uA,
+          seaTopA,
+          pSeaB.sx,
+          pSeaB.sy,
+          pSeaB.depth,
+          uB,
+          seaTopB,
+          pTopB.sx,
+          pTopB.sy,
+          pTopB.depth,
+          uB,
+          topFloorB,
+          sideShade,
+          true
+        );
+        rasterizeWallTri(
+          pSeaA.sx,
+          pSeaA.sy,
+          pSeaA.depth,
+          uA,
+          seaTopA,
+          pTopB.sx,
+          pTopB.sy,
+          pTopB.depth,
+          uB,
+          topFloorB,
+          pTopA.sx,
+          pTopA.sy,
+          pTopA.depth,
+          uA,
+          topFloorA,
+          sideShade,
+          true
+        );
       }
     }
 
-    // Sort back-to-front (largest camDepth is furthest from camera and drawn first)
-    drawFaces.sort((a, b) => b.depth - a.depth);
+    // Composite the Z-buffered textured 3D block onto the main canvas
+    const offCtx = offCanvas.getContext('2d');
+    if (offCtx) {
+      offCtx.putImageData(imgData, 0, 0);
+      ctx.drawImage(offCanvas, 0, 0);
+    }
 
-    ctx.lineWidth = showWireframe ? 0.55 : 0.4;
-    for (let i = 0; i < drawFaces.length; i++) {
-      const f = drawFaces[i];
-      ctx.fillStyle = f.fillStyle;
+    // Optional diagnostic wireframe overlay if user toggles "Mesh"
+    if (showWireframe) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.24)';
+      ctx.lineWidth = 0.5;
       ctx.beginPath();
-      ctx.moveTo(f.x0, f.y0);
-      ctx.lineTo(f.x1, f.y1);
-      ctx.lineTo(f.x2, f.y2);
-      if (f.x3 !== undefined && f.y3 !== undefined) {
-        ctx.lineTo(f.x3, f.y3);
+      for (let i = 0; i < triangles.length; i++) {
+        const tri = triangles[i];
+        const p0 = projVerts[tri.v0];
+        const p1 = projVerts[tri.v1];
+        const p2 = projVerts[tri.v2];
+        ctx.moveTo(p0.sx, p0.sy);
+        ctx.lineTo(p1.sx, p1.sy);
+        ctx.lineTo(p2.sx, p2.sy);
+        ctx.closePath();
       }
-      ctx.closePath();
-      ctx.fill();
-      if (f.strokeStyle) {
-        ctx.strokeStyle = f.strokeStyle;
-        ctx.stroke();
-      }
+      ctx.stroke();
+      ctx.restore();
     }
 
-    // 3. Draw outer Goldberg Hex/Pentagon border rim
+    // 4. Draw outer Goldberg Hex/Pentagon border rim
     ctx.save();
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
     ctx.lineWidth = 1.5;
@@ -1111,7 +1651,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     ctx.stroke();
     ctx.restore();
 
-    // 4. Render 3D Elevated Cloud Layer & Atmospheric Veil over the Terrain Block
+    // 5. Render 3D Elevated Cloud Layer & Atmospheric Veil over the Terrain Block
     if (showClouds3D && cloudPuffs.length > 0) {
       ctx.save();
       const cloudRgb = surfaceModel.atmospherePalette.cloudRgb;
@@ -1156,7 +1696,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       ctx.restore();
     }
 
-    // 5. Neighbor direction badges floating around the perimeter of the 3D biome block
+    // 6. Neighbor direction badges floating around the perimeter of the 3D biome block
     ctx.save();
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center';
@@ -1201,6 +1741,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     neighborTiles,
     hasAtmosphere,
     pBarAtmo,
+    activeTile,
   ]);
 
   return (
@@ -1253,8 +1794,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             <span className="text-[10px] text-slate-400">RELIEF:</span>
             <input
               type="range"
-              min="0.6"
-              max="2.6"
+              min="0.4"
+              max="2.5"
               step="0.05"
               value={verticalExag}
               onChange={(e) => setVerticalExag(+e.target.value)}
@@ -1265,58 +1806,59 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
 
           <div className="flex items-center gap-1">
             <Sun className="w-3.5 h-3.5 text-amber-400" />
+            <span className="text-[10px] text-slate-400">SUN:</span>
             <input
               type="range"
-              min="0"
-              max="360"
+              min="-60"
+              max="180"
+              step="5"
               value={timeOfDayDeg}
               onChange={(e) => onChangeTimeOfDay(+e.target.value)}
               className="w-16 accent-amber-400 cursor-pointer"
-              title="Adjust Solar Illumination & Sky Time of Day"
             />
           </div>
 
-          {!surfaceModel.isNoSurface && surfaceModel.cloudOpacity > 0.015 && (
+          {hasAtmosphere && (
             <button
               type="button"
-              onClick={() => setShowClouds3D((c) => !c)}
+              onClick={() => setShowClouds3D((v) => !v)}
               className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
                 showClouds3D
-                  ? 'bg-sky-950/80 border-sky-500 text-sky-200'
-                  : 'bg-slate-900 border-slate-800 text-slate-400'
+                  ? 'bg-sky-900/60 border-sky-500/70 text-sky-200'
+                  : 'bg-slate-900 border-slate-700 text-slate-400'
               }`}
-              title="Toggle 3D Atmospheric Cloud Canopy & Cloud Shadows"
+              title="Toggle 3D floating clouds & ground cloud shadows"
             >
               <Cloud className="w-3 h-3" />
-              Clouds: {showClouds3D ? `${Math.round(meshData.effCloudCover * 100)}%` : 'Off'}
+              Clouds
             </button>
           )}
 
-          {surfaceModel.hasLiquid && (
+          {surfaceModel.hasLiquid && !surfaceModel.isNoSurface && (
             <button
               type="button"
-              onClick={() => setShowWaterLayer((w) => !w)}
+              onClick={() => setShowWaterLayer((v) => !v)}
               className={`px-2 py-0.5 rounded border text-[10px] font-bold cursor-pointer transition ${
                 showWaterLayer
-                  ? 'bg-cyan-950/80 border-cyan-500 text-cyan-200'
-                  : 'bg-slate-900 border-slate-800 text-slate-400'
+                  ? 'bg-cyan-900/60 border-cyan-500/70 text-cyan-200'
+                  : 'bg-slate-900 border-slate-700 text-slate-400'
               }`}
-              title="Toggle Liquid Ocean/Rivers vs Drained Bathymetry"
+              title="Toggle liquid sea/lake layer to inspect underwater bathymetry"
             >
-              {showWaterLayer ? 'Liquid: On' : 'Drained Seafloor'}
+              {showWaterLayer ? 'Liquid ON' : 'Bathymetry'}
             </button>
           )}
 
           <button
             type="button"
-            onClick={() => setShowWireframe((w) => !w)}
-            className={`px-2 py-0.5 rounded border text-[10px] font-bold cursor-pointer transition ${
+            onClick={() => setShowWireframe((v) => !v)}
+            className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
               showWireframe
-                ? 'bg-indigo-950/80 border-indigo-400 text-indigo-200'
-                : 'bg-slate-900 border-slate-800 text-slate-400'
+                ? 'bg-indigo-900/60 border-indigo-500/70 text-indigo-200'
+                : 'bg-slate-900 border-slate-700 text-slate-400'
             }`}
           >
-            <Layers className="w-3 h-3 inline mr-1" />
+            <Layers className="w-3 h-3" />
             Mesh
           </button>
 
@@ -1328,23 +1870,21 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
               setZoom(1.28);
               setVerticalExag(1.45);
             }}
-            className="p-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 cursor-pointer"
-            title="Reset 3D Biome Camera"
+            className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[10px] flex items-center gap-1 cursor-pointer"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
+            <RotateCcw className="w-3 h-3" />
+            Reset
           </button>
         </div>
       </div>
 
-      {/* Main 3D Isometric Biome Terrain Block Canvas */}
-      <div className="relative w-full flex flex-col items-center">
-        <canvas
-          ref={canvasRef}
-          className={`w-full max-w-4xl h-auto rounded-lg border border-slate-800/80 shadow-2xl transition ${
+      {/* Main 3D Biome Block Viewport + Neighbor Navigation Sidebar */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+        <div
+          className={`lg:col-span-3 relative rounded-lg overflow-hidden border border-slate-800 bg-slate-950 select-none ${
             isDragging ? 'cursor-grabbing' : 'cursor-grab'
           }`}
           onMouseDown={(e) => {
-            if (e.button !== 0) return;
             setIsDragging(true);
             dragRef.current = {
               startX: e.clientX,
@@ -1357,8 +1897,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             if (!isDragging || !dragRef.current) return;
             const dx = e.clientX - dragRef.current.startX;
             const dy = e.clientY - dragRef.current.startY;
-            setRotYaw(dragRef.current.startYaw + dx * 0.012);
-            setRotPitch(Math.max(0.18, Math.min(1.32, dragRef.current.startPitch + dy * 0.01)));
+            setRotYaw(dragRef.current.startYaw - dx * 0.0085);
+            setRotPitch(Math.max(0.18, Math.min(1.28, dragRef.current.startPitch + dy * 0.0065)));
           }}
           onMouseUp={() => {
             setIsDragging(false);
@@ -1370,44 +1910,94 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           }}
           onWheel={(e) => {
             e.preventDefault();
-            setZoom((z) => Math.max(0.75, Math.min(2.4, +(z - e.deltaY * 0.001).toFixed(2))));
+            setZoom((z) => Math.max(0.75, Math.min(2.4, +(z - e.deltaY * 0.0012).toFixed(2))));
           }}
-        />
+        >
+          <canvas ref={canvasRef} className="w-full h-[380px] sm:h-[440px] block object-cover" />
 
-        <div className="w-full flex justify-between items-center text-[10px] text-slate-400 px-2 mt-1 flex-wrap gap-2">
-          <span>
-            <Sparkles className="w-3 h-3 inline text-sky-400 mr-1" />
-            High-Detail 3D Goldberg {activeTile.isPentagon ? 'Pentagonal' : 'Hexagonal'} Biome View (~9,600 Triangles + 3D Atmosphere & Clouds) • Drag to rotate, scroll to zoom
-          </span>
-          <span>
-            Elev: {activeTile.elevationKm >= 0 ? `+${activeTile.elevationKm}` : activeTile.elevationKm} km (Relief {activeTile.reliefSpanKm} km) • Atmo: {activeTile.pressureBar} bar ({Math.round(meshData.effCloudCover * 100)}% Local Cloud Cover)
-          </span>
+          {/* Bottom-left Telemetry Overlay */}
+          <div className="absolute bottom-2.5 left-2.5 bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-lg border border-slate-800/90 text-[11px] text-slate-300 pointer-events-none flex flex-col gap-0.5">
+            <div className="text-sky-300 font-bold flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5" />
+              3D Biome Terrain Block ({activeTile.biomeName})
+            </div>
+            <div className="text-slate-400 text-[10px]">
+              Surface Temp: <span className="text-white font-semibold">{activeTile.temperatureK} K</span> ({Math.round(activeTile.temperatureK - 273.15)}°C) • Moisture:{' '}
+              <span className="text-cyan-300 font-semibold">{Math.round(activeTile.moisture * 100)}%</span> • Clouds:{' '}
+              <span className="text-sky-200 font-semibold">{Math.round(meshData.effCloudCover * 100)}%</span>
+            </div>
+            <div className="text-slate-400 text-[10px]">
+              Atmosphere: <span className="text-amber-200 font-semibold">{pBarAtmo.toFixed(2)} bar</span> • Drag to orbit 360° • Scroll to zoom ({zoom.toFixed(1)}×)
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* Linked Adjacent Goldberg Tiles Navigation Bar */}
-      <div className="bg-slate-950/85 border border-slate-800 rounded-lg px-3 py-2 flex flex-wrap items-center gap-2">
-        <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1 mr-1">
-          <Compass className="w-3.5 h-3.5 text-sky-400" />
-          ADJACENT HEX NEIGHBORS (CLICK TO TRAVERSE):
-        </span>
-        {neighborTiles.map(({ tile, compass }) => (
-          <button
-            key={tile.tileId}
-            type="button"
-            onClick={() => onSelectTile(tile)}
-            className="px-2.5 py-1 rounded-md bg-slate-900 hover:bg-slate-800 border border-slate-700/80 hover:border-sky-500/70 flex items-center gap-1.5 text-[10px] text-slate-200 cursor-pointer transition"
-            title={`Jump to adjacent Goldberg Tile #${tile.tileId + 1} (${tile.biomeName})`}
-          >
-            <span className="text-sky-400 font-bold">{compass}</span>
-            <span
-              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-              style={{ backgroundColor: tile.biomeColor }}
-            />
-            <span className="font-bold">#{tile.tileId + 1}</span>
-            <span className="text-slate-400 truncate max-w-[130px]">{tile.biomeName}</span>
-          </button>
-        ))}
+        {/* Right Column: Linked Adjacent Goldberg Tiles & Local Geomorphology */}
+        <div className="bg-slate-950/90 rounded-lg border border-slate-800 p-3 flex flex-col justify-between gap-3">
+          <div>
+            <div className="text-xs font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+              <Compass className="w-3.5 h-3.5" />
+              Adjacent Planetary Tiles ({neighborTiles.length})
+            </div>
+            <p className="text-[11px] text-slate-400 mb-2.5 leading-relaxed">
+              Border elevations and biome transitions blend continuously into neighboring Goldberg cells. Click any adjacent tile to traverse across the planet:
+            </p>
+
+            <div className="flex flex-col gap-1.5">
+              {neighborTiles.map((nb) => (
+                <button
+                  key={nb.tile.tileId}
+                  type="button"
+                  onClick={() => onSelectTile(nb.tile)}
+                  className="w-full text-left px-2.5 py-1.5 rounded-md bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-sky-500/50 transition flex items-center justify-between cursor-pointer group"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-950 text-sky-300 border border-slate-800 w-7 text-center shrink-0">
+                      {nb.compass}
+                    </span>
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0 border border-white/20"
+                      style={{ backgroundColor: nb.tile.biomeColor }}
+                    />
+                    <span className="text-[11px] text-slate-200 font-medium truncate group-hover:text-white">
+                      #{nb.tile.tileId + 1} {nb.tile.biomeName}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono shrink-0 ml-1">
+                    {nb.tile.temperatureK}K
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Local Tile Geomorphology Summary */}
+          <div className="border-t border-slate-800/80 pt-2.5 text-[11px] text-slate-400 space-y-1">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+              Tile Geomorphology & Drivers
+            </div>
+            <div className="flex justify-between">
+              <span>Elevation Anomaly:</span>
+              <span className="text-slate-200 font-mono">
+                {activeTile.elevationKm >= 0 ? `+${activeTile.elevationKm.toFixed(1)} km` : `${activeTile.elevationKm.toFixed(1)} km`}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Crater Preservation:</span>
+              <span className="text-slate-200 font-mono">{Math.round(activeTile.craterIntensity * 100)}%</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Volcanic / Tectonic:</span>
+              <span className="text-slate-200 font-mono">
+                {Math.round(Math.max(activeTile.volcanoIntensity, activeTile.fractureIntensity) * 100)}%
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Cloud / Storm Cover:</span>
+              <span className="text-slate-200 font-mono">{Math.round(activeTile.cloudCover * 100)}%</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
