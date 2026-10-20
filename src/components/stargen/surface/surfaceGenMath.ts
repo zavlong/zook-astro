@@ -298,11 +298,17 @@ export function deriveCrustCompositionPalette(params: {
   }
 
   // 2. Iron-Rich / Core-Dominated / Mercury-like Metallic Silicate Worlds
+  const isAmmoniaWorld =
+    solventKey === 'NH3-H2O' ||
+    bodyClassLower.includes('ammonia') ||
+    ((gases.NH3 || 0) >= 0.005 && Tbase < 265);
+
   const isIronRich =
-    bodyClassLower.includes('iron') ||
-    bodyClassLower.includes('core') ||
-    bodyClassLower.includes('mercury') ||
-    (iceFrac < 0.05 && (densityGcm3 >= 6.0 || (densityGcm3 >= 5.25 && pBar < 0.05)));
+    !isAmmoniaWorld &&
+    (bodyClassLower.includes('iron') ||
+      bodyClassLower.includes('core') ||
+      bodyClassLower.includes('mercury') ||
+      (iceFrac < 0.05 && (densityGcm3 >= 6.0 || (densityGcm3 >= 5.25 && pBar < 0.05))));
 
   if (isIronRich) {
     // Interpolate metallic sheen by density (5.2 -> 7.8 g/cm3)
@@ -335,42 +341,47 @@ export function deriveCrustCompositionPalette(params: {
     };
   }
 
-  // 3. Tholin-Stained Cryo-Organic & Hydrocarbon Worlds (Titan, Pluto, Triton, Kuiper-like)
-  const hasNonMethaneSea = coverageFrac > 0 && solventKey !== 'CH4-C2H6';
+  // 3. Tholin-Stained Cryo-Organic, Ammonia-Water & Hydrocarbon Worlds (Ammonia Worlds, Titan, Pluto, Triton, Kuiper-like)
+  // On ammonia worlds (NH3-H2O) and methane-nitrogen cryo-worlds, UV photolysis of NH3, N2, and CH4
+  // coats all exposed icy ground, tabular icebergs, and glacial peaks in reddish-amber / russet-ochre tholins (never white!).
+  const hasNonTholinSea = coverageFrac > 0 && solventKey !== 'CH4-C2H6' && solventKey !== 'NH3-H2O';
   const isTholinCryo =
-    !hasNonMethaneSea &&
-    (solventKey === 'CH4-C2H6' ||
-      bodyClassLower.includes('titan') ||
-      bodyClassLower.includes('methane') ||
-      ((isIcyWorld || Tbase < 150) &&
-        ((gases.CH4 || 0) >= 0.01 || (Tbase < 115 && iceFrac >= 0.15))));
+    isAmmoniaWorld ||
+    (!hasNonTholinSea &&
+      (solventKey === 'CH4-C2H6' ||
+        bodyClassLower.includes('titan') ||
+        bodyClassLower.includes('methane') ||
+        ((isIcyWorld || Tbase < 150) &&
+          ((gases.CH4 || 0) >= 0.01 || (Tbase < 115 && iceFrac >= 0.15)))));
 
   if (isTholinCryo) {
-    const lowRgb: [number, number, number] = [166, 104, 60];
-    const platRgb: [number, number, number] = [184, 128, 78];
-    const mtnRgb: [number, number, number] = [96, 58, 36];
-    const peakRgb: [number, number, number] = [226, 214, 200];
+    const lowRgb: [number, number, number] = [166, 98, 54];
+    const platRgb: [number, number, number] = [184, 118, 66];
+    const mtnRgb: [number, number, number] = [102, 56, 34];
+    const peakRgb: [number, number, number] = [214, 139, 82]; // Golden-amber / russet-ochre tholin-coated ice peaks (never white!)
     return {
-      compositionLabel: 'Tholin-Stained Cryo-Organic & Water/Nitrogen Ice',
-      craterlandHex: '#7d4b32',
-      alluvialHex: '#8a5230',
-      lowlandHex: '#a6683c',
-      basinHex: '#945a33',
-      steppeHex: '#87502f',
-      aridHex: '#9e6238',
-      duneHex: '#694226', // Dark hydrocarbon coffee-brown sand dunes
-      plateauHex: '#b8804e', // Bright Xanadu-like icy-tholin plateaus
-      mountainHex: '#603a24',
-      peakHex: '#e2d6c8',
-      tundraHex: '#8c5c3e',
-      iceHex: '#dfd0be', // Warm cream nitrogen/water ice (Sputnik Planitia tone)
-      cryoPlainsHex: '#d4c2ae',
-      basaltHex: '#3b2316',
+      compositionLabel: isAmmoniaWorld
+        ? 'Tholin-Coated Ammonia-Water Ice & Cryo-Organic Crust (NH3-H2O / Tholins)'
+        : 'Tholin-Stained Cryo-Organic & Hydrocarbon Ice Crust',
+      craterlandHex: '#7d462d',
+      alluvialHex: '#8c502e',
+      lowlandHex: '#a66236',
+      basinHex: '#945630',
+      steppeHex: '#874d2c',
+      aridHex: '#9e5e35',
+      duneHex: '#693e23', // Dark hydrocarbon/tholin coffee-brown sand dunes
+      plateauHex: '#b87642', // Bright Xanadu-like icy-tholin plateaus
+      mountainHex: '#663822',
+      peakHex: '#d68b52', // Amber-ochre tholin-dusted glacial pressure ridges & peaks
+      tundraHex: '#8f4f2b',
+      iceHex: '#c4743d', // Tholin-coated russet-amber / butterscotch glacial ice & iceberg sheets
+      cryoPlainsHex: '#b26230', // Terracotta-ochre tholin-stained tabular iceberg shelves & cryo-plains
+      basaltHex: '#3b2114',
       lowlandRgb: lowRgb,
       plateauRgb: platRgb,
       mountainRgb: mtnRgb,
       peakRgb: peakRgb,
-      iceEjectaBoost: 0.7,
+      iceEjectaBoost: 0.22,
     };
   }
 
@@ -3121,6 +3132,7 @@ export function resolveSolidBiomeColorHex(
   if (biomeId === 14) return comp.basaltHex;
   if (biomeId === 16) return comp.craterlandHex;
   if (biomeId === 18) return comp.cryoPlainsHex;
+  if (biomeId === 21) return comp.compositionLabel.includes('Tholin') ? '#6e3219' : '#3b7ea1';
   return (BIOMES.find((bm) => bm.id === biomeId) || BIOMES[4]).color;
 }
 
@@ -3375,6 +3387,10 @@ export function evaluateSurfaceMapTexel(
         }
       }
 
+      const isTholinIce =
+        seaPalette.solventKey === 'NH3-H2O' ||
+        seaPalette.solventKey === 'CH4-C2H6' ||
+        compositionPalette.compositionLabel.includes('Tholin');
       const crackVal = fractureGrid[idx];
       if ((isMoltenWorld || seaPalette.solventKey === 'Silicate Magma' || Tlocal >= 800) && crackVal > 0.08) {
         // Solidified basalt tectonic fractures across higher-altitude volcanic rock crust
@@ -3382,9 +3398,15 @@ export function evaluateSurfaceMapTexel(
         r = r * (1 - t) + 22 * t;
         g = g * (1 - t) + 16 * t;
         b = b * (1 - t) + 14 * t;
-      } else if ((isIcyWorld || isFrozenSeaIce) && isIceCell && crackVal > 0.08) {
+      } else if ((isIcyWorld || isFrozenSeaIce || isTholinIce) && isIceCell && crackVal > 0.08) {
         const t = Math.min(1.0, crackVal / 0.85);
-        if (t < 0.4) {
+        if (isTholinIce) {
+          // Deep russet-burgundy tholin-filled cryotectonic lineae & fractures on ammonia/hydrocarbon worlds
+          const c = Math.min(0.75, t * 0.68);
+          r = r * (1 - c) + 92 * c;
+          g = g * (1 - c) + 38 * c;
+          b = b * (1 - c) + 18 * c;
+        } else if (t < 0.4) {
           const m = t / 0.4;
           r = r * (1 - m * 0.35) + 155 * (m * 0.35);
           g = g * (1 - m * 0.35) + 125 * (m * 0.35);
@@ -3411,9 +3433,9 @@ export function evaluateSurfaceMapTexel(
         // Bright ice ejecta boost is strongest on icy crust; exposed rock (> 250 K) has darker silicate ejecta
         const ejectaMult = isIcyWorld && !isIceCell ? 0.35 : compositionPalette.iceEjectaBoost;
         const craterBoost = isFrozenSeaIce ? 0 : craterGrid[idx] * (13 + ejectaMult * 25) * promScale;
-        r = Math.min(255, r * (0.92 + altRatio * 0.22) + craterBoost * 0.94);
-        g = Math.min(255, g * (0.92 + altRatio * 0.22) + craterBoost * 0.98);
-        b = Math.min(255, b * (0.92 + altRatio * 0.22) + craterBoost * 1.08);
+        r = Math.min(255, r * (0.92 + altRatio * 0.22) + craterBoost * (isTholinIce ? 1.06 : 0.94));
+        g = Math.min(255, g * (0.92 + altRatio * 0.22) + craterBoost * (isTholinIce ? 0.78 : 0.98));
+        b = Math.min(255, b * (0.92 + altRatio * 0.22) + craterBoost * (isTholinIce ? 0.52 : 1.08));
       }
     }
 
@@ -3476,12 +3498,16 @@ export function evaluateSurfaceMapTexel(
       b = 36;
     } else if (isIceCell) {
       // Hypsometric elevation gradient for Glacial Ice Sheets & Cryo-Shells in Topography view
+      const isTholinIce =
+        seaPalette.solventKey === 'NH3-H2O' ||
+        seaPalette.solventKey === 'CH4-C2H6' ||
+        compositionPalette.compositionLabel.includes('Tholin');
       const altRatio = isFrozenSeaIce
         ? 0.02
         : Math.max(0, Math.min(1, (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized)));
-      const lowIce = [108, 162, 206];
-      const midIce = [176, 218, 244];
-      const highIce = [246, 250, 255];
+      const lowIce = isTholinIce ? [142, 74, 38] : [108, 162, 206];
+      const midIce = isTholinIce ? [194, 114, 60] : [176, 218, 244];
+      const highIce = isTholinIce ? [228, 156, 96] : [246, 250, 255];
       if (altRatio < 0.45) {
         const t = altRatio / 0.45;
         r = Math.round(lowIce[0] + (midIce[0] - lowIce[0]) * t);
@@ -3496,9 +3522,9 @@ export function evaluateSurfaceMapTexel(
       const crackVal = fractureGrid[idx];
       if (crackVal > 0.1) {
         const ct = Math.min(0.65, crackVal * 0.55);
-        r = Math.round(r * (1 - ct) + 48 * ct);
-        g = Math.round(g * (1 - ct) + 112 * ct);
-        b = Math.round(b * (1 - ct) + 162 * ct);
+        r = Math.round(r * (1 - ct) + (isTholinIce ? 92 : 48) * ct);
+        g = Math.round(g * (1 - ct) + (isTholinIce ? 38 : 112) * ct);
+        b = Math.round(b * (1 - ct) + (isTholinIce ? 18 : 162) * ct);
       }
     } else {
       const altRatio = Math.max(0, (h - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized));
@@ -4313,13 +4339,19 @@ export function sampleSurfacePoint(
   } else if (biomeId === 14 && isFrozenSea && (model.isMoltenWorld || model.seaPalette.solventKey === 'Silicate Magma')) {
     biomeName = `Solidified Magma Sea — Basalt Rock Crust (${model.compositionPalette.compositionLabel})`;
   } else if (biomeId === 8 || biomeId === 13) {
+    const isTholinIce =
+      model.seaPalette.solventKey === 'NH3-H2O' ||
+      model.seaPalette.solventKey === 'CH4-C2H6' ||
+      model.compositionPalette.compositionLabel.includes('Tholin');
     if (isFrozenSea) {
-      biomeName = `Frozen Sea Ice — ${model.seaPalette.iceBiomeName}`;
+      biomeName = isTholinIce
+        ? `Tholin-Coated Sea Ice — ${model.seaPalette.iceBiomeName}`
+        : `Frozen Sea Ice — ${model.seaPalette.iceBiomeName}`;
     } else if (model.hasLiquid && !model.isIcyWorld) {
       biomeName =
         biomeId === 13
-          ? `Alpine Glacial Peaks — ${model.seaPalette.iceBiomeName}`
-          : `Glacial Ice Sheet — ${model.seaPalette.iceBiomeName}`;
+          ? `${isTholinIce ? 'Tholin-Coated Glacial Peaks' : 'Alpine Glacial Peaks'} — ${model.seaPalette.iceBiomeName}`
+          : `${isTholinIce ? 'Tholin-Coated Ice Sheet' : 'Glacial Ice Sheet'} — ${model.seaPalette.iceBiomeName}`;
     } else {
       biomeName = `${biomeDef.name} (${model.compositionPalette.compositionLabel})`;
     }
@@ -4345,8 +4377,12 @@ export function sampleSurfacePoint(
       biomeName = `${biomeDef.name} (${model.compositionPalette.compositionLabel})`;
     }
   } else if ((model.isIcyWorld || isFrozenSea) && isIceCell && model.fractureGrid[idx] > 0.28) {
-    biomeName = 'Cryotectonic Ice Fissure (Linea)';
-    biomeColor = '#3b7ea1';
+    const isTholinIce =
+      model.seaPalette.solventKey === 'NH3-H2O' ||
+      model.seaPalette.solventKey === 'CH4-C2H6' ||
+      model.compositionPalette.compositionLabel.includes('Tholin');
+    biomeName = isTholinIce ? 'Tholin-Stained Cryotectonic Fissure (Linea)' : 'Cryotectonic Ice Fissure (Linea)';
+    biomeColor = isTholinIce ? '#6e3219' : '#3b7ea1';
   } else if (model.isIcyWorld && !isIceCell) {
     biomeName = `Exposed Silicate Bedrock — ${biomeDef.name} (T > 250 K)`;
   } else if (model.craterGrid[idx] > 0.35) {

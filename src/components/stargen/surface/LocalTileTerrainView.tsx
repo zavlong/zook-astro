@@ -701,6 +701,10 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
 
       if (isIceB) {
         flags |= FLAG_ICE_SPEC;
+        const isTholinIce =
+          surfaceModel.seaPalette.solventKey === 'NH3-H2O' ||
+          surfaceModel.seaPalette.solventKey === 'CH4-C2H6' ||
+          surfaceModel.compositionPalette.compositionLabel.includes('Tholin');
         const sastrugiWave = Math.sin(px * 65 - pz * 32 + fine1 * 5.5);
         const crevassePattern = Math.abs(fine1 * 2.0 - 1.0 + (ridge - 0.5) * 0.6);
         const isCrevasse = crevassePattern < 0.14 || isFissureFloor;
@@ -709,15 +713,15 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
 
         if (isCrevasse) {
           const depthCrev = isFissureFloor ? 0.85 : 1.0 - crevassePattern / 0.14;
-          r = Math.round(targetBaseRgb[0] * (1 - depthCrev * 0.62) + 38 * (depthCrev * 0.62));
-          g = Math.round(targetBaseRgb[1] * (1 - depthCrev * 0.42) + 128 * (depthCrev * 0.42));
-          b = Math.round(targetBaseRgb[2] * (1 - depthCrev * 0.25) + 210 * (depthCrev * 0.25));
+          r = Math.round(targetBaseRgb[0] * (1 - depthCrev * 0.62) + (isTholinIce ? 92 : 38) * (depthCrev * 0.62));
+          g = Math.round(targetBaseRgb[1] * (1 - depthCrev * 0.48) + (isTholinIce ? 36 : 128) * (depthCrev * 0.48));
+          b = Math.round(targetBaseRgb[2] * (1 - depthCrev * 0.38) + (isTholinIce ? 18 : 210) * (depthCrev * 0.38));
           bumpX *= 1.8;
         } else {
           const frostSparkle = sastrugiWave * 14 + grain * 16;
-          r = Math.round(targetBaseRgb[0] * 0.72 + iceRgb[0] * 0.28 + frostSparkle);
-          g = Math.round(targetBaseRgb[1] * 0.72 + iceRgb[1] * 0.28 + frostSparkle);
-          b = Math.round(targetBaseRgb[2] * 0.7 + iceRgb[2] * 0.3 + frostSparkle * 1.1);
+          r = Math.round(targetBaseRgb[0] * 0.72 + iceRgb[0] * 0.28 + frostSparkle * (isTholinIce ? 1.15 : 1.0));
+          g = Math.round(targetBaseRgb[1] * 0.72 + iceRgb[1] * 0.28 + frostSparkle * (isTholinIce ? 0.76 : 1.0));
+          b = Math.round(targetBaseRgb[2] * 0.7 + iceRgb[2] * 0.3 + frostSparkle * (isTholinIce ? 0.42 : 1.1));
         }
       } else if (hasBioB) {
         const canopyDensity = Math.max(
@@ -978,10 +982,14 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
               }
               if (waterDepth < 0.018) {
                 const surfLine = Math.sin(waterDepth * 650 + fine1 * 5.0) * 0.5 + 0.5;
-                const foam = (1.0 - waterDepth / 0.018) * (0.35 + 0.55 * surfLine);
-                r = Math.min(255, Math.round(r + (242 - r) * foam));
-                g = Math.min(255, Math.round(g + (248 - g) * foam));
-                b = Math.min(255, Math.round(b + (255 - b) * foam));
+                const isExoticSolvent = pal.solventKey === 'NH3-H2O' || pal.solventKey === 'CH4-C2H6';
+                const foam = (1.0 - waterDepth / 0.018) * (0.35 + 0.55 * surfLine) * (isExoticSolvent ? 0.55 : 1.0);
+                const foamR = isExoticSolvent ? Math.round(sh[0] * 0.55 + alluvialRgb[0] * 0.45 + 32) : 242;
+                const foamG = isExoticSolvent ? Math.round(sh[1] * 0.55 + alluvialRgb[1] * 0.45 + 24) : 248;
+                const foamB = isExoticSolvent ? Math.round(sh[2] * 0.55 + alluvialRgb[2] * 0.45 + 18) : 255;
+                r = Math.min(255, Math.round(r + (foamR - r) * foam));
+                g = Math.min(255, Math.round(g + (foamG - g) * foam));
+                b = Math.min(255, Math.round(b + (foamB - b) * foam));
               }
             }
           } else {
@@ -1446,11 +1454,18 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                 if (!isNight && (flags & (FLAG_WATER | FLAG_ICE_SPEC)) !== 0) {
                   const ndoth = Math.max(0, nx * halfX + ny * halfY + nz * halfZ);
                   const isWater = (flags & FLAG_WATER) !== 0;
-                  const specPow = isWater ? Math.pow(ndoth, 24) * 0.58 : Math.pow(ndoth, 16) * 0.30;
+                  const isTholinSpec =
+                    !isWater &&
+                    (surfaceModel.seaPalette.solventKey === 'NH3-H2O' ||
+                      surfaceModel.seaPalette.solventKey === 'CH4-C2H6' ||
+                      surfaceModel.compositionPalette.compositionLabel.includes('Tholin'));
+                  const specPow = isWater
+                    ? Math.pow(ndoth, 24) * 0.58
+                    : Math.pow(ndoth, 16) * (isTholinSpec ? 0.18 : 0.30);
                   const spec = specPow * shadowAtten;
-                  r += 230 * spec;
-                  g += 244 * spec;
-                  b += 255 * spec;
+                  r += (isTholinSpec ? 245 : 230) * spec;
+                  g += (isTholinSpec ? 185 : 244) * spec;
+                  b += (isTholinSpec ? 120 : 255) * spec;
                 }
 
                 // Distance-based atmospheric aerial perspective haze
