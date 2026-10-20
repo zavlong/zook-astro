@@ -12,9 +12,16 @@ import {
   Compass,
   Globe,
   Map as MapIcon,
+  Download,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { PlanetarySurfaceExplorer } from '../surface/PlanetarySurfaceExplorer';
 import { PlanetaryChemistrySection } from '../surface/PlanetaryChemistrySection';
+import {
+  ExportFormatType,
+  exportSingleEntityInFormat,
+} from '../../../core/export/systemFormatExporters';
 import {
   RealisticPlanetBody,
   RealisticMoon,
@@ -92,6 +99,9 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
     planetClaimInfo?.empire?.id || currentEmpire?.id || (sectorEmpires[0]?.id ?? '')
   );
   const [activeTab, setActiveTab] = useState<'overview' | 'surface'>('overview');
+  const [showExportPanel, setShowExportPanel] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormatType>('spaceengine');
+  const [copiedExport, setCopiedExport] = useState(false);
 
   useEffect(() => {
     if (planetClaimInfo?.designation) {
@@ -400,6 +410,19 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
             </button>
             <button
               type="button"
+              onClick={() => setShowExportPanel((v) => !v)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-mono flex items-center gap-1 cursor-pointer transition shadow-sm border ${
+                showExportPanel
+                  ? 'bg-emerald-900/80 text-emerald-200 border-emerald-500'
+                  : 'bg-slate-900 hover:bg-slate-800 text-emerald-300 border-slate-700'
+              }`}
+              title="Export this world in Stargen (.json), SpaceEngine (.sc), or Stellaris (.txt) format"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export
+            </button>
+            <button
+              type="button"
               onClick={onClose}
               className="p-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800 cursor-pointer"
             >
@@ -407,6 +430,94 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Collapsible Multi-Format World Exporter (Stargen / SpaceEngine / Stellaris) */}
+        {showExportPanel && (() => {
+          const exported = exportSingleEntityInFormat(
+            systemResult,
+            selectedEntity.zoneIdx,
+            selectedEntity.bodyIdx,
+            selectedEntity.kind === 'moon' ? selectedEntity.moonIdx : null,
+            exportFormat
+          );
+          return (
+            <div className="bg-[#0c121d] p-3.5 rounded-xl border border-emerald-700/60 flex flex-col gap-2.5 font-mono text-xs shadow-lg">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider">
+                    Export World Telemetry:
+                  </span>
+                  <div className="inline-flex rounded-lg bg-slate-950 p-0.5 border border-slate-800">
+                    {(
+                      [
+                        { id: 'stargen', label: 'Stargen (.json)' },
+                        { id: 'spaceengine', label: 'SpaceEngine (.sc)' },
+                        { id: 'stellaris', label: 'Stellaris (.txt)' },
+                      ] as { id: ExportFormatType; label: string }[]
+                    ).map((fmt) => (
+                      <button
+                        key={fmt.id}
+                        type="button"
+                        onClick={() => setExportFormat(fmt.id)}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition cursor-pointer ${
+                          exportFormat === fmt.id
+                            ? 'bg-emerald-600 text-white shadow'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {fmt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(exported.content);
+                      setCopiedExport(true);
+                      setTimeout(() => setCopiedExport(false), 1800);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-sky-300 border border-slate-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    {copiedExport ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedExport ? 'Copied!' : 'Copy'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const blob = new Blob([exported.content], { type: exported.mimeType });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = exported.filename;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-200 border border-emerald-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Download {exported.filename}
+                  </button>
+                </div>
+              </div>
+              <p className="text-[10.5px] text-slate-400">
+                {exportFormat === 'stargen'
+                  ? 'Raw Stargen astrophysical JSON object for this body.'
+                  : exportFormat === 'spaceengine'
+                  ? 'SpaceEngine .sc script block with derived procedural Surface/Clouds/Ocean/Atmosphere/Aurora/Orbit parameters; unused Stargen telemetry and inactive blocks are commented out (//).'
+                  : 'Stellaris planet/moon initializer block with scaled size and orbit_distance; unused Stargen astrophysical fields are commented out (#).'}
+              </p>
+              <textarea
+                readOnly
+                value={exported.content}
+                rows={12}
+                className="w-full p-2.5 rounded-lg bg-[#070b12] border border-slate-800 text-[11px] font-mono text-slate-200 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+          );
+        })()}
 
         {/* Main World Title & Visual Banner */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[#151d2c] p-4 rounded-xl border border-[#2a3852]">
