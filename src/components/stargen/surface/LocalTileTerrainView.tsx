@@ -549,25 +549,26 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       // Yaw around Y axis
       const x1 = x * cosY - z * sinY;
       const z1 = x * sinY + z * cosY;
-      // Pitch around X axis
+      // Pitch around X axis (+z1 is front/bottom toward viewer, -z1 is back/top away from viewer)
       const y2 = y * cosP - z1 * sinP;
-      const z2 = y * sinP + z1 * cosP;
+      const zCam = y * sinP + z1 * cosP; // +zCam is closer to camera, -zCam is farther from camera
+      const camDepth = camDist - zCam; // Larger camDepth = farther from camera
 
-      const persp = camDist / Math.max(1.2, camDist + z2 * 0.55);
+      const persp = camDist / Math.max(1.2, camDepth);
       return {
         sx: cx + x1 * scale * persp,
         sy: cy - y2 * scale * persp,
-        depth: z2,
+        depth: camDepth,
         rx: x1,
         ry: y2,
-        rz: z2,
+        rz: zCam,
       };
     };
 
     // Light direction in local world space based on timeOfDayDeg
     const lxRaw = Math.cos(radTOD) * 0.82;
     const lyRaw = Math.max(0.18, Math.sin(radTOD) * 0.85 + 0.25);
-    const lzRaw = -0.42;
+    const lzRaw = 0.42;
     const lLen = Math.hypot(lxRaw, lyRaw, lzRaw) || 1;
     const lx = lxRaw / lLen;
     const ly = lyRaw / lLen;
@@ -578,7 +579,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     // Project all top-surface vertices
     const projVerts = vertices.map((v) => project3D(v.x, v.y, v.z));
 
-    // Build painter's algorithm draw list (top surface triangles + cutaway geological skirt quads)
+    // Build painter's algorithm draw list (top surface triangles + front-facing cutaway geological skirt quads)
     interface DrawFace {
       x0: number;
       y0: number;
@@ -664,8 +665,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       });
     }
 
-    // B) Cutaway 3D Geological Cross-Section Skirt along the outer hexagonal/pentagonal perimeter
-    const baseBottomY = -0.44;
+    // B) Cutaway 3D Geological Cross-Section Skirt along the front-facing outer hexagonal/pentagonal perimeter
+    const baseBottomY = -0.36;
     const crustRgb = hexToRgb(surfaceModel.compositionPalette.plateauHex);
     const mantleRgb = surfaceModel.isIcyWorld
       ? [75, 118, 158]
@@ -680,6 +681,23 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       const vA = vertices[curr.vIdx];
       const vB = vertices[next.vIdx];
 
+      // Outward normal of this hex edge in world (x, z): perpendicular to (vB - vA) pointing away from origin
+      const edgeDx = vB.x - vA.x;
+      const edgeDz = vB.z - vA.z;
+      const mx = (vA.x + vB.x) * 0.5;
+      const mz = (vA.z + vB.z) * 0.5;
+      let outNx = -edgeDz;
+      let outNz = edgeDx;
+      if (outNx * mx + outNz * mz < 0) {
+        outNx = -outNx;
+        outNz = -outNz;
+      }
+      // Rotate outward normal by rotYaw into camera space: only draw skirt walls facing the camera (camNz > 0)!
+      const camNz = outNx * sinY + outNz * cosY;
+      if (camNz <= 0.01) {
+        continue; // Back-facing underground wall: culled so it never hides the terrain!
+      }
+
       // Solid floor top (either land surface or submerged seafloor)
       const topFloorA = showWaterLayer ? vA.seaFloorY : vA.y;
       const topFloorB = showWaterLayer ? vB.seaFloorY : vB.y;
@@ -689,10 +707,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       const pBotB = project3D(vB.x, baseBottomY, vB.z);
       const pBotA = project3D(vA.x, baseBottomY, vA.z);
 
-      // Outward normal of this perimeter segment in (x, z)
-      const mx = (vA.x + vB.x) * 0.5;
-      const mz = (vA.z + vB.z) * 0.5;
-      const sideShade = 0.52 + 0.35 * Math.max(-0.5, mx * lx + mz * lz);
+      const outLen = Math.hypot(outNx, outNz) || 1;
+      const sideShade = 0.52 + 0.38 * Math.max(-0.4, (outNx / outLen) * lx + (outNz / outLen) * lz);
 
       const sr = Math.max(0, Math.min(255, Math.round((crustRgb[0] * 0.55 + mantleRgb[0] * 0.45) * sideShade)));
       const sg = Math.max(0, Math.min(255, Math.round((crustRgb[1] * 0.55 + mantleRgb[1] * 0.45) * sideShade)));
@@ -707,12 +723,12 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         y2: pBotB.sy,
         x3: pBotA.sx,
         y3: pBotA.sy,
-        depth: (pTopA.depth + pTopB.depth + pBotA.depth + pBotB.depth) * 0.25 + 0.02,
+        depth: (pTopA.depth + pTopB.depth) * 0.5 - 0.01,
         fillStyle: `rgb(${sr},${sg},${sb})`,
         strokeStyle: `rgb(${sr},${sg},${sb})`,
       });
 
-      // If water layer is above seafloor along this edge, draw translucent liquid cross-section wall!
+      // If water layer is above seafloor along this front-facing edge, draw translucent liquid cross-section wall!
       if (showWaterLayer && (vA.seaFloorY < 0 || vB.seaFloorY < 0)) {
         const pSeaA = project3D(vA.x, Math.max(0, vA.seaFloorY), vA.z);
         const pSeaB = project3D(vB.x, Math.max(0, vB.seaFloorY), vB.z);
@@ -729,13 +745,13 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           y2: pTopB.sy,
           x3: pTopA.sx,
           y3: pTopA.sy,
-          depth: (pSeaA.depth + pSeaB.depth + pTopA.depth + pTopB.depth) * 0.25 + 0.01,
+          depth: (pSeaA.depth + pSeaB.depth) * 0.5 - 0.015,
           fillStyle: `rgba(${wr},${wg},${wb},0.78)`,
         });
       }
     }
 
-    // Sort back-to-front (largest depth z2 is furthest from camera)
+    // Sort back-to-front (largest camDepth is furthest from camera and drawn first)
     drawFaces.sort((a, b) => b.depth - a.depth);
 
     ctx.lineWidth = showWireframe ? 0.6 : 0.45;
