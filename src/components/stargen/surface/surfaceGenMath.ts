@@ -3692,6 +3692,16 @@ export interface RenderProjectedGlobeOptions {
   transparentBg?: boolean;
   includeRings?: boolean;
   selectedCoords?: { lat: number; lon: number } | null;
+  goldbergOverlay?: {
+    texelTileId: Uint16Array;
+    cells: ReadonlyArray<{
+      unitVec: [number, number, number];
+      neighbors: number[];
+      isPentagon: boolean;
+    }>;
+    selectedTileId?: number | null;
+    hoveredTileId?: number | null;
+  } | null;
 }
 
 /**
@@ -4016,6 +4026,83 @@ export function renderSurfaceProjectedGlobeToCanvas(
           litR = litR * 0.82 + 255 * 0.18;
           litG = litG * 0.82 + 255 * 0.18;
           litB = litB * 0.82 + 255 * 0.18;
+        }
+      }
+
+      // Optional Goldberg Polyhedron Hex/Pentagon Tile Grid Overlay on the 3D Globe
+      if (options.goldbergOverlay && !isBlankSurfaceLayer) {
+        const gb = options.goldbergOverlay;
+        const seedIdx = Math.floor(mapY) * 360 + Math.floor(mapX);
+        const seedId = gb.texelTileId[seedIdx] || 0;
+        const cells = gb.cells;
+        let bestId = seedId;
+        const sv = cells[seedId].unitVec;
+        let bestDot = sx * sv[0] + sy * sv[1] + sz * sv[2];
+        let secondId = seedId;
+        let secondDot = -2;
+
+        const nbs = cells[seedId].neighbors;
+        for (let i = 0; i < nbs.length; i++) {
+          const cid = nbs[i];
+          const cv = cells[cid].unitVec;
+          const dot = sx * cv[0] + sy * cv[1] + sz * cv[2];
+          if (dot > bestDot) {
+            secondDot = bestDot;
+            secondId = bestId;
+            bestDot = dot;
+            bestId = cid;
+          } else if (dot > secondDot) {
+            secondDot = dot;
+            secondId = cid;
+          }
+        }
+        if (bestId !== seedId) {
+          const nbs2 = cells[bestId].neighbors;
+          for (let i = 0; i < nbs2.length; i++) {
+            const cid = nbs2[i];
+            if (cid === bestId) continue;
+            const cv = cells[cid].unitVec;
+            const dot = sx * cv[0] + sy * cv[1] + sz * cv[2];
+            if (dot > bestDot) {
+              secondDot = bestDot;
+              secondId = bestId;
+              bestDot = dot;
+              bestId = cid;
+            } else if (dot > secondDot) {
+              secondDot = dot;
+              secondId = cid;
+            }
+          }
+        }
+
+        const gap = Math.max(0, bestDot - secondDot);
+        const isSelTile = bestId === gb.selectedTileId;
+        const isHovTile = bestId === gb.hoveredTileId;
+        const isSelBorder = gap < 0.0028 && (isSelTile || secondId === gb.selectedTileId);
+        const isHovBorder = gap < 0.0025 && (isHovTile || secondId === gb.hoveredTileId);
+
+        if (isSelBorder) {
+          litR = litR * 0.2 + 56 * 0.8;
+          litG = litG * 0.2 + 189 * 0.8;
+          litB = litB * 0.2 + 248 * 0.8;
+        } else if (isHovBorder) {
+          litR = litR * 0.25 + 250 * 0.75;
+          litG = litG * 0.25 + 204 * 0.75;
+          litB = litB * 0.25 + 21 * 0.75;
+        } else if (gap < 0.0019) {
+          const isPent = cells[bestId].isPentagon;
+          const bAlpha = isPent ? 0.42 : 0.28;
+          litR = litR * (1 - bAlpha) + (isPent ? 251 : 226) * bAlpha;
+          litG = litG * (1 - bAlpha) + (isPent ? 191 : 232) * bAlpha;
+          litB = litB * (1 - bAlpha) + (isPent ? 36 : 240) * bAlpha;
+        } else if (isSelTile) {
+          litR = litR * 0.86 + 56 * 0.14;
+          litG = litG * 0.86 + 189 * 0.14;
+          litB = litB * 0.86 + 248 * 0.14;
+        } else if (isHovTile) {
+          litR = litR * 0.9 + 250 * 0.1;
+          litG = litG * 0.9 + 204 * 0.1;
+          litB = litB * 0.9 + 21 * 0.1;
         }
       }
 

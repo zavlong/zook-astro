@@ -10,6 +10,7 @@ import {
   Play,
   Pause,
   RotateCcw,
+  Hexagon,
 } from 'lucide-react';
 import {
   RealisticPlanetBody,
@@ -26,6 +27,13 @@ import {
   SurfacePointTelemetry,
   SurfaceMapLayerType,
 } from './surfaceGenMath';
+import {
+  getPlanetaryGoldbergGrid,
+  getGoldbergTileAtLatLon,
+  GoldbergPlanetaryTile,
+  PlanetaryGoldbergGrid,
+} from './goldbergTileGrid';
+import { LocalTileTerrainView } from './LocalTileTerrainView';
 import { PlanetaryChemistrySection } from './PlanetaryChemistrySection';
 
 interface PlanetarySurfaceExplorerProps {
@@ -36,7 +44,7 @@ interface PlanetarySurfaceExplorerProps {
 }
 
 type MapLayer = SurfaceMapLayerType;
-type DisplayMode = 'map' | 'globe' | 'horizon';
+type DisplayMode = 'map' | 'globe' | 'terrain' | 'horizon';
 
 export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> = ({
   planet,
@@ -51,7 +59,8 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
   const [hoverCoords, setHoverCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [timeOfDayDeg, setTimeOfDayDeg] = useState<number>(45); // 0 = Sunrise, 90 = Noon, 180 = Sunset, 270 = Midnight
   const [cameraPanDeg, setCameraPanDeg] = useState<number>(0);
-  const [showGrid, setShowGrid] = useState<boolean>(true);
+  const [showGrid, setShowGrid] = useState<boolean>(false);
+  const [showTileGrid, setShowTileGrid] = useState<boolean>(true);
 
   // Interactive 3D Globe Rotation State
   const [globeYaw, setGlobeYaw] = useState<number>(0);
@@ -76,11 +85,43 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     return generatePlanetarySurfaceModel(planet, moon, zone, stars);
   }, [planet, moon, zone, stars]);
 
-  // Selected telemetry point
+  // Generate Goldberg Polyhedron (480 Hexagons + 12 Pentagons) planetary tile grid
+  const goldbergGrid = useMemo<PlanetaryGoldbergGrid>(() => {
+    return getPlanetaryGoldbergGrid(surfaceModel, planet, moon);
+  }, [surfaceModel, planet, moon]);
+
+  const selectedTile = useMemo<GoldbergPlanetaryTile>(() => {
+    return getGoldbergTileAtLatLon(goldbergGrid, selectedCoords.lat, selectedCoords.lon);
+  }, [goldbergGrid, selectedCoords]);
+
+  const hoveredTile = useMemo<GoldbergPlanetaryTile | null>(() => {
+    if (!hoverCoords) return null;
+    return getGoldbergTileAtLatLon(goldbergGrid, hoverCoords.lat, hoverCoords.lon);
+  }, [goldbergGrid, hoverCoords]);
+
+  const activeInspectedTile = hoveredTile || selectedTile;
+
+  // Selected telemetry point (snapped to the Goldberg tile when showTileGrid or terrain mode is active)
   const currentTelemetry = useMemo<SurfacePointTelemetry>(() => {
+    if (showTileGrid || displayMode === 'terrain') {
+      const t = activeInspectedTile;
+      return {
+        lat: t.centerLat,
+        lon: t.centerLon,
+        elevationKm: t.elevationKm,
+        elevationMeters: t.elevationMeters,
+        temperatureK: t.temperatureK,
+        temperatureC: t.temperatureC,
+        pressureBar: t.pressureBar,
+        biome: t.biomeName,
+        biomeColor: t.biomeColor,
+        isOcean: t.isOcean,
+        featureName: t.featureName,
+      };
+    }
     const coords = hoverCoords || selectedCoords;
     return sampleSurfacePoint(surfaceModel, planet, moon, coords.lat, coords.lon);
-  }, [surfaceModel, planet, moon, hoverCoords, selectedCoords]);
+  }, [surfaceModel, planet, moon, hoverCoords, selectedCoords, showTileGrid, displayMode, activeInspectedTile]);
 
   const isBlankSurfaceLayer =
     surfaceModel.isNoSurface &&
@@ -98,7 +139,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     return () => cancelAnimationFrame(rafId);
   }, [displayMode, autoSpinGlobe, isDraggingGlobe]);
 
-  // Render 2D Cartographic Surface Map (2x supersampled 720x360 with bilinear sub-texel blending)
+  // Render 2D Cartographic Surface Map (2x supersampled 720x360 with bilinear sub-texel blending + Goldberg hex overlay)
   useEffect(() => {
     if (displayMode !== 'map') return;
     const canvas = mapCanvasRef.current;
@@ -114,15 +155,62 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const imgData = ctx.createImageData(width, height);
     const data = imgData.data;
 
+    const topo = goldbergGrid.topology;
+    const selTileId = selectedTile.tileId;
+    const hovTileId = hoveredTile?.tileId ?? -1;
+
     for (let y = 0; y < height; y++) {
       const mapY = (y / height) * 180;
+      const yDown = Math.min(height - 1, y + 1);
       for (let x = 0; x < width; x++) {
         const mapX = (x / width) * 360;
         const pIdx = (y * width + x) * 4;
         const texel = evaluateSurfaceMapBilinear(surfaceModel, mapX, mapY, activeLayer, showCloudsOverlay, true);
-        data[pIdx] = texel.r;
-        data[pIdx + 1] = texel.g;
-        data[pIdx + 2] = texel.b;
+        let r = texel.r;
+        let g = texel.g;
+        let b = texel.b;
+
+        if (showTileGrid && !isBlankSurfaceLayer) {
+          const hIdx = y * width + x;
+          const tId = topo.hiResTileId[hIdx];
+          const isBorder = topo.hiResIsBorder[hIdx] === 1;
+          const xRight = (x + 1) % width;
+          const tRight = topo.hiResTileId[y * width + xRight];
+          const tDown = topo.hiResTileId[yDown * width + x];
+
+          const isSelBorder =
+            isBorder && (tId === selTileId || tRight === selTileId || tDown === selTileId);
+          const isHovBorder =
+            isBorder && (tId === hovTileId || tRight === hovTileId || tDown === hovTileId);
+
+          if (isSelBorder) {
+            r = Math.round(r * 0.15 + 56 * 0.85);
+            g = Math.round(g * 0.15 + 189 * 0.85);
+            b = Math.round(b * 0.15 + 248 * 0.85);
+          } else if (isHovBorder) {
+            r = Math.round(r * 0.2 + 250 * 0.8);
+            g = Math.round(g * 0.2 + 204 * 0.8);
+            b = Math.round(b * 0.2 + 21 * 0.8);
+          } else if (isBorder) {
+            const isPent = topo.cells[tId].isPentagon;
+            const alpha = isPent ? 0.42 : 0.26;
+            r = Math.round(r * (1 - alpha) + (isPent ? 251 : 226) * alpha);
+            g = Math.round(g * (1 - alpha) + (isPent ? 191 : 232) * alpha);
+            b = Math.round(b * (1 - alpha) + (isPent ? 36 : 240) * alpha);
+          } else if (tId === selTileId) {
+            r = Math.round(r * 0.85 + 56 * 0.15);
+            g = Math.round(g * 0.85 + 189 * 0.15);
+            b = Math.round(b * 0.85 + 248 * 0.15);
+          } else if (tId === hovTileId) {
+            r = Math.round(r * 0.9 + 250 * 0.1);
+            g = Math.round(g * 0.9 + 204 * 0.1);
+            b = Math.round(b * 0.9 + 21 * 0.1);
+          }
+        }
+
+        data[pIdx] = r;
+        data[pIdx + 1] = g;
+        data[pIdx + 2] = b;
         data[pIdx + 3] = 255;
       }
     }
@@ -166,23 +254,37 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       ctx.stroke();
     }
 
-    // Draw Landing Site Marker
-    const markerX = ((selectedCoords.lon + 180) / 360) * width;
-    const markerY = ((90 - selectedCoords.lat) / 180) * height;
+    // Draw Landing Site / Selected Tile Center Marker
+    const markerLon = showTileGrid ? selectedTile.centerLon : selectedCoords.lon;
+    const markerLat = showTileGrid ? selectedTile.centerLat : selectedCoords.lat;
+    const markerX = ((markerLon + 180) / 360) * width;
+    const markerY = ((90 - markerLat) / 180) * height;
 
     ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2.2;
     ctx.beginPath();
-    ctx.arc(markerX, markerY, 9, 0, Math.PI * 2);
+    ctx.arc(markerX, markerY, 7, 0, Math.PI * 2);
     ctx.stroke();
 
     ctx.fillStyle = '#38bdf8';
     ctx.beginPath();
-    ctx.arc(markerX, markerY, 3, 0, Math.PI * 2);
+    ctx.arc(markerX, markerY, 2.5, 0, Math.PI * 2);
     ctx.fill();
-  }, [displayMode, activeLayer, showCloudsOverlay, surfaceModel, showGrid, selectedCoords]);
+  }, [
+    displayMode,
+    activeLayer,
+    showCloudsOverlay,
+    surfaceModel,
+    showGrid,
+    showTileGrid,
+    selectedCoords,
+    selectedTile,
+    hoveredTile,
+    goldbergGrid,
+    isBlankSurfaceLayer,
+  ]);
 
-  // Render 3D Projected Globe View (projecting the exact 360x180 surface map onto a 3D sphere + atmosphere glow)
+  // Render 3D Projected Globe View (projecting the exact 360x180 surface map onto a 3D sphere + Goldberg hex overlay)
   useEffect(() => {
     if (displayMode !== 'globe') return;
     const canvas = globeCanvasRef.current;
@@ -200,7 +302,17 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       rotPitch: globePitch,
       transparentBg: false,
       includeRings: !moon,
-      selectedCoords,
+      selectedCoords: showTileGrid
+        ? { lat: selectedTile.centerLat, lon: selectedTile.centerLon }
+        : selectedCoords,
+      goldbergOverlay: showTileGrid
+        ? {
+            texelTileId: goldbergGrid.topology.texelTileId,
+            cells: goldbergGrid.topology.cells,
+            selectedTileId: selectedTile.tileId,
+            hoveredTileId: hoveredTile?.tileId ?? null,
+          }
+        : null,
     });
     globeGeomRef.current = geom;
   }, [
@@ -208,6 +320,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     activeLayer,
     showCloudsOverlay,
     showGrid,
+    showTileGrid,
     globeYaw,
     globePitch,
     isDraggingGlobe,
@@ -216,6 +329,9 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     planet,
     moon,
     selectedCoords,
+    selectedTile,
+    hoveredTile,
+    goldbergGrid,
   ]);
 
   // Render First-Person Horizon Vista Canvas
@@ -567,6 +683,21 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     setSelectedCoords({ lat, lon });
   };
 
+  // Double-click on 2D map tile to open the linked 3D Local Terrain Block
+  const handleMapDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = mapCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const xDeg = ((e.clientX - rect.left) / rect.width) * 360;
+    const yDeg = ((e.clientY - rect.top) / rect.height) * 180;
+
+    const lon = Math.round(Math.max(-180, Math.min(180, xDeg - 180)));
+    const lat = Math.round(Math.max(-90, Math.min(90, 90 - yDeg)));
+
+    setSelectedCoords({ lat, lon });
+    setDisplayMode('terrain');
+  };
+
   const handleMapMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = mapCanvasRef.current;
     if (!canvas) return;
@@ -642,6 +773,20 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
           <button
             type="button"
+            onClick={() => setDisplayMode('terrain')}
+            className={`px-3 py-1.5 rounded-lg border font-bold flex items-center gap-1.5 transition cursor-pointer ${
+              displayMode === 'terrain'
+                ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200'
+                : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+            }`}
+            title="Inspect 3D Isometric Terrain Block for the selected Goldberg Tile (or double-click any tile)"
+          >
+            <Hexagon className="w-3.5 h-3.5" />
+            3D Tile Terrain (#{selectedTile.tileId + 1})
+          </button>
+
+          <button
+            type="button"
             onClick={() => setDisplayMode('horizon')}
             className={`px-3 py-1.5 rounded-lg border font-bold flex items-center gap-1.5 transition cursor-pointer ${
               displayMode === 'horizon'
@@ -694,6 +839,20 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
             <button
               type="button"
+              onClick={() => setShowTileGrid(!showTileGrid)}
+              className={`px-2 py-1 rounded text-[11px] border font-bold flex items-center gap-1 cursor-pointer transition ${
+                showTileGrid
+                  ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
+                  : 'bg-slate-900 border-slate-800 text-slate-400'
+              }`}
+              title="Toggle Goldberg Polyhedron (480 Hexagons + 12 Pentagons) Tile Grid Overlay & Per-Tile Snapping"
+            >
+              <Hexagon className="w-3 h-3" />
+              Hex Tiles
+            </button>
+
+            <button
+              type="button"
               onClick={() => setShowGrid(!showGrid)}
               className={`px-2 py-1 rounded text-[11px] border font-bold cursor-pointer transition ${
                 showGrid
@@ -714,7 +873,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               <Download className="w-3.5 h-3.5" />
             </button>
           </div>
-        ) : (
+        ) : displayMode === 'horizon' ? (
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
               <Sun className="w-3.5 h-3.5 text-amber-400" />
@@ -751,7 +910,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               />
             </div>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Main Visual Display Area */}
@@ -761,6 +920,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             <canvas
               ref={mapCanvasRef}
               onClick={handleMapClick}
+              onDoubleClick={handleMapDoubleClick}
               onMouseMove={handleMapMouseMove}
               onMouseLeave={() => setHoverCoords(null)}
               className="w-full max-w-4xl h-auto rounded-lg border border-slate-800/80 shadow-inner cursor-crosshair transition"
@@ -782,9 +942,9 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             <div className="w-full flex justify-between items-center text-[10px] text-slate-500 px-2 mt-1 flex-wrap gap-2">
               <span>
                 Equirectangular Projection (360° × 180°) •{' '}
-                {surfaceModel.isNoSurface
+                {showTileGrid ? `Goldberg Grid (${goldbergGrid.tileCount} Tiles: 480 Hex, 12 Pent) • Double-click tile for 3D Terrain` : surfaceModel.isNoSurface
                   ? `${surfaceModel.atmospherePalette.classLabel} (100% Cloud Envelope)`
-                  : `Crust: ${surfaceModel.compositionPalette.compositionLabel} • ${surfaceModel.atmospherePalette.classLabel} (${Math.round(surfaceModel.cloudOpacity * 100)}%)`}
+                  : `Crust: ${surfaceModel.compositionPalette.compositionLabel}`}
               </span>
               <span>
                 Weather: {surfaceModel.weatherRegime}
@@ -893,6 +1053,13 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
                 setIsDraggingGlobe(false);
                 globeDragRef.current = null;
               }}
+              onDoubleClick={(e) => {
+                const coords = getCoordsFromGlobeEvent(e);
+                if (coords) {
+                  setSelectedCoords(coords);
+                  setDisplayMode('terrain');
+                }
+              }}
               onMouseLeave={() => {
                 setIsDraggingGlobe(false);
                 globeDragRef.current = null;
@@ -916,7 +1083,9 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             <div className="w-full flex justify-between items-center text-[10px] text-slate-500 px-2 mt-1 flex-wrap gap-2">
               <span>
                 3D Spherical Projection •{' '}
-                {surfaceModel.isNoSurface
+                {showTileGrid
+                  ? `Goldberg Grid (${goldbergGrid.tileCount} Tiles) • Double-click tile to open 3D Terrain`
+                  : surfaceModel.isNoSurface
                   ? 'Fluid/Gas Envelope'
                   : `Crust: ${surfaceModel.compositionPalette.compositionLabel}`}{' '}
                 • Drag to rotate
@@ -926,6 +1095,23 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               </span>
             </div>
           </div>
+        ) : displayMode === 'terrain' ? (
+          <LocalTileTerrainView
+            surfaceModel={surfaceModel}
+            goldbergGrid={goldbergGrid}
+            activeTile={selectedTile}
+            planet={planet}
+            moon={moon}
+            timeOfDayDeg={timeOfDayDeg}
+            onChangeTimeOfDay={setTimeOfDayDeg}
+            onSelectTile={(nextTile) =>
+              setSelectedCoords({
+                lat: Math.round(nextTile.centerLat),
+                lon: Math.round(nextTile.centerLon),
+              })
+            }
+            onBackToGlobe={() => setDisplayMode('globe')}
+          />
         ) : (
           <div className="w-full flex flex-col items-center">
             <canvas
@@ -943,7 +1129,11 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       {/* Interactive Surface Site Telemetry Inspector */}
       <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 bg-[#151d2c] p-3 rounded-xl border border-slate-800">
         <div>
-          <span className="text-slate-400 block text-[10px]">COORDINATES</span>
+          <span className="text-slate-400 block text-[10px]">
+            {showTileGrid || displayMode === 'terrain'
+              ? `GOLDBERG TILE #${activeInspectedTile.tileId + 1} (${activeInspectedTile.isPentagon ? 'PENT' : 'HEX'})`
+              : 'COORDINATES'}
+          </span>
           <b className="text-white text-xs">
             {currentTelemetry.lat >= 0 ? `${currentTelemetry.lat}°N` : `${Math.abs(currentTelemetry.lat)}°S`},{' '}
             {currentTelemetry.lon >= 0 ? `${currentTelemetry.lon}°E` : `${Math.abs(currentTelemetry.lon)}°W`}
@@ -999,22 +1189,36 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         </div>
 
         <div className="col-span-2">
-          <span className="text-slate-400 block text-[10px]">LOCAL BIOME & GEOLOGY</span>
-          <div className="flex items-center gap-2 mt-0.5">
+          <span className="text-slate-400 block text-[10px]">
+            {showTileGrid || displayMode === 'terrain' ? 'UNIFIED TILE BIOME & GEOLOGY' : 'LOCAL BIOME & GEOLOGY'}
+          </span>
+          <div className="flex items-center gap-1.5 mt-0.5">
             <span
               className="w-3 h-3 rounded-full flex-shrink-0"
               style={{ backgroundColor: currentTelemetry.biomeColor }}
             />
             <b className="text-slate-200 truncate">{currentTelemetry.biome}</b>
-            {displayMode !== 'horizon' && (
-              <button
-                type="button"
-                onClick={() => setDisplayMode('horizon')}
-                className="ml-auto px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 border border-sky-700 text-sky-200 text-[10px] font-bold cursor-pointer transition"
-              >
-                View Horizon
-              </button>
-            )}
+            <div className="ml-auto flex items-center gap-1 flex-shrink-0">
+              {displayMode !== 'terrain' && (
+                <button
+                  type="button"
+                  onClick={() => setDisplayMode('terrain')}
+                  className="px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 border border-emerald-700 text-emerald-200 text-[10px] font-bold cursor-pointer transition"
+                  title="Open 3D Isometric Terrain Block for this Goldberg Tile"
+                >
+                  3D Block
+                </button>
+              )}
+              {displayMode !== 'horizon' && (
+                <button
+                  type="button"
+                  onClick={() => setDisplayMode('horizon')}
+                  className="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 border border-sky-700 text-sky-200 text-[10px] font-bold cursor-pointer transition"
+                >
+                  Horizon
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
