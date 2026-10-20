@@ -238,10 +238,10 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     }));
   }, [activeTile, goldbergGrid]);
 
-  // Build 3D Hexagonal/Pentagonal Mesh + 512x512 High-Resolution Procedural Biome Texture & Micro-Bump Normal Map
+  // Build High-Resolution 3D Hexagonal/Pentagonal Mesh + 768x768 Procedural Biome Texture & Micro-Bump Normal Map
   const meshData = useMemo(() => {
     const sides = activeTile.isPentagon ? 5 : 6;
-    const rings = 30; // Rings strictly inside the active Goldberg tile border (no extended terrain mesh)
+    const rings = 54; // High-density rings strictly inside the active Goldberg tile border (3.24x higher triangle density)
     const tileSeed = (surfaceModel.seed * 1664525 + activeTile.tileId * 1013904223) & 0x7fffffff;
 
     // Corner angles in local (x, z) plane aligned with neighbor compass directions
@@ -604,19 +604,21 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const vertices: LocalVertex[] = [];
     const buildVertex = (px: number, pz: number, edgeFrac: number): LocalVertex => {
       const { hLocal, oceanWeight } = sampleHeightOnly(px, pz);
-      const eps = 0.022;
-      const hx = sampleHeightOnly(px + eps, pz).hLocal;
-      const hz = sampleHeightOnly(px, pz + eps).hLocal;
+      const eps = 0.014;
+      const hxPos = sampleHeightOnly(px + eps, pz).hLocal;
+      const hxNeg = sampleHeightOnly(px - eps, pz).hLocal;
+      const hzPos = sampleHeightOnly(px, pz + eps).hLocal;
+      const hzNeg = sampleHeightOnly(px, pz - eps).hLocal;
       const hasSeaHere = oceanWeight >= 0.5 && hLocal < 0;
       const rawY = hasSeaHere ? 0 : hLocal;
-      // Smoothly meet the y=0 perspective plane right at the tile perimeter so there is no cliff wall at the border
-      const edgeTaper = edgeFrac > 0.85 ? Math.max(0, 1.0 - (edgeFrac - 0.85) / 0.15) : 1.0;
-      const smoothTaper = edgeTaper * edgeTaper * (3 - 2 * edgeTaper);
+      // Smoothly meet the y=0 perspective plane right at the tile perimeter with quintic C2 taper
+      const edgeTaper = edgeFrac > 0.84 ? Math.max(0, 1.0 - (edgeFrac - 0.84) / 0.16) : 1.0;
+      const smoothTaper = edgeTaper * edgeTaper * edgeTaper * (edgeTaper * (edgeTaper * 6 - 15) + 10);
       const finalY = rawY * smoothTaper;
 
-      let nx = hasSeaHere ? 0 : (-(hx - hLocal) / eps) * smoothTaper;
-      let ny = 1.0;
-      let nz = hasSeaHere ? 0 : (-(hz - hLocal) / eps) * smoothTaper;
+      const nx = hasSeaHere ? 0 : (-(hxPos - hxNeg) / (2.0 * eps)) * smoothTaper;
+      const ny = 1.0;
+      const nz = hasSeaHere ? 0 : (-(hzPos - hzNeg) / (2.0 * eps)) * smoothTaper;
       const nLen = Math.hypot(nx, ny, nz) || 1;
       return {
         x: px,
@@ -670,6 +672,41 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       }
     }
 
+    // Perform Laplacian vertex-normal smoothing across triangle adjacency to eliminate any polygonal faceting
+    const vCount = vertices.length;
+    const accNx = new Float32Array(vCount);
+    const accNy = new Float32Array(vCount);
+    const accNz = new Float32Array(vCount);
+    for (let i = 0; i < vCount; i++) {
+      accNx[i] = vertices[i].nx * 2.0;
+      accNy[i] = vertices[i].ny * 2.0;
+      accNz[i] = vertices[i].nz * 2.0;
+    }
+    for (let i = 0; i < triangles.length; i++) {
+      const { v0, v1, v2 } = triangles[i];
+      const n0 = vertices[v0];
+      const n1 = vertices[v1];
+      const n2 = vertices[v2];
+      const avgX = (n0.nx + n1.nx + n2.nx) / 3.0;
+      const avgY = (n0.ny + n1.ny + n2.ny) / 3.0;
+      const avgZ = (n0.nz + n1.nz + n2.nz) / 3.0;
+      accNx[v0] += avgX;
+      accNy[v0] += avgY;
+      accNz[v0] += avgZ;
+      accNx[v1] += avgX;
+      accNy[v1] += avgY;
+      accNz[v1] += avgZ;
+      accNx[v2] += avgX;
+      accNy[v2] += avgY;
+      accNz[v2] += avgZ;
+    }
+    for (let i = 0; i < vCount; i++) {
+      const inv = 1.0 / (Math.hypot(accNx[i], accNy[i], accNz[i]) || 1);
+      vertices[i].nx = accNx[i] * inv;
+      vertices[i].ny = accNy[i] * inv;
+      vertices[i].nz = accNz[i] * inv;
+    }
+
     const perimeterIndices: { vIdx: number; wedgeIdx: number }[] = [];
     for (let s = 0; s < sides; s++) {
       for (let k = 0; k < rings; k++) {
@@ -678,9 +715,9 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     }
 
     // ============================================================================
-    // GENERATE 512x512 HIGH-RESOLUTION PROCEDURAL BIOME TEXTURE & BUMP NORMAL MAP
+    // GENERATE 768x768 HIGH-RESOLUTION PROCEDURAL BIOME TEXTURE & BUMP NORMAL MAP
     // ============================================================================
-    const TEX_RES = 512;
+    const TEX_RES = 768;
     const texR = new Uint8Array(TEX_RES * TEX_RES);
     const texG = new Uint8Array(TEX_RES * TEX_RES);
     const texB = new Uint8Array(TEX_RES * TEX_RES);
@@ -689,8 +726,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const texFlags = new Uint8Array(TEX_RES * TEX_RES);
     const texCloudShadow = new Uint8Array(TEX_RES * TEX_RES);
 
-    // Precompute a 129x129 macro terrain grid across [-1, +1] (1:1 unstretched tile coordinates)
-    const MACRO_N = 129;
+    // Precompute a 193x193 macro terrain grid across [-1, +1] (1:1 unstretched tile coordinates)
+    const MACRO_N = 193;
     const macroHGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroFbmGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroRidgeGrid = new Float32Array(MACRO_N * MACRO_N);
@@ -921,15 +958,15 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       return { r, g, b, bumpX, bumpZ, flags };
     };
 
-    // Synthesize every pixel of the 512x512 procedural biome texture + bump map across [-1, +1] (1:1 tile scale)
+    // Synthesize every pixel of the 768x768 procedural biome texture + bump map across [-1, +1] (1:1 tile scale)
     for (let tz = 0; tz < TEX_RES; tz++) {
       const vNorm = tz / (TEX_RES - 1);
       const pz = vNorm * 2.0 - 1.0;
       const mfz = vNorm * (MACRO_N - 1);
       const miz = Math.min(MACRO_N - 2, Math.floor(mfz));
       const fz = mfz - miz;
-      // Smoothstep Hermite weight eliminates linear interpolation kinks along MACRO_N rows
-      const sfz = fz * fz * (3 - 2 * fz);
+      // Quintic C2 Perlin weight eliminates both linear and second-derivative creases along MACRO_N rows
+      const sfz = fz * fz * fz * (fz * (fz * 6 - 15) + 10);
 
       for (let tx = 0; tx < TEX_RES; tx++) {
         const uNorm = tx / (TEX_RES - 1);
@@ -937,7 +974,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         const mfx = uNorm * (MACRO_N - 1);
         const mix = Math.min(MACRO_N - 2, Math.floor(mfx));
         const fx = mfx - mix;
-        const sfx = fx * fx * (3 - 2 * fx);
+        const sfx = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
 
         const i00 = miz * MACRO_N + mix;
         const i10 = i00 + 1;
@@ -1016,17 +1053,19 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           macroFissureGrid[i11] * w11;
         const isOceanPoint = oceanWeight >= 0.48;
 
-        // Isotropic dual-rotated continuous micro-texture noises at pixel resolution
-        const fine1 = isotropicNoise2D(px * 28.0, pz * 28.0, tileSeed + 313);
-        const fine2 = isotropicNoise2D(px * 64.0, pz * 64.0, tileSeed + 419);
-        const fine3 = isotropicNoise2D(px * 148.0, pz * 148.0, tileSeed + 521);
-        const grain = (fine3 - 0.5) * 0.65 + (fine2 - 0.5) * 0.35;
+        // Isotropic dual-rotated continuous micro-texture noises at pixel resolution with smooth band-limiting
+        const fine1 = isotropicNoise2D(px * 24.0, pz * 24.0, tileSeed + 313);
+        const fine2 = isotropicNoise2D(px * 52.0, pz * 52.0, tileSeed + 419);
+        const fine3 = isotropicNoise2D(px * 96.0, pz * 96.0, tileSeed + 521);
+        const grain = (fine3 - 0.5) * 0.34 + (fine2 - 0.5) * 0.24;
 
-        // Micro-normal gradient evaluated at the exact same frequency (28.0) as fine1 so no square grid embosses
-        const fineRight = isotropicNoise2D((px + 0.005) * 28.0, pz * 28.0, tileSeed + 313);
-        const fineDown = isotropicNoise2D(px * 28.0, (pz + 0.005) * 28.0, tileSeed + 313);
-        let bumpX = -dhx * 1.35 + (fine1 - fineRight) * 2.1;
-        let bumpZ = -dhz * 1.35 + (fine1 - fineDown) * 2.1;
+        // Micro-normal gradient evaluated symmetrically so no directional bias or grid embosses
+        const fineRight = isotropicNoise2D((px + 0.006) * 24.0, pz * 24.0, tileSeed + 313);
+        const fineLeft = isotropicNoise2D((px - 0.006) * 24.0, pz * 24.0, tileSeed + 313);
+        const fineDown = isotropicNoise2D(px * 24.0, (pz + 0.006) * 24.0, tileSeed + 313);
+        const fineUp = isotropicNoise2D(px * 24.0, (pz - 0.006) * 24.0, tileSeed + 313);
+        let bumpX = -dhx * 1.32 + (fineLeft - fineRight) * 1.05;
+        let bumpZ = -dhz * 1.32 + (fineUp - fineDown) * 1.05;
 
         let r = baseRgb1[0];
         let g = baseRgb1[1];
@@ -1071,10 +1110,10 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
               flags |= FLAG_LAVA;
             } else {
               // 3D Ocean / River Capillary Wave Normal Map for realistic water glints
-              const wPhase1 = px * 78.0 + pz * 44.0 + fine1 * 4.2;
-              const wPhase2 = px * 48.0 - pz * 82.0 + fine2 * 3.6;
-              bumpX = Math.cos(wPhase1) * 0.55 + Math.cos(wPhase2) * 0.38;
-              bumpZ = Math.sin(wPhase1) * 0.55 - Math.sin(wPhase2) * 0.38;
+              const wPhase1 = px * 68.0 + pz * 38.0 + fine1 * 4.0;
+              const wPhase2 = px * 42.0 - pz * 72.0 + fine2 * 3.4;
+              bumpX = Math.cos(wPhase1) * 0.48 + Math.cos(wPhase2) * 0.32;
+              bumpZ = Math.sin(wPhase1) * 0.48 - Math.sin(wPhase2) * 0.32;
 
               const sh = pal.shallowRgb;
               const dp = pal.deepRgb;
@@ -1253,6 +1292,59 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         texBumpZ[tIdx] = Math.max(-127, Math.min(127, Math.round(bumpZ * 64)));
         texFlags[tIdx] = flags;
         texCloudShadow[tIdx] = Math.max(0, Math.min(255, Math.round(cShadow * 255)));
+      }
+    }
+
+    // Apply a 3x3 binomial smoothing kernel across the synthesized texture & normal maps to eliminate high-frequency harshness
+    const smoothR = new Uint8Array(TEX_RES * TEX_RES);
+    const smoothG = new Uint8Array(TEX_RES * TEX_RES);
+    const smoothB = new Uint8Array(TEX_RES * TEX_RES);
+    const smoothBX = new Int8Array(TEX_RES * TEX_RES);
+    const smoothBZ = new Int8Array(TEX_RES * TEX_RES);
+    for (let tz = 0; tz < TEX_RES; tz++) {
+      const z0 = Math.max(0, tz - 1) * TEX_RES;
+      const z1 = tz * TEX_RES;
+      const z2 = Math.min(TEX_RES - 1, tz + 1) * TEX_RES;
+      for (let tx = 0; tx < TEX_RES; tx++) {
+        const x0 = Math.max(0, tx - 1);
+        const x1 = tx;
+        const x2 = Math.min(TEX_RES - 1, tx + 1);
+        const i00 = z0 + x0, i10 = z0 + x1, i20 = z0 + x2;
+        const i01 = z1 + x0, i11 = z1 + x1, i21 = z1 + x2;
+        const i02 = z2 + x0, i12 = z2 + x1, i22 = z2 + x2;
+        smoothR[i11] = (texR[i00] + texR[i20] + texR[i02] + texR[i22] + (texR[i10] + texR[i01] + texR[i21] + texR[i12]) * 2 + texR[i11] * 8 + 10) / 20;
+        smoothG[i11] = (texG[i00] + texG[i20] + texG[i02] + texG[i22] + (texG[i10] + texG[i01] + texG[i21] + texG[i12]) * 2 + texG[i11] * 8 + 10) / 20;
+        smoothB[i11] = (texB[i00] + texB[i20] + texB[i02] + texB[i22] + (texB[i10] + texB[i01] + texB[i21] + texB[i12]) * 2 + texB[i11] * 8 + 10) / 20;
+        smoothBX[i11] = Math.round((texBumpX[i00] + texBumpX[i20] + texBumpX[i02] + texBumpX[i22] + (texBumpX[i10] + texBumpX[i01] + texBumpX[i21] + texBumpX[i12]) * 2 + texBumpX[i11] * 4) / 16);
+        smoothBZ[i11] = Math.round((texBumpZ[i00] + texBumpZ[i20] + texBumpZ[i02] + texBumpZ[i22] + (texBumpZ[i10] + texBumpZ[i01] + texBumpZ[i21] + texBumpZ[i12]) * 2 + texBumpZ[i11] * 4) / 16);
+      }
+    }
+    texR.set(smoothR);
+    texG.set(smoothG);
+    texB.set(smoothB);
+    texBumpX.set(smoothBX);
+    texBumpZ.set(smoothBZ);
+
+    // Precompute a 2x2 box-filtered mipmap level (384x384) for anti-aliased distance sampling on the horizon plane
+    const MIP_RES = TEX_RES >> 1;
+    const mipR = new Uint8Array(MIP_RES * MIP_RES);
+    const mipG = new Uint8Array(MIP_RES * MIP_RES);
+    const mipB = new Uint8Array(MIP_RES * MIP_RES);
+    const mipBumpX = new Int8Array(MIP_RES * MIP_RES);
+    const mipBumpZ = new Int8Array(MIP_RES * MIP_RES);
+    for (let mz = 0; mz < MIP_RES; mz++) {
+      const r0 = (mz * 2) * TEX_RES;
+      const r1 = (mz * 2 + 1) * TEX_RES;
+      const mRow = mz * MIP_RES;
+      for (let mx = 0; mx < MIP_RES; mx++) {
+        const c0 = mx * 2;
+        const c1 = c0 + 1;
+        const mIdx = mRow + mx;
+        mipR[mIdx] = (texR[r0 + c0] + texR[r0 + c1] + texR[r1 + c0] + texR[r1 + c1] + 2) >> 2;
+        mipG[mIdx] = (texG[r0 + c0] + texG[r0 + c1] + texG[r1 + c0] + texG[r1 + c1] + 2) >> 2;
+        mipB[mIdx] = (texB[r0 + c0] + texB[r0 + c1] + texB[r1 + c0] + texB[r1 + c1] + 2) >> 2;
+        mipBumpX[mIdx] = (texBumpX[r0 + c0] + texBumpX[r0 + c1] + texBumpX[r1 + c0] + texBumpX[r1 + c1]) >> 2;
+        mipBumpZ[mIdx] = (texBumpZ[r0 + c0] + texBumpZ[r0 + c1] + texBumpZ[r1 + c0] + texBumpZ[r1 + c1]) >> 2;
       }
     }
 
@@ -1480,6 +1572,12 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       texBumpZ,
       texFlags,
       texCloudShadow,
+      MIP_RES,
+      mipR,
+      mipG,
+      mipB,
+      mipBumpX,
+      mipBumpZ,
       tileSeed,
     };
   }, [surfaceModel, activeTile, neighborTiles, pBarAtmo, hasAtmosphere]);
@@ -1491,8 +1589,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const W = 720;
-    const H = 440;
+    const W = 900;
+    const H = 550;
     if (canvas.width !== W || canvas.height !== H) {
       canvas.width = W;
       canvas.height = H;
@@ -1611,7 +1709,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const cosP = Math.cos(rotPitch);
     const sinP = Math.sin(rotPitch);
 
-    const scale = 250 * zoom;
+    const scale = 312.5 * zoom;
     const cx = W * 0.5;
     const cy = H * 0.57;
     const camDist = 3.5;
@@ -1668,6 +1766,12 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       texBumpZ,
       texFlags,
       texCloudShadow,
+      MIP_RES,
+      mipR,
+      mipG,
+      mipB,
+      mipBumpX,
+      mipBumpZ,
     } = meshData;
 
     const hazeRgb = isSunset
@@ -2097,6 +2201,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
 
       // Step 3B: Extend the unstretched texture on a flat horizontal perspective plane (y = 0) out to infinity at the horizon
       const invScaleDist = 1.0 / (scale * camDist);
+      const mipMax = MIP_RES - 1;
       for (let py = 0; py < H; py++) {
         const vs = (cy - (py + 0.5)) * invScaleDist;
         const denom = sinP - vs * cosP;
@@ -2112,6 +2217,10 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         const wzBase = z1 * cosY;
         const dwx = camDepth * invScaleDist * cosY;
         const dwz = -camDepth * invScaleDist * sinY;
+
+        // Distance-based trilinear mipmap blend & bump-normal attenuation to eliminate horizon shimmering
+        const mipBlend = Math.max(0, Math.min(1, (camDepth - 3.6) / 4.2));
+        const bumpAtten = Math.max(0.15, 1.0 - Math.max(0, (camDepth - 3.4) / 7.5));
 
         // Horizon aerial perspective fog factor as plane extends toward infinity
         const baseFog = atmoDensityFactor > 0 ? Math.max(0, Math.min(1, (camDepth - 2.9) / 8.5)) * atmoDensityFactor : 0;
@@ -2132,8 +2241,11 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             const signZ = twz <= 1 ? 1 : -1;
             const fzMir = (twz <= 1 ? twz : 2 - twz) * 2 - 1;
 
-            const tu = Math.max(0, Math.min(texMax - 0.001, (fxMir * 0.5 + 0.5) * texMax));
-            const tv = Math.max(0, Math.min(texMax - 0.001, (fzMir * 0.5 + 0.5) * texMax));
+            const uNorm = fxMir * 0.5 + 0.5;
+            const vNorm = fzMir * 0.5 + 0.5;
+
+            const tu = Math.max(0, Math.min(texMax - 0.001, uNorm * texMax));
+            const tv = Math.max(0, Math.min(texMax - 0.001, vNorm * texMax));
             const iu = tu | 0;
             const iv = tv | 0;
             const fu = tu - iu;
@@ -2155,14 +2267,47 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             let g = texG[ti00] * tw00 + texG[ti10] * tw10 + texG[ti01] * tw01 + texG[ti11] * tw11;
             let b = texB[ti00] * tw00 + texB[ti10] * tw10 + texB[ti01] * tw01 + texB[ti11] * tw11;
 
-            const bx =
+            let bx =
               (texBumpX[ti00] * tw00 + texBumpX[ti10] * tw10 + texBumpX[ti01] * tw01 + texBumpX[ti11] * tw11) *
               (1 / 64) *
               signX;
-            const bz =
+            let bz =
               (texBumpZ[ti00] * tw00 + texBumpZ[ti10] * tw10 + texBumpZ[ti01] * tw01 + texBumpZ[ti11] * tw11) *
               (1 / 64) *
               signZ;
+
+            if (mipBlend > 0.01) {
+              const mtu = Math.max(0, Math.min(mipMax - 0.001, uNorm * mipMax));
+              const mtv = Math.max(0, Math.min(mipMax - 0.001, vNorm * mipMax));
+              const miu = mtu | 0;
+              const miv = mtv | 0;
+              const mfu = mtu - miu;
+              const mfv = mtv - miv;
+              const mi00 = miv * MIP_RES + miu;
+              const mi10 = mi00 + 1;
+              const mi01 = mi00 + MIP_RES;
+              const mi11 = mi01 + 1;
+              const mw00 = (1 - mfu) * (1 - mfv);
+              const mw10 = mfu * (1 - mfv);
+              const mw01 = (1 - mfu) * mfv;
+              const mw11 = mfu * mfv;
+              const mr = mipR[mi00] * mw00 + mipR[mi10] * mw10 + mipR[mi01] * mw01 + mipR[mi11] * mw11;
+              const mg = mipG[mi00] * mw00 + mipG[mi10] * mw10 + mipG[mi01] * mw01 + mipG[mi11] * mw11;
+              const mb = mipB[mi00] * mw00 + mipB[mi10] * mw10 + mipB[mi01] * mw01 + mipB[mi11] * mw11;
+              const mbx =
+                (mipBumpX[mi00] * mw00 + mipBumpX[mi10] * mw10 + mipBumpX[mi01] * mw01 + mipBumpX[mi11] * mw11) *
+                (1 / 64) *
+                signX;
+              const mbz =
+                (mipBumpZ[mi00] * mw00 + mipBumpZ[mi10] * mw10 + mipBumpZ[mi01] * mw01 + mipBumpZ[mi11] * mw11) *
+                (1 / 64) *
+                signZ;
+              r = r * (1 - mipBlend) + mr * mipBlend;
+              g = g * (1 - mipBlend) + mg * mipBlend;
+              b = b * (1 - mipBlend) + mb * mipBlend;
+              bx = bx * (1 - mipBlend) + mbx * mipBlend;
+              bz = bz * (1 - mipBlend) + mbz * mipBlend;
+            }
 
             const f00 = texFlags[ti00];
             const f10 = texFlags[ti10];
@@ -2179,9 +2324,9 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
               const rawG = g;
               const rawB = b;
 
-              const mnx = bx * 0.42;
+              const mnx = bx * 0.42 * bumpAtten;
               const mny = 1.0;
-              const mnz = bz * 0.42;
+              const mnz = bz * 0.42 * bumpAtten;
               const invN = 1.0 / (Math.hypot(mnx, mny, mnz) || 1);
               const nx = mnx * invN;
               const ny = mny * invN;
@@ -2219,7 +2364,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                   const specPow =
                     waterW * (Math.pow(ndoth, 24) * 0.58) +
                     iceW * (Math.pow(ndoth, 16) * (isTholinSpec ? 0.18 : 0.30));
-                  const spec = specPow * shadowAtten;
+                  const spec = specPow * shadowAtten * bumpAtten;
                   r += (isTholinSpec ? 245 : 230) * spec;
                   g += (isTholinSpec ? 185 : 244) * spec;
                   b += (isTholinSpec ? 120 : 255) * spec;
@@ -2246,6 +2391,40 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           }
           wx += dwx;
           wz += dwz;
+        }
+      }
+
+      // Step 3C: Depth-discontinuity silhouette & high-contrast edge anti-aliasing pass
+      for (let py = 1; py < H - 1; py++) {
+        const row = py * W;
+        for (let px = 1; px < W - 1; px++) {
+          const idx = row + px;
+          const c0 = colorBuffer[idx];
+          if (c0 === 0) continue;
+          const z0 = zBuffer[idx];
+          const zU = zBuffer[idx - W];
+          const zD = zBuffer[idx + W];
+          const zL = zBuffer[idx - 1];
+          const zR = zBuffer[idx + 1];
+          // Smooth pixels along 3D terrain ridge silhouettes or sky transitions
+          if (
+            Math.abs(z0 - zU) > 0.08 ||
+            Math.abs(z0 - zD) > 0.08 ||
+            Math.abs(z0 - zL) > 0.08 ||
+            Math.abs(z0 - zR) > 0.08
+          ) {
+            const cU = colorBuffer[idx - W] || c0;
+            const cD = colorBuffer[idx + W] || c0;
+            const cL = colorBuffer[idx - 1] || c0;
+            const cR = colorBuffer[idx + 1] || c0;
+            const rAvg = ((c0 & 255) * 4 + (cU & 255) + (cD & 255) + (cL & 255) + (cR & 255)) >> 3;
+            const gAvg = (((c0 >> 8) & 255) * 4 + ((cU >> 8) & 255) + ((cD >> 8) & 255) + ((cL >> 8) & 255) + ((cR >> 8) & 255)) >> 3;
+            const bAvg = (((c0 >> 16) & 255) * 4 + ((cU >> 16) & 255) + ((cD >> 16) & 255) + ((cL >> 16) & 255) + ((cR >> 16) & 255)) >> 3;
+            const a0 = (c0 >>> 24) & 255;
+            const aU = (cU >>> 24) & 255;
+            const aAvg = (a0 * 3 + aU) >> 2;
+            colorBuffer[idx] = (aAvg << 24) | (bAvg << 16) | (gAvg << 8) | rAvg;
+          }
         }
       }
 

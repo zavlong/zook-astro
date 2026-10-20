@@ -933,8 +933,10 @@ function hash2D(x: number, y: number, seed: number): number {
 function noise2D(x: number, y: number, seed: number): number {
   const ix = Math.floor(x);
   const iy = Math.floor(y);
-  const fx = (x - ix) * (x - ix) * (3 - 2 * (x - ix));
-  const fy = (y - iy) * (y - iy) * (3 - 2 * (y - iy));
+  const ux = x - ix;
+  const uy = y - iy;
+  const fx = ux * ux * ux * (ux * (ux * 6 - 15) + 10);
+  const fy = uy * uy * uy * (uy * (uy * 6 - 15) + 10);
 
   const n00 = hash2D(ix, iy, seed);
   const n10 = hash2D(ix + 1, iy, seed);
