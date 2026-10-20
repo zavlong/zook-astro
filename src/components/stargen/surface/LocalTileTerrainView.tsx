@@ -209,7 +209,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
   const [rotPitch, setRotPitch] = useState<number>(0.54); // ~31 deg immersive biome tilt
   const [zoom, setZoom] = useState<number>(1.28); // Default zoomed-in so the tile fills the viewport like a full biome
   const verticalExag = 0.6;
-  const [showWireframe, setShowWireframe] = useState<boolean>(false);
+  const [showGeologyPanel, setShowGeologyPanel] = useState<boolean>(false);
   const [showClouds3D, setShowClouds3D] = useState<boolean>(true);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const dragRef = useRef<{
@@ -1844,26 +1844,6 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       ctx.drawImage(offCanvas, 0, 0);
     }
 
-    // Optional diagnostic wireframe overlay if user toggles "Mesh"
-    if (showWireframe) {
-      ctx.save();
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.24)';
-      ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      for (let i = 0; i < triangles.length; i++) {
-        const tri = triangles[i];
-        const p0 = projVerts[tri.v0];
-        const p1 = projVerts[tri.v1];
-        const p2 = projVerts[tri.v2];
-        ctx.moveTo(p0.sx, p0.sy);
-        ctx.lineTo(p1.sx, p1.sy);
-        ctx.lineTo(p2.sx, p2.sy);
-        ctx.closePath();
-      }
-      ctx.stroke();
-      ctx.restore();
-    }
-
     // 4. Draw Goldberg Hex/Pentagon tile boundary contour on the continuous surface
     ctx.save();
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
@@ -1938,7 +1918,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       const nb = neighborTiles[s];
       if (!nb) continue;
 
-      const labelText = `${nb.compass} #${nb.tile.tileId + 1}`;
+      const labelText = nb.compass;
       const metrics = ctx.measureText(labelText);
       const bw = metrics.width + 14;
       const bh = 16;
@@ -1961,7 +1941,6 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     rotPitch,
     zoom,
     verticalExag,
-    showWireframe,
     showClouds3D,
     timeOfDayDeg,
     surfaceModel,
@@ -1985,7 +1964,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             Back to Planetary Grid
           </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="inline-flex items-center -space-x-1">
               <span
                 className="w-3 h-3 rounded-full border border-white/30"
@@ -1999,11 +1978,14 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
               )}
             </span>
             <span className="text-white font-bold text-xs">
-              {moon?.name || planet.planetClass} — Goldberg Tile #{activeTile.tileId + 1} ({activeTile.isPentagon ? 'Pentagon' : 'Hexagon'})
+              {moon?.name || planet.planetClass}
             </span>
-            <span className="text-slate-400 text-[11px]">
-              • {activeTile.biomeName} ({activeTile.centerLat >= 0 ? `${activeTile.centerLat}°N` : `${Math.abs(activeTile.centerLat)}°S`},{' '}
-              {activeTile.centerLon >= 0 ? `${activeTile.centerLon}°E` : `${Math.abs(activeTile.centerLon)}°W`})
+            <span className="text-slate-200 font-semibold text-xs">
+              • {activeTile.biomeName}
+            </span>
+            <span className="px-2 py-0.5 rounded-md bg-sky-950/90 border border-sky-500/60 text-sky-200 font-mono font-bold text-xs tracking-wide shadow-sm">
+              {activeTile.centerLat >= 0 ? `${activeTile.centerLat}°N` : `${Math.abs(activeTile.centerLat)}°S`},{' '}
+              {activeTile.centerLon >= 0 ? `${activeTile.centerLon}°E` : `${Math.abs(activeTile.centerLon)}°W`}
             </span>
           </div>
         </div>
@@ -2056,15 +2038,16 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
 
           <button
             type="button"
-            onClick={() => setShowWireframe((v) => !v)}
+            onClick={() => setShowGeologyPanel((v) => !v)}
             className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
-              showWireframe
-                ? 'bg-indigo-900/60 border-indigo-500/70 text-indigo-200'
-                : 'bg-slate-900 border-slate-700 text-slate-400'
+              showGeologyPanel
+                ? 'bg-amber-900/60 border-amber-500/70 text-amber-200'
+                : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
             }`}
+            title="Toggle Local Geology & Crust Composition Panel"
           >
             <Layers className="w-3 h-3" />
-            Mesh
+            Local Geology
           </button>
 
           <button
@@ -2081,6 +2064,58 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Toggleable Local Geology & Crust Composition Panel */}
+      {showGeologyPanel && (
+        <div className="bg-slate-950/95 border border-amber-500/40 rounded-lg p-3 text-xs text-slate-300 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-0.5">
+              Crust & Bedrock Composition
+            </div>
+            <div className="text-white font-semibold">
+              {surfaceModel.compositionPalette.compositionLabel}
+            </div>
+            <div className="text-[11px] text-slate-400 mt-0.5">
+              {activeTile.featureName}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-sky-400 mb-0.5">
+              Elevation & Relief
+            </div>
+            <div className="text-white font-mono">
+              Mean Elevation: {activeTile.elevationKm >= 0 ? `+${activeTile.elevationKm.toFixed(1)} km` : `${activeTile.elevationKm.toFixed(1)} km`}
+            </div>
+            <div className="text-[11px] text-slate-400">
+              Relief Range: {surfaceModel.minElevationKm.toFixed(1)} to +{surfaceModel.maxElevationKm.toFixed(1)} km
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-0.5">
+              Tectonic & Impact Drivers
+            </div>
+            <div className="text-slate-200">
+              Crater Preservation: <span className="font-mono text-white">{Math.round(activeTile.craterIntensity * 100)}%</span>
+            </div>
+            <div className="text-slate-200">
+              Volcanic / Tectonic: <span className="font-mono text-white">{Math.round(Math.max(activeTile.volcanoIntensity, activeTile.fractureIntensity) * 100)}%</span>
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-purple-400 mb-0.5">
+              Surface Solvent & Biosphere
+            </div>
+            <div className="text-slate-200">
+              Liquid Solvent: <span className="text-white font-semibold">{surfaceModel.hasLiquid ? surfaceModel.seaPalette.displayName : 'None (Dry)'}</span>
+            </div>
+            {surfaceModel.floraPalette.hasAnyLife && (
+              <div className="text-[11px] text-emerald-300">
+                Pigment: {surfaceModel.floraPalette.pigmentName}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main 3D Biome Block Viewport + Neighbor Navigation Sidebar */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
@@ -2136,16 +2171,13 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Linked Adjacent Goldberg Tiles & Local Geomorphology */}
+        {/* Right Column: Linked Adjacent Tiles */}
         <div className="bg-slate-950/90 rounded-lg border border-slate-800 p-3 flex flex-col justify-between gap-3">
           <div>
-            <div className="text-xs font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+            <div className="text-xs font-bold text-sky-400 tracking-wide flex items-center gap-1.5 mb-2.5">
               <Compass className="w-3.5 h-3.5" />
-              Adjacent Planetary Tiles ({neighborTiles.length})
+              Adjacent Tiles (Click to travel)
             </div>
-            <p className="text-[11px] text-slate-400 mb-2.5 leading-relaxed">
-              Border elevations and biome transitions blend continuously into neighboring Goldberg cells. Click any adjacent tile to traverse across the planet:
-            </p>
 
             <div className="flex flex-col gap-1.5">
               {neighborTiles.map((nb) => (
@@ -2172,7 +2204,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                       )}
                     </span>
                     <span className="text-[11px] text-slate-200 font-medium truncate group-hover:text-white">
-                      #{nb.tile.tileId + 1} {nb.tile.biomeName}
+                      {nb.tile.biomeName}
                     </span>
                   </div>
                   <span className="text-[10px] text-slate-400 font-mono shrink-0 ml-1">
@@ -2180,33 +2212,6 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                   </span>
                 </button>
               ))}
-            </div>
-          </div>
-
-          {/* Local Tile Geomorphology Summary */}
-          <div className="border-t border-slate-800/80 pt-2.5 text-[11px] text-slate-400 space-y-1">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
-              Tile Geomorphology & Drivers
-            </div>
-            <div className="flex justify-between">
-              <span>Elevation Anomaly:</span>
-              <span className="text-slate-200 font-mono">
-                {activeTile.elevationKm >= 0 ? `+${activeTile.elevationKm.toFixed(1)} km` : `${activeTile.elevationKm.toFixed(1)} km`}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span>Crater Preservation:</span>
-              <span className="text-slate-200 font-mono">{Math.round(activeTile.craterIntensity * 100)}%</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Volcanic / Tectonic:</span>
-              <span className="text-slate-200 font-mono">
-                {Math.round(Math.max(activeTile.volcanoIntensity, activeTile.fractureIntensity) * 100)}%
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span>Cloud / Storm Cover:</span>
-              <span className="text-slate-200 font-mono">{Math.round(activeTile.cloudCover * 100)}%</span>
             </div>
           </div>
         </div>

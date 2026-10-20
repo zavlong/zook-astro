@@ -4408,62 +4408,69 @@ export function sampleSurfacePoint(
     biomeName = 'Active Volcanic Lava Caldera';
     biomeColor = '#fbbf24';
   } else if (volcVal > 0.38) {
-    biomeName = 'Volcanic Shield Cone (Basalt Edifice)';
+    biomeName = 'Volcanic Shield Cone';
     biomeColor = '#4a2518';
   } else if (isOcean) {
     const pal = model.seaPalette;
     const fp = model.floraPalette;
     const isAmmoniaLife = pal.solventKey === 'NH3-H2O' && fp.hasAnyLife;
     const isElevatedMeltPond = model.isIcyWorld && hNorm >= model.seaLevelNormalized;
+    const solventLabel =
+      pal.solventKey === 'H2O' || pal.solventKey === 'H2O + CO2'
+        ? 'Water'
+        : pal.solventKey === 'NH3-H2O'
+        ? 'Ammonia'
+        : pal.solventKey === 'CH4-C2H6'
+        ? 'Hydrocarbon'
+        : pal.solventKey;
     if (biomeId === 23 && fp.hasAnyLife) {
-      biomeName = isAmmoniaLife
-        ? `Ammoniated Algal Sea (${fp.pigmentName})`
-        : `Algal Sea (${fp.pigmentName})`;
+      biomeName = isAmmoniaLife ? 'Ammoniated Algal Sea' : 'Algal Sea';
       biomeColor = rgbToHex([
         Math.round(pal.shallowRgb[0] * 0.42 + fp.lowRgb[0] * 0.58),
         Math.round(pal.shallowRgb[1] * 0.42 + fp.lowRgb[1] * 0.58),
         Math.round(pal.shallowRgb[2] * 0.42 + fp.lowRgb[2] * 0.58),
       ]);
     } else if (isElevatedMeltPond && (pal.solventKey === 'H2O' || pal.solventKey === 'H2O + CO2')) {
-      biomeName =
-        biomeId === 1 ? 'Deep Meltwater Lake (Liquid H2O)' : 'Surface Meltwater Patch (Liquid H2O)';
+      biomeName = biomeId === 1 ? 'Deep Meltwater Lake' : 'Surface Meltwater Patch';
       biomeColor = rgbToHex(biomeId === 1 ? pal.deepRgb : pal.shallowRgb);
     } else if (biomeId === 0) {
-      biomeName = `Abyssal Trench (${pal.solventKey} Sea)`;
+      biomeName = `Abyssal ${solventLabel} Trench`;
       biomeColor = rgbToHex(pal.trenchRgb);
     } else if (biomeId === 1) {
-      biomeName = `Deep ${pal.solventKey} Ocean`;
+      biomeName = `Deep ${solventLabel} Ocean`;
       biomeColor = rgbToHex(pal.deepRgb);
     } else {
-      biomeName = `Shallow ${pal.solventKey} Shelf`;
+      biomeName = `Shallow ${solventLabel} Sea`;
       biomeColor = rgbToHex(pal.shallowRgb);
     }
   } else if (isBoiledSeaBasin) {
-    biomeName = `Desiccated Evaporite Desert Basin (${model.compositionPalette.compositionLabel})`;
+    biomeName = 'Desiccated Evaporite Desert Basin';
   } else if (biomeId === 15) {
     biomeName =
       model.fractureGrid[idx] > 0.22
-        ? 'Active Magma Rift & Lava Surface (T ≥ 800 K)'
-        : 'Molten Silicate Magma Surface (T ≥ 800 K)';
+        ? 'Active Magma Rift & Lava Surface'
+        : 'Molten Silicate Magma Surface';
     biomeColor = '#ffa21a';
   } else if (biomeId === 14 && isFrozenSea && (model.isMoltenWorld || model.seaPalette.solventKey === 'Silicate Magma')) {
-    biomeName = `Solidified Magma Sea — Basalt Rock Crust (${model.compositionPalette.compositionLabel})`;
+    biomeName = 'Solidified Magma Sea';
   } else if (biomeId === 8 || biomeId === 13) {
     const isTholinIce =
       model.seaPalette.solventKey === 'NH3-H2O' ||
       model.seaPalette.solventKey === 'CH4-C2H6' ||
       model.compositionPalette.compositionLabel.includes('Tholin');
     if (isFrozenSea) {
-      biomeName = isTholinIce
-        ? `Tholin-Coated Sea Ice — ${model.seaPalette.iceBiomeName}`
-        : `Frozen Sea Ice — ${model.seaPalette.iceBiomeName}`;
+      biomeName = isTholinIce ? 'Tholin-Coated Sea Ice' : 'Frozen Sea Ice';
     } else if (model.hasLiquid && !model.isIcyWorld) {
       biomeName =
         biomeId === 13
-          ? `${isTholinIce ? 'Tholin-Coated Glacial Peaks' : 'Alpine Glacial Peaks'} — ${model.seaPalette.iceBiomeName}`
-          : `${isTholinIce ? 'Tholin-Coated Ice Sheet' : 'Glacial Ice Sheet'} — ${model.seaPalette.iceBiomeName}`;
+          ? isTholinIce
+            ? 'Tholin-Coated Glacial Peaks'
+            : 'Alpine Glacial Peaks'
+          : isTholinIce
+          ? 'Tholin-Coated Ice Sheet'
+          : 'Glacial Ice Sheet';
     } else {
-      biomeName = `${biomeDef.name} (${model.compositionPalette.compositionLabel})`;
+      biomeName = biomeDef.name;
     }
   } else if (biomeId >= 3 && biomeId <= 6) {
     // Dynamic flora or sterile regolith biome naming & coloring
@@ -4471,43 +4478,34 @@ export function sampleSurfacePoint(
     const isAmmoniaLife = model.seaPalette.solventKey === 'NH3-H2O' && fp.hasAnyLife;
     if (fp.hasAnyLife) {
       if (biomeId === 3) {
-        biomeName = isAmmoniaLife
-          ? `Cryo-Ammonia Coastal Marsh (${fp.pigmentName})`
-          : `Coastal Marsh & Mangrove Forest (${fp.pigmentName})`;
+        biomeName = isAmmoniaLife ? 'Cryo-Ammonia Coastal Marsh' : 'Coastal Marsh & Mangrove Forest';
         biomeColor = fp.marshHex;
       } else if (biomeId === 4) {
-        biomeName = isAmmoniaLife
-          ? `Cryo-Ammonia Grassland (${fp.pigmentName})`
-          : `Grassland (${fp.pigmentName})`;
+        biomeName = isAmmoniaLife ? 'Cryo-Ammonia Grassland' : 'Grassland';
         biomeColor = fp.plainsHex;
       } else if (biomeId === 5) {
-        biomeName = isAmmoniaLife
-          ? `Cryo-Ammonia Forest (${fp.pigmentName})`
-          : `Forest (${fp.pigmentName})`;
+        biomeName = isAmmoniaLife ? 'Cryo-Ammonia Forest' : 'Forest';
         biomeColor = fp.woodlandHex;
       } else {
-        biomeName = isAmmoniaLife
-          ? `Cryo-Ammonia Boreal Forest (${fp.pigmentName})`
-          : `Boreal Forest (${fp.pigmentName})`;
+        biomeName = isAmmoniaLife ? 'Cryo-Ammonia Boreal Forest' : 'Boreal Forest';
         biomeColor = fp.taigaHex;
       }
     } else {
-      // Sterile world: barren mineral/rocky plains colored by planetary composition
-      biomeName = `${biomeDef.name} (${model.compositionPalette.compositionLabel})`;
+      biomeName = biomeDef.name;
     }
   } else if ((model.isIcyWorld || isFrozenSea) && isIceCell && model.fractureGrid[idx] > 0.28) {
     const isTholinIce =
       model.seaPalette.solventKey === 'NH3-H2O' ||
       model.seaPalette.solventKey === 'CH4-C2H6' ||
       model.compositionPalette.compositionLabel.includes('Tholin');
-    biomeName = isTholinIce ? 'Tholin-Stained Cryotectonic Fissure (Linea)' : 'Cryotectonic Ice Fissure (Linea)';
+    biomeName = isTholinIce ? 'Tholin-Stained Cryotectonic Fissure' : 'Cryotectonic Ice Fissure';
     biomeColor = isTholinIce ? '#6e3219' : '#3b7ea1';
   } else if (model.isIcyWorld && !isIceCell) {
-    biomeName = `Exposed Silicate Bedrock — ${biomeDef.name} (T > 250 K)`;
+    biomeName = `Exposed Silicate Bedrock — ${biomeDef.name}`;
   } else if (model.craterGrid[idx] > 0.35) {
-    biomeName = `${biomeDef.name} (Impact Crater — ${model.compositionPalette.compositionLabel})`;
+    biomeName = `${biomeDef.name} (Impact Crater)`;
   } else {
-    biomeName = `${biomeDef.name} (${model.compositionPalette.compositionLabel})`;
+    biomeName = biomeDef.name;
   }
 
   // Barometric pressure at altitude: P(h) = P0 * exp(-h / H)

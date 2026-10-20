@@ -632,10 +632,12 @@ export function getPlanetaryGoldbergGrid(
       }
     }
 
-    const combinedBiomeName =
-      secondaryBiomeName && secondaryBiomeName !== primaryBiomeName
-        ? `${primaryBiomeName} + ${secondaryBiomeName}`
-        : primaryBiomeName;
+    const combinedBiomeName = formatCombinedTileBiomeName(
+      bestBiome,
+      primaryBiomeName,
+      secondaryBiomeId,
+      secondaryBiomeName
+    );
 
     const isOcean = !surfaceModel.isNoSurface && (bestBiome <= 2 || bestBiome === 17 || bestBiome === 23);
     const isIce = bestBiome === 8 || bestBiome === 13 || bestBiome === 18 || bestBiome === 21;
@@ -680,7 +682,7 @@ export function getPlanetaryGoldbergGrid(
       craterIntensity: +Math.max(sumCrater[tId] / w, maxCrater[tId] * 0.72).toFixed(2),
       fractureIntensity: +Math.max(sumFracture[tId] / w, maxFracture[tId] * 0.65).toFixed(2),
       volcanoIntensity: +maxVolcano[tId].toFixed(2),
-      featureName: `Tile #${tId + 1} (${cell.isPentagon ? 'Pentagon' : 'Hexagon'}) • ${snappedSample.featureName}`,
+      featureName: snappedSample.featureName,
       neighbors: cell.neighbors,
       neighborAzimuthDeg: cell.neighborAzimuthDeg,
       polygon3D: cell.polygon3D,
@@ -738,10 +740,12 @@ export function getPlanetaryGoldbergGrid(
           tile.secondaryBiomeColor = candSample.biomeColor;
           const rawShare = candW / Math.max(0.001, bestW + candW);
           tile.secondaryBiomeWeight = +Math.max(0.22, Math.min(0.5, rawShare)).toFixed(2);
-          tile.biomeName =
-            tile.secondaryBiomeName && tile.secondaryBiomeName !== tile.primaryBiomeName
-              ? `${tile.primaryBiomeName} + ${tile.secondaryBiomeName}`
-              : tile.primaryBiomeName;
+          tile.biomeName = formatCombinedTileBiomeName(
+            bestBiome,
+            tile.primaryBiomeName,
+            tile.secondaryBiomeId,
+            tile.secondaryBiomeName
+          );
         }
 
         // Orient transitionAngleRad toward the bordering tiles that have higher affinity for secondaryBiomeId
@@ -775,6 +779,24 @@ export function getPlanetaryGoldbergGrid(
 
 function isOceanBiomeId(id: number): boolean {
   return id <= 2 || id === 17 || id === 23;
+}
+
+function formatCombinedTileBiomeName(
+  bId1: number,
+  name1: string,
+  bId2: number | null,
+  name2: string | null
+): string {
+  if (bId2 === null || !name2 || name2 === name1) {
+    return name1;
+  }
+  const ocean1 = isOceanBiomeId(bId1);
+  const ocean2 = isOceanBiomeId(bId2);
+  if (ocean1 !== ocean2) {
+    const landName = ocean1 ? name2 : name1;
+    return `${landName} + Coast`;
+  }
+  return `${name1} + ${name2}`;
 }
 
 function isIceBiomeId(id: number): boolean {

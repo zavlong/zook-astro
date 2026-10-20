@@ -8,6 +8,7 @@ import {
   Footprints,
   Plane,
   Hexagon,
+  Layers,
 } from 'lucide-react';
 import { RealisticPlanetBody } from '../../../core/generation/realisticStarGen';
 import { RealisticMoon } from '../../../types/astrophysics';
@@ -193,6 +194,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
 
   const [heightMode, setHeightMode] = useState<CameraHeightMode>('walk');
   const [showClouds, setShowClouds] = useState<boolean>(true);
+  const [showGeologyPanel, setShowGeologyPanel] = useState<boolean>(false);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [hudHeadingDeg, setHudHeadingDeg] = useState<number>(0);
 
@@ -1764,7 +1766,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         if (!bPos || bPos.sx < 45 || bPos.sx > W - 45) continue;
 
         const beaconY = Math.max(38, Math.min(H - 55, clampedHorizon - 28));
-        const label = `${nb.compass} • #${nb.tile.tileId + 1} ${nb.tile.biomeName}`;
+        const label = `${nb.compass} • ${nb.tile.biomeName}`;
         const tw = ctx.measureText(label).width + 18;
         const th = 18;
         const bx = bPos.sx - tw * 0.5;
@@ -1827,7 +1829,11 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
             )}
           </span>
           <span className="text-white font-bold text-xs">
-            First-Person Surface Explorer — Tile #{activeTile.tileId + 1} ({activeTile.biomeName})
+            First-Person Surface Explorer • {activeTile.biomeName}
+          </span>
+          <span className="px-2 py-0.5 rounded-md bg-sky-950/90 border border-sky-500/60 text-sky-200 font-mono font-bold text-xs tracking-wide shadow-sm">
+            {activeTile.centerLat >= 0 ? `${activeTile.centerLat}°N` : `${Math.abs(activeTile.centerLat)}°S`},{' '}
+            {activeTile.centerLon >= 0 ? `${activeTile.centerLon}°E` : `${Math.abs(activeTile.centerLon)}°W`}
           </span>
           <span className="text-sky-400 text-[11px] font-mono">
             • HDG {String(hudHeadingDeg).padStart(3, '0')}° ({compassLabelFromAzimuth(hudHeadingDeg)})
@@ -1887,6 +1893,20 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
             </button>
           )}
 
+          <button
+            type="button"
+            onClick={() => setShowGeologyPanel((v) => !v)}
+            className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
+              showGeologyPanel
+                ? 'bg-amber-900/60 border-amber-500/70 text-amber-200'
+                : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+            }`}
+            title="Toggle Local Geology & Crust Composition Panel"
+          >
+            <Layers className="w-3 h-3" />
+            Local Geology
+          </button>
+
           <div className="flex items-center gap-1">
             <Sun className="w-3.5 h-3.5 text-amber-400" />
             <input
@@ -1926,6 +1946,58 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Toggleable Local Geology & Crust Composition Panel */}
+      {showGeologyPanel && (
+        <div className="bg-slate-950/95 border border-amber-500/40 rounded-lg p-3 text-xs text-slate-300 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-0.5">
+              Crust & Bedrock Composition
+            </div>
+            <div className="text-white font-semibold">
+              {surfaceModel.compositionPalette.compositionLabel}
+            </div>
+            <div className="text-[11px] text-slate-400 mt-0.5">
+              {activeTile.featureName}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-sky-400 mb-0.5">
+              Elevation & Relief
+            </div>
+            <div className="text-white font-mono">
+              Mean Elevation: {activeTile.elevationKm >= 0 ? `+${activeTile.elevationKm.toFixed(1)} km` : `${activeTile.elevationKm.toFixed(1)} km`}
+            </div>
+            <div className="text-[11px] text-slate-400">
+              Relief Range: {surfaceModel.minElevationKm.toFixed(1)} to +{surfaceModel.maxElevationKm.toFixed(1)} km
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-0.5">
+              Tectonic & Impact Drivers
+            </div>
+            <div className="text-slate-200">
+              Crater Preservation: <span className="font-mono text-white">{Math.round(activeTile.craterIntensity * 100)}%</span>
+            </div>
+            <div className="text-slate-200">
+              Volcanic / Tectonic: <span className="font-mono text-white">{Math.round(Math.max(activeTile.volcanoIntensity, activeTile.fractureIntensity) * 100)}%</span>
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-purple-400 mb-0.5">
+              Surface Solvent & Biosphere
+            </div>
+            <div className="text-slate-200">
+              Liquid Solvent: <span className="text-white font-semibold">{surfaceModel.hasLiquid ? surfaceModel.seaPalette.displayName : 'None (Dry)'}</span>
+            </div>
+            {surfaceModel.floraPalette.hasAnyLife && (
+              <div className="text-[11px] text-emerald-300">
+                Pigment: {surfaceModel.floraPalette.pigmentName}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main Interactive First-Person Viewport */}
       <div

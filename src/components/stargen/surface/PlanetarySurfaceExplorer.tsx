@@ -444,7 +444,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             title="Inspect 3D Isometric Terrain Block for the selected Goldberg Tile (or double-click any tile)"
           >
             <Hexagon className="w-3.5 h-3.5" />
-            3D Tile Terrain (#{selectedTile.tileId + 1})
+            3D Tile Terrain
           </button>
 
           <button
@@ -761,12 +761,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       {/* Interactive Surface Site Telemetry Inspector */}
       <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 bg-[#151d2c] p-3 rounded-xl border border-slate-800">
         <div>
-          <span className="text-slate-400 block text-[10px]">
-            {showTileGrid || displayMode === 'terrain' || displayMode === 'horizon'
-              ? `GOLDBERG TILE #${activeInspectedTile.tileId + 1} (${activeInspectedTile.isPentagon ? 'PENT' : 'HEX'})`
-              : 'COORDINATES'}
+          <span className="text-sky-400 font-bold block text-[10px]">
+            COORDINATES
           </span>
-          <b className="text-white text-xs">
+          <b className="text-sky-200 font-mono text-sm">
             {currentTelemetry.lat >= 0 ? `${currentTelemetry.lat}°N` : `${Math.abs(currentTelemetry.lat)}°S`},{' '}
             {currentTelemetry.lon >= 0 ? `${currentTelemetry.lon}°E` : `${Math.abs(currentTelemetry.lon)}°W`}
           </b>
