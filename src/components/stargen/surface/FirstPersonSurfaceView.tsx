@@ -266,7 +266,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       return t * t * (3 - 2 * t);
     };
 
-    const isBiomeOcean = (id: number) => !surfaceModel.isNoSurface && id <= 2;
+    const isBiomeOcean = (id: number) => !surfaceModel.isNoSurface && (id <= 2 || id === 17);
     const isBiomeIce = (id: number) => id === 8 || id === 13 || id === 18 || id === 21;
     const anyOceanBiome = isBiomeOcean(bId1) || (bId2 !== null && isBiomeOcean(bId2));
 
@@ -293,16 +293,6 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         });
       }
     }
-
-    const isRiverBiome = (id: number | null) =>
-      id !== null && !isBiomeOcean(id) && !isBiomeIce(id) && ((id >= 3 && id <= 7) || activeTile.moisture > 0.45);
-    const hasRiverValley =
-      !surfaceModel.isNoSurface &&
-      surfaceModel.hasLiquid &&
-      (isRiverBiome(bId1) || isRiverBiome(bId2));
-    const riverAngle = hash2(31, 37, tileSeed) * Math.PI;
-    const riverCos = Math.cos(riverAngle);
-    const riverSin = Math.sin(riverAngle);
 
     const baseHex1 =
       activeTile.biomeColor ||
@@ -351,17 +341,22 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       ridge: number,
       fine: number
     ): number => {
-      let h = isBiomeOcean(bId) ? Math.min(-0.04, macroH * 0.45) : Math.max(0.02, macroH * 0.52);
+      if (isBiomeOcean(bId)) {
+        const seamount = ridge > 0.72 ? (ridge - 0.72) * 0.25 : 0;
+        return Math.min(-0.028, Math.min(-0.035, macroH * 0.48) + (baseFbm - 0.52) * 0.18 + seamount + fine * 0.018);
+      }
+
+      let h = Math.max(0.065, macroH * 0.52 + 0.065);
 
       if (bId === 12 || bId === 13) {
-        h += ridge * 0.38 + baseFbm * 0.16 - 0.1 + fine * 0.045;
+        h += ridge * 0.38 + baseFbm * 0.16 - 0.06 + fine * 0.045;
       } else if (bId === 11) {
         const raw = baseFbm * 1.18 + fine * 0.08;
         const steps = 5;
         const stepped = (Math.floor(raw * steps) + Math.pow((raw * steps) % 1, 3.5)) / steps;
         const gorge = Math.abs(wx * 0.85 - wz * 0.52 + Math.sin(wz * 4.5) * 0.14);
-        const gorgeCarve = gorge < 0.13 ? (1.0 - Math.pow(gorge / 0.13, 2)) * 0.22 : 0;
-        h += (stepped - 0.32) * 0.34 - gorgeCarve;
+        const gorgeCarve = gorge < 0.13 ? (1.0 - Math.pow(gorge / 0.13, 2)) * 0.16 : 0;
+        h += (stepped - 0.24) * 0.32 - gorgeCarve;
       } else if (bId === 10) {
         const dunePhase = px * 22.0 + pz * 9.0 + Math.sin(pz * 7.5 + baseFbm * 4.0) * 2.6;
         const duneWave = Math.pow(Math.sin(dunePhase) * 0.5 + 0.5, 1.65);
@@ -370,16 +365,13 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       } else if (bId === 18) {
         const sastrugi = Math.sin(px * 26 + baseFbm * 5) * 0.012;
         h = 0.055 + (ridge - 0.4) * 0.065 + sastrugi;
-      } else if (bId === 16 || bId === 17 || bId === 21) {
+      } else if (bId === 8 || bId === 21) {
         const sastrugi = Math.sin(px * 20 - pz * 12 + baseFbm * 4) * 0.015;
         h += (baseFbm - 0.42) * 0.16 + ridge * 0.09 + sastrugi;
-      } else if (isBiomeOcean(bId)) {
-        const seamount = ridge > 0.68 ? (ridge - 0.68) * 0.35 : 0;
-        h = Math.min(-0.025, macroH * 0.48 + (baseFbm - 0.52) * 0.22 + seamount + fine * 0.02);
       } else {
-        h += (baseFbm - 0.44) * 0.22 + (ridge - 0.45) * 0.11 + fine * 0.028;
+        h += (baseFbm - 0.42) * 0.20 + (ridge - 0.42) * 0.10 + fine * 0.026;
       }
-      return h;
+      return Math.max(0.032, h);
     };
 
     const sampleMacroTerrain = (px: number, pz: number) => {
@@ -391,7 +383,6 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           isCalderaLava: false,
           isLavaRiver: false,
           isFissureFloor: false,
-          isRiverChannel: false,
           baseFbm: bandWave * 0.5 + 0.5,
           ridge: 0.5,
           biomeMix: 0,
@@ -413,30 +404,6 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       if (hasSecondaryBiome && bId2 !== null) {
         const h2 = evalSingleBiomeHeight(bId2, px, pz, wx, wz, baseFbm, ridge, fine);
         hLocal = h1 * (1 - biomeMix) + h2 * biomeMix;
-      }
-
-      let isRiverChannel = false;
-      if (hasRiverValley && hLocal > -0.02) {
-        const uRiver = px * riverCos - pz * riverSin;
-        const vRiver = px * riverSin + pz * riverCos;
-        const meander =
-          Math.sin(uRiver * 5.2 + tileSeed * 0.01) * 0.18 +
-          Math.sin(uRiver * 11.5) * 0.05 +
-          (baseFbm - 0.5) * 0.12;
-        const distMain = Math.abs(vRiver - meander);
-        const tribMeander = uRiver * 0.55 + 0.15 + Math.sin(vRiver * 7.0) * 0.08;
-        const distTrib = vRiver > meander ? Math.abs(uRiver - tribMeander) : 99;
-        const riverDist = Math.min(distMain, distTrib * 1.35);
-
-        const valleyWidth = 0.16;
-        if (riverDist < valleyWidth) {
-          const valleyProfile = 1.0 - Math.pow(riverDist / valleyWidth, 1.8);
-          hLocal -= valleyProfile * 0.14;
-          if (riverDist < 0.036) {
-            isRiverChannel = true;
-            hLocal = Math.min(hLocal, -0.012 - (1.0 - riverDist / 0.036) * 0.025);
-          }
-        }
       }
 
       let craterRimTint = 0;
@@ -506,13 +473,18 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         }
       }
 
+      const oceanWeightAtPoint =
+        (isBiomeOcean(bId1) ? 1 - biomeMix : 0) + (bId2 !== null && isBiomeOcean(bId2) ? biomeMix : 0);
+      if (!anyOceanBiome || oceanWeightAtPoint < 0.45) {
+        hLocal = Math.max(0.012, hLocal);
+      }
+
       return {
         hLocal,
         craterRimTint,
         isCalderaLava,
         isLavaRiver,
         isFissureFloor,
-        isRiverChannel,
         baseFbm,
         ridge,
         biomeMix,
@@ -543,7 +515,6 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         let sp = 0;
         if (sh.isCalderaLava || sh.isLavaRiver) sp |= 1;
         if (sh.isFissureFloor) sp |= 2;
-        if (sh.isRiverChannel) sp |= 4;
         macroSpecialGrid[mIdx] = sp;
       }
     }
@@ -576,7 +547,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       let hDelta = 0;
       let flags = 0;
 
-      const isIceB = isBiomeIce(targetBiomeId) || targetBiomeId === 16 || targetBiomeId === 17;
+      const isIceB = isBiomeIce(targetBiomeId);
       const hasBioB = targetBiomeId >= 3 && targetBiomeId <= 6 && surfaceModel.floraPalette.hasAnyLife;
       const isDesertB = targetBiomeId === 10;
       const isCanyonB = targetBiomeId === 11;
@@ -586,7 +557,8 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         targetBiomeId === 9 ||
         targetBiomeId === 12 ||
         targetBiomeId === 13 ||
-        targetBiomeId === 14;
+        targetBiomeId === 14 ||
+        targetBiomeId === 16;
 
       if (isIceB) {
         flags |= FLAG_ICE_SPEC;
@@ -786,7 +758,6 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         const spMask = macroSpecialGrid[i00] | macroSpecialGrid[i10] | macroSpecialGrid[i01] | macroSpecialGrid[i11];
         const isLavaSpecial = (spMask & 1) !== 0;
         const isFissureFloor = (spMask & 2) !== 0;
-        const isRiverChannel = (spMask & 4) !== 0;
 
         const fine1 = valueNoise2D(px * 28.0, pz * 28.0, tileSeed + 313);
         const fine2 = valueNoise2D(px * 64.0, pz * 64.0, tileSeed + 419);
@@ -809,7 +780,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           g = Math.round(pal.bandDarkRgb[1] + (pal.bandLightRgb[1] - pal.bandDarkRgb[1]) * swirl);
           b = Math.round(pal.bandDarkRgb[2] + (pal.bandLightRgb[2] - pal.bandDarkRgb[2]) * swirl);
         } else {
-          const hasSeaHere = (surfaceModel.hasLiquid || anyOceanBiome || isRiverChannel) && hLocal < 0;
+          const hasSeaHere = anyOceanBiome && hLocal < 0;
           const waterDepth = hasSeaHere ? Math.max(0, -hLocal) : 0;
 
           if (isLavaSpecial || (isFissureFloor && isVolcanicAny)) {
@@ -944,7 +915,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
               g = Math.round(g * (1 - pkT) + (targetPeak[1] + snowGrain) * pkT);
               b = Math.round(b * (1 - pkT) + (targetPeak[2] + snowGrain) * pkT);
               if (activeTile.temperatureK < 308) flags |= FLAG_ICE_SPEC;
-            } else if (hLocal < 0.034 && surfaceModel.hasLiquid && !activeTile.isIce) {
+            } else if (hLocal < 0.034 && anyOceanBiome && surfaceModel.hasLiquid && !activeTile.isIce) {
               const cT = Math.max(0, Math.min(1, (0.034 - hLocal) / 0.034)) * 0.72;
               const sandGrain = grain * 18 + (fine2 - 0.5) * 14;
               r = Math.round(r * (1 - cT) + (alluvialRgb[0] + sandGrain) * cT);

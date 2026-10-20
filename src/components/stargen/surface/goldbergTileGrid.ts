@@ -631,7 +631,7 @@ export function getPlanetaryGoldbergGrid(
         ? `${primaryBiomeName} + ${secondaryBiomeName}`
         : primaryBiomeName;
 
-    const isOcean = !surfaceModel.isNoSurface && bestBiome <= 2;
+    const isOcean = !surfaceModel.isNoSurface && (bestBiome <= 2 || bestBiome === 17);
     const isIce = bestBiome === 8 || bestBiome === 13 || bestBiome === 18 || bestBiome === 21;
     const isLava =
       bestBiome === 15 ||
