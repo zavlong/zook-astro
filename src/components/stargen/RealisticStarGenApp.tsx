@@ -1852,26 +1852,103 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       };
     };
 
-    // Build a closed 3D circle/ellipse SVG path in the Z=0 plane around (cxAU, cyAU)
+    // Fast 2D screen-space circle culling against the [0, viewW] x [0, viewH] viewport
+    const isCircleInViewport = (sx: number, sy: number, radPx: number, pad = 48): boolean =>
+      sx + radPx >= -pad &&
+      sx - radPx <= viewW + pad &&
+      sy + radPx >= -pad &&
+      sy - radPx <= viewH + pad;
+
+    // World-space AU frustum radius around camera for O(1) radial culling of orbits and belts
+    const minPitchScale = Math.max(0.18, Math.abs(cosPitch)) * 0.5;
+    const viewRadiusAU =
+      (Math.hypot(viewW * 0.5, viewH * 0.5) / Math.max(0.05, orreryPxPerAU * minPitchScale)) * 1.35;
+
+    const doesRadialBandIntersectViewport = (
+      centerAU: Vec2AU,
+      rInnerAU: number,
+      rOuterAU: number
+    ): boolean => {
+      const distCamAU = Math.hypot(orreryCamAU.x - centerAU.x, orreryCamAU.y - centerAU.y);
+      return rOuterAU >= distCamAU - viewRadiusAU && rInnerAU <= distCamAU + viewRadiusAU;
+    };
+
+    // Clips a sequence of projected 2D points to the viewport and returns only visible sub-paths
+    const buildClippedScreenPath = (
+      pts: Array<{ x: number; y: number }>,
+      closed: boolean,
+      pad = 260
+    ): string => {
+      if (pts.length === 0) return '';
+      const inBox = (p: { x: number; y: number }) =>
+        p.x >= -pad && p.x <= viewW + pad && p.y >= -pad && p.y <= viewH + pad;
+      const cmds: string[] = [];
+      let penDown = false;
+      const total = closed ? pts.length : pts.length - 1;
+      for (let i = 0; i < total; i++) {
+        const p0 = pts[i];
+        const p1 = pts[(i + 1) % pts.length];
+        if (inBox(p0) || inBox(p1)) {
+          if (!penDown) {
+            cmds.push(`M${p0.x.toFixed(1)},${p0.y.toFixed(1)}`);
+            penDown = true;
+          }
+          cmds.push(`L${p1.x.toFixed(1)},${p1.y.toFixed(1)}`);
+        } else {
+          penDown = false;
+        }
+      }
+      return cmds.join(' ');
+    };
+
+    // Build a 3D circle/ellipse SVG path in the Z=0 plane around (cxAU, cyAU) with O(1) radial & viewport culling
     const build3DCirclePath = (
       cxAU: number,
       cyAU: number,
       radiusAU: number,
       steps = 56,
-      reverse = false
+      reverse = false,
+      forceClosed = false
     ): string => {
-      const pts: string[] = [];
-      for (let i = 0; i <= steps; i++) {
-        const idx = reverse ? steps - i : i;
-        const ang = (idx / steps) * Math.PI * 2;
+      if (!forceClosed && !doesRadialBandIntersectViewport({ x: cxAU, y: cyAU }, radiusAU, radiusAU)) {
+        return '';
+      }
+      const rPx = radiusAU * orreryPxPerAU;
+      if (forceClosed || rPx <= 1600) {
+        const pts: string[] = [];
+        for (let i = 0; i <= steps; i++) {
+          const idx = reverse ? steps - i : i;
+          const ang = (idx / steps) * Math.PI * 2;
+          const p = project3D(
+            cxAU + radiusAU * Math.cos(ang),
+            cyAU + radiusAU * Math.sin(ang),
+            0
+          );
+          pts.push(`${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`);
+        }
+        return pts.join(' ') + ' Z';
+      }
+
+      // High-zoom adaptive angular window around camera
+      const distCamAU = Math.hypot(orreryCamAU.x - cxAU, orreryCamAU.y - cyAU);
+      const camAng = Math.atan2(orreryCamAU.y - cyAU, orreryCamAU.x - cxAU);
+      const halfSpan =
+        distCamAU > viewRadiusAU
+          ? Math.min(Math.PI, Math.asin(Math.min(1, viewRadiusAU / distCamAU)) + 0.12)
+          : Math.PI;
+      const sampleSteps = 48;
+      const projPts: Array<{ x: number; y: number }> = [];
+      for (let i = 0; i <= sampleSteps; i++) {
+        const frac = (i / sampleSteps) * 2 - 1;
+        const ang = camAng + frac * halfSpan;
         const p = project3D(
           cxAU + radiusAU * Math.cos(ang),
           cyAU + radiusAU * Math.sin(ang),
           0
         );
-        pts.push(`${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`);
+        projPts.push({ x: p.x, y: p.y });
       }
-      return pts.join(' ') + ' Z';
+      return buildClippedScreenPath(projPts, false);
     };
 
     // Evaluate a 3D point on an inclined Keplerian orbit around centerAU
@@ -1909,14 +1986,51 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       argPeri: number,
       steps = 64
     ): string => {
-      const pts: string[] = [];
-      for (let i = 0; i <= steps; i++) {
-        const nu = (i / steps) * Math.PI * 2;
-        const pos3 = evalKepler3D(centerAU, a, e, incRad, omegaNode, argPeri, nu);
-        const p = project3D(pos3.wx, pos3.wy, pos3.wz);
-        pts.push(`${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`);
+      const eSafe = clamp(e, 0, 0.92);
+      const rPeri = a * (1 - eSafe);
+      const rApo = a * (1 + eSafe);
+      if (!doesRadialBandIntersectViewport(centerAU, rPeri * Math.cos(incRad), rApo)) {
+        return '';
       }
-      return pts.join(' ') + ' Z';
+      if (rApo * orreryPxPerAU <= 1600) {
+        const pts: string[] = [];
+        for (let i = 0; i <= steps; i++) {
+          const nu = (i / steps) * Math.PI * 2;
+          const pos3 = evalKepler3D(centerAU, a, e, incRad, omegaNode, argPeri, nu);
+          const p = project3D(pos3.wx, pos3.wy, pos3.wz);
+          pts.push(`${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`);
+        }
+        return pts.join(' ') + ' Z';
+      }
+
+      // High-zoom adaptive sampling & viewport clipping so offscreen orbit segments are never rendered
+      const coarseSteps = 72;
+      const cmds: string[] = [];
+      const pad = 220;
+      const inBox = (px: number, py: number) =>
+        px >= -pad && px <= viewW + pad && py >= -pad && py <= viewH + pad;
+
+      for (let i = 0; i < coarseSteps; i++) {
+        const nu0 = (i / coarseSteps) * Math.PI * 2;
+        const nu1 = ((i + 1) / coarseSteps) * Math.PI * 2;
+        const pos0 = evalKepler3D(centerAU, a, e, incRad, omegaNode, argPeri, nu0);
+        const pos1 = evalKepler3D(centerAU, a, e, incRad, omegaNode, argPeri, nu1);
+        const p0 = project3D(pos0.wx, pos0.wy, pos0.wz);
+        const p1 = project3D(pos1.wx, pos1.wy, pos1.wz);
+        const pMidPos = evalKepler3D(centerAU, a, e, incRad, omegaNode, argPeri, 0.5 * (nu0 + nu1));
+        const pMid = project3D(pMidPos.wx, pMidPos.wy, pMidPos.wz);
+
+        if (inBox(p0.x, p0.y) || inBox(p1.x, p1.y) || inBox(pMid.x, pMid.y)) {
+          const subSteps = 8;
+          for (let s = 0; s <= subSteps; s++) {
+            const nu = nu0 + (s / subSteps) * (nu1 - nu0);
+            const ps = evalKepler3D(centerAU, a, e, incRad, omegaNode, argPeri, nu);
+            const pr = project3D(ps.wx, ps.wy, ps.wz);
+            cmds.push(`${s === 0 ? 'M' : 'L'}${pr.x.toFixed(1)},${pr.y.toFixed(1)}`);
+          }
+        }
+      }
+      return cmds.join(' ');
     };
 
     // Compute a clean physical scale bar in AU for the bottom-left overlay
@@ -3354,23 +3468,27 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
               return (
                 <g key={`zone-3d-${zIdx}`}>
-                  {/* 3D Habitable Zone Shaded Annulus */}
+                  {/* 3D Habitable Zone Shaded Annulus (Culled to Viewport) */}
                   {showHZ &&
                     rHZOutPx > rHZInPx &&
                     rHZOutPx > 3 &&
-                    rHZInPx < 60000 && (
+                    rHZInPx < 60000 &&
+                    doesRadialBandIntersectViewport(centerAU, hzInnerClampAU, hzOuterClampAU) &&
+                    (rHZOutPx <= 2800 ? (
                       <path
                         d={`${build3DCirclePath(
                           centerAU.x,
                           centerAU.y,
                           hzOuterClampAU,
                           56,
-                          false
+                          false,
+                          true
                         )} ${build3DCirclePath(
                           centerAU.x,
                           centerAU.y,
                           hzInnerClampAU,
                           56,
+                          true,
                           true
                         )}`}
                         fill="rgba(16, 185, 129, 0.14)"
@@ -3378,31 +3496,54 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                         stroke="rgba(16, 185, 129, 0.35)"
                         strokeWidth={0.9}
                       />
-                    )}
+                    ) : (
+                      <g>
+                        <path
+                          d={build3DCirclePath(centerAU.x, centerAU.y, hzOuterClampAU, 56)}
+                          fill="none"
+                          stroke="rgba(16, 185, 129, 0.45)"
+                          strokeWidth={1.2}
+                          strokeDasharray="6,4"
+                        />
+                        <path
+                          d={build3DCirclePath(centerAU.x, centerAU.y, hzInnerClampAU, 56)}
+                          fill="none"
+                          stroke="rgba(16, 185, 129, 0.45)"
+                          strokeWidth={1.2}
+                          strokeDasharray="6,4"
+                        />
+                      </g>
+                    ))}
 
                   {/* 3D Snow Line Ring */}
-                  {showSnow && rSnowPx > 4 && rSnowPx < 60000 && (
-                    <g>
-                      <path
-                        d={build3DCirclePath(centerAU.x, centerAU.y, z.a_snow, 56)}
-                        fill="none"
-                        stroke="rgba(56, 189, 248, 0.55)"
-                        strokeWidth={1.2}
-                        strokeDasharray="5,5"
-                      />
-                      {showLabels && rSnowPx > 28 && rSnowPx < 2000 && (
-                        <text
-                          x={snowLabelPt.x + 4}
-                          y={snowLabelPt.y - 4}
-                          fill="#38bdf8"
-                          fontSize={8.5}
-                          fontFamily="monospace"
-                        >
-                          ❄️ {z.a_snow.toFixed(2)} AU
-                        </text>
-                      )}
-                    </g>
-                  )}
+                  {showSnow &&
+                    rSnowPx > 4 &&
+                    rSnowPx < 60000 &&
+                    doesRadialBandIntersectViewport(centerAU, z.a_snow, z.a_snow) && (
+                      <g>
+                        <path
+                          d={build3DCirclePath(centerAU.x, centerAU.y, z.a_snow, 56)}
+                          fill="none"
+                          stroke="rgba(56, 189, 248, 0.55)"
+                          strokeWidth={1.2}
+                          strokeDasharray="5,5"
+                        />
+                        {showLabels &&
+                          rSnowPx > 28 &&
+                          rSnowPx < 2000 &&
+                          isCircleInViewport(snowLabelPt.x, snowLabelPt.y, 48, 24) && (
+                            <text
+                              x={snowLabelPt.x + 4}
+                              y={snowLabelPt.y - 4}
+                              fill="#38bdf8"
+                              fontSize={8.5}
+                              fontFamily="monospace"
+                            >
+                              ❄️ {z.a_snow.toFixed(2)} AU
+                            </text>
+                          )}
+                      </g>
+                    )}
 
                   {/* 3D Orbit Curves, 3D Asteroid Belt Swarms & Depth-Sorted 3D Planet Globes */}
                   {(() => {
@@ -3457,6 +3598,16 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                       if (b.kind === 'belt') {
                         if (rOrbitPx > 90000) return null;
                         const beltHalfWidthAU = Math.max(b.a * 0.06, b.beltWidth);
+                        // O(1) radial frustum check: skip entire 165-asteroid loop when belt does not intersect viewport
+                        if (
+                          !doesRadialBandIntersectViewport(
+                            centerAU,
+                            Math.max(0, b.a - beltHalfWidthAU * 1.3),
+                            b.a + beltHalfWidthAU * 1.3
+                          )
+                        ) {
+                          return null;
+                        }
                         const beltHitWidthPx = clamp(
                           beltHalfWidthAU * 2 * orreryPxPerAU,
                           10,
@@ -3486,6 +3637,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
                         const numAsteroids = 165;
                         const asteroidNodes: React.ReactNode[] = [];
+                        const beltSpanPx = beltHalfWidthAU * orreryPxPerAU;
+                        const beltScaleFactor = clamp(Math.pow(beltSpanPx / 18, 0.35), 0.55, 1.55);
                         for (let k = 0; k < numAsteroids; k++) {
                           // Deterministic pseudo-random radial, vertical & angular scatter
                           const h1 =
@@ -3527,13 +3680,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                           const zScatterAU = astPos3.wz + (u2 - 0.5) * 0.04 * aAst * Math.sin(astAngle + k * 0.7);
                           const astProj = project3D(astPos3.wx, astPos3.wy, zScatterAU);
 
+                          // Cull offscreen individual asteroids before mounting SVG nodes
+                          if (!isCircleInViewport(astProj.x, astProj.y, 4, 16)) continue;
+
                           // Small, crisp asteroid rock size that scales gently with belt zoom
-                          const beltSpanPx = beltHalfWidthAU * orreryPxPerAU;
                           const baseRockSz = 0.35 + Math.pow(u3, 2.6) * 0.58;
                           const rockRad = clamp(
-                            baseRockSz *
-                              clamp(Math.pow(beltSpanPx / 18, 0.35), 0.55, 1.55) *
-                              astProj.scale,
+                            baseRockSz * beltScaleFactor * astProj.scale,
                             0.35,
                             1.4
                           );
@@ -3555,6 +3708,20 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             />
                           );
                         }
+
+                        const beltPath =
+                          rOrbitPx <= 3200
+                            ? buildKepler3DPath(
+                                centerAU,
+                                b.a,
+                                0.02,
+                                beltIncRad,
+                                beltNode,
+                                0,
+                                60
+                              )
+                            : '';
+                        if (!beltPath && asteroidNodes.length === 0) return null;
 
                         return (
                           <g
@@ -3586,38 +3753,34 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             }}
                           >
                             {/* Subtle diffuse zodiacal dust glow & wide transparent click hit-ring */}
-                            <path
-                              d={buildKepler3DPath(
-                                centerAU,
-                                b.a,
-                                0.02,
-                                beltIncRad,
-                                beltNode,
-                                0,
-                                60
-                              )}
-                              fill="none"
-                              stroke={
-                                isIceBelt
-                                  ? 'rgba(186, 230, 253, 0.04)'
-                                  : 'rgba(168, 162, 158, 0.04)'
-                              }
-                              strokeWidth={beltHitWidthPx}
-                            />
-                            {/* 165 Individual Small 3D Asteroid Specks */}
-                            {asteroidNodes}
-                            {showLabels && rOrbitPx > 36 && (
-                              <text
-                                x={bLblPt.x}
-                                y={bLblPt.y - 6}
-                                fill="#94a3b8"
-                                fontSize={8.5}
-                                fontFamily="monospace"
-                                textAnchor="middle"
-                              >
-                                #{bIdx + 1} ({b.a.toFixed(2)} AU)
-                              </text>
+                            {beltPath && (
+                              <path
+                                d={beltPath}
+                                fill="none"
+                                stroke={
+                                  isIceBelt
+                                    ? 'rgba(186, 230, 253, 0.04)'
+                                    : 'rgba(168, 162, 158, 0.04)'
+                                }
+                                strokeWidth={beltHitWidthPx}
+                              />
                             )}
+                            {/* Visible Small 3D Asteroid Specks */}
+                            {asteroidNodes}
+                            {showLabels &&
+                              rOrbitPx > 36 &&
+                              isCircleInViewport(bLblPt.x, bLblPt.y, 48, 24) && (
+                                <text
+                                  x={bLblPt.x}
+                                  y={bLblPt.y - 6}
+                                  fill="#94a3b8"
+                                  fontSize={8.5}
+                                  fontFamily="monospace"
+                                  textAnchor="middle"
+                                >
+                                  #{bIdx + 1} ({b.a.toFixed(2)} AU)
+                                </text>
+                              )}
                           </g>
                         );
                       }
@@ -3757,463 +3920,504 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                       const isPlanetSel = isPlanetTracked || isPlanetDossier;
                       const claimInfo = getPlanetClaimInfo(b, zIdx, bIdx);
 
-                      // Actual Procedural Planet Texture from Planet Info View (without baked sprite rings on 3D Orrery):
-                      const planetIconUrl = getProceduralPlanetIconDataUrl(
-                        b,
-                        null,
-                        zoneStar?.colorHex || '#fff4e6',
-                        zoneStar?.Teff || 5778,
-                        0,
-                        144,
-                        0,
-                        0,
-                        false
-                      );
                       const planetImgSize = pRad / 0.44;
                       const ringOffset = b.ringSystem
                         ? pRad * (Math.min(2.3, b.ringSystem.outerRadiusRp) - 1.0)
                         : 0;
 
-                      // Generate 3D Micro-Asteroid Ring Belt particles (split into Back & Front halves for true 3D planet occlusion)
-                      // Ring density (opticalDepth τ & ringClass) is visibly reflected in band opacity, ringlets, speck count, and brightness
-                      const ringBackNodes: React.ReactNode[] = [];
-                      const ringFrontNodes: React.ReactNode[] = [];
-                      if (b.ringSystem && pRad > 2.6) {
-                        const rSys = b.ringSystem;
-                        const tau = rSys.opticalDepth;
-                        // Normalized visual density factor from optical depth τ ∈ [0.04, 2.0]
-                        const densityNorm = clamp(Math.sqrt(tau / 1.45), 0.14, 1.15);
-                        const isMajorRing = tau >= 0.9 || rSys.ringClass.includes('Major');
-                        const isDenseRing =
-                          !isMajorRing &&
-                          (tau >= 0.28 ||
-                            rSys.ringClass.includes('Silicate') ||
-                            rSys.ringClass.includes('Roche'));
+                      // Check if this planet or any of its moons/rings are within the screen viewport:
+                      // If offscreen, skip all procedural texture generation, 195-particle ring math, moon loops, and DOM nodes!
+                      const maxMoonDistPx =
+                        b.moons.length > 0
+                          ? pRad +
+                            ringOffset +
+                            Math.max(4, pRad * (0.55 + (b.moons.length - 1) * 0.38)) +
+                            pRad * 0.35 +
+                            28
+                          : pRad + ringOffset + 28;
+                      const isPlanetSystemVisible = isCircleInViewport(
+                        pProj.x,
+                        pProj.y,
+                        maxMoonDistPx,
+                        64
+                      );
+                      const isPlanetBodyVisible = isCircleInViewport(
+                        pProj.x,
+                        pProj.y,
+                        pRad + ringOffset + 28,
+                        48
+                      );
 
-                        const rInnerPx = pRad * rSys.innerRadiusRp;
-                        const rOuterPx = pRad * Math.min(2.38, rSys.outerRadiusRp);
-                        const tiltY = Math.max(0.24, Math.abs(Math.cos(orreryPitch)));
-                        const ringFrontSign = Math.sin(orreryPitch) < 0 ? -1 : 1;
-                        const ringSeed = zIdx * 997 + bIdx * 313 + Math.round(b.a * 1000);
+                      if (isPlanetSystemVisible) {
+                        // Actual Procedural Planet Texture from Planet Info View (only computed when visible):
+                        const planetIconUrl = isPlanetBodyVisible
+                          ? getProceduralPlanetIconDataUrl(
+                              b,
+                              null,
+                              zoneStar?.colorHex || '#fff4e6',
+                              zoneStar?.Teff || 5778,
+                              0,
+                              144,
+                              0,
+                              0,
+                              false
+                            )
+                          : '';
 
-                        // Scale micro-asteroid speck count strongly with optical depth τ
-                        const speckCount = Math.round(
-                          clamp(22 + tau * 115, 26, 195)
-                        );
+                        // Generate 3D Micro-Asteroid Ring Belt particles (split into Back & Front halves for true 3D planet occlusion)
+                        // Only generated when the planet body & ring system are actually inside the viewport!
+                        const ringBackNodes: React.ReactNode[] = [];
+                        const ringFrontNodes: React.ReactNode[] = [];
+                        if (isPlanetBodyVisible && b.ringSystem && pRad > 2.6) {
+                          const rSys = b.ringSystem;
+                          const tau = rSys.opticalDepth;
+                          // Normalized visual density factor from optical depth τ ∈ [0.04, 2.0]
+                          const densityNorm = clamp(Math.sqrt(tau / 1.45), 0.14, 1.15);
+                          const isMajorRing = tau >= 0.9 || rSys.ringClass.includes('Major');
+                          const isDenseRing =
+                            !isMajorRing &&
+                            (tau >= 0.28 ||
+                              rSys.ringClass.includes('Silicate') ||
+                              rSys.ringClass.includes('Roche'));
 
-                        const baseRingRgb =
-                          rSys.iceFrac >= 0.5
-                            ? '186, 230, 253'
-                            : rSys.metalFrac >= 0.28
-                            ? '212, 212, 216'
-                            : '214, 190, 156';
+                          const rInnerPx = pRad * rSys.innerRadiusRp;
+                          const rOuterPx = pRad * Math.min(2.38, rSys.outerRadiusRp);
+                          const tiltY = Math.max(0.24, Math.abs(Math.cos(orreryPitch)));
+                          const ringFrontSign = Math.sin(orreryPitch) < 0 ? -1 : 1;
+                          const ringSeed = zIdx * 997 + bIdx * 313 + Math.round(b.a * 1000);
 
-                        // Helper to push a 3D ringlet arc split into back (behind planet) and front (in front of planet)
-                        const pushRingletArcs = (
-                          keyPrefix: string,
-                          rx: number,
-                          strokeW: number,
-                          opacity: number
-                        ) => {
-                          if (rx <= 0 || strokeW <= 0.1 || opacity <= 0.01) return;
-                          const ry = rx * tiltY;
-                          const xL = (pProj.x - rx).toFixed(2);
-                          const xR = (pProj.x + rx).toFixed(2);
-                          const yC = pProj.y.toFixed(2);
-                          const rxS = rx.toFixed(2);
-                          const ryS = ry.toFixed(2);
-                          const upperArc = (
-                            <path
-                              key={`${keyPrefix}-upper`}
-                              d={`M ${xL} ${yC} A ${rxS} ${ryS} 0 0 1 ${xR} ${yC}`}
-                              fill="none"
-                              stroke={`rgba(${baseRingRgb}, ${opacity.toFixed(3)})`}
-                              strokeWidth={strokeW}
-                            />
+                          // Scale micro-asteroid speck count strongly with optical depth τ
+                          const speckCount = Math.round(
+                            clamp(22 + tau * 115, 26, 195)
                           );
-                          const lowerArc = (
-                            <path
-                              key={`${keyPrefix}-lower`}
-                              d={`M ${xR} ${yC} A ${rxS} ${ryS} 0 0 1 ${xL} ${yC}`}
-                              fill="none"
-                              stroke={`rgba(${baseRingRgb}, ${opacity.toFixed(3)})`}
-                              strokeWidth={strokeW}
-                            />
-                          );
-                          if (ringFrontSign >= 0) {
-                            ringBackNodes.push(upperArc);
-                            ringFrontNodes.push(lowerArc);
+
+                          const baseRingRgb =
+                            rSys.iceFrac >= 0.5
+                              ? '186, 230, 253'
+                              : rSys.metalFrac >= 0.28
+                              ? '212, 212, 216'
+                              : '214, 190, 156';
+
+                          // Helper to push a 3D ringlet arc split into back (behind planet) and front (in front of planet)
+                          const pushRingletArcs = (
+                            keyPrefix: string,
+                            rx: number,
+                            strokeW: number,
+                            opacity: number
+                          ) => {
+                            if (rx <= 0 || strokeW <= 0.1 || opacity <= 0.01) return;
+                            const ry = rx * tiltY;
+                            const xL = (pProj.x - rx).toFixed(2);
+                            const xR = (pProj.x + rx).toFixed(2);
+                            const yC = pProj.y.toFixed(2);
+                            const rxS = rx.toFixed(2);
+                            const ryS = ry.toFixed(2);
+                            const upperArc = (
+                              <path
+                                key={`${keyPrefix}-upper`}
+                                d={`M ${xL} ${yC} A ${rxS} ${ryS} 0 0 1 ${xR} ${yC}`}
+                                fill="none"
+                                stroke={`rgba(${baseRingRgb}, ${opacity.toFixed(3)})`}
+                                strokeWidth={strokeW}
+                              />
+                            );
+                            const lowerArc = (
+                              <path
+                                key={`${keyPrefix}-lower`}
+                                d={`M ${xR} ${yC} A ${rxS} ${ryS} 0 0 1 ${xL} ${yC}`}
+                                fill="none"
+                                stroke={`rgba(${baseRingRgb}, ${opacity.toFixed(3)})`}
+                                strokeWidth={strokeW}
+                              />
+                            );
+                            if (ringFrontSign >= 0) {
+                              ringBackNodes.push(upperArc);
+                              ringFrontNodes.push(lowerArc);
+                            } else {
+                              ringFrontNodes.push(upperArc);
+                              ringBackNodes.push(lowerArc);
+                            }
+                          };
+
+                          const spanPx = Math.max(1.2, rOuterPx - rInnerPx);
+                          if (isMajorRing) {
+                            // Saturn-class high optical depth: distinct dense inner B-ring and outer A-ring separated by Cassini gap
+                            const innerBandRx = rInnerPx + spanPx * 0.3;
+                            const innerBandW = spanPx * 0.48;
+                            const outerBandRx = rInnerPx + spanPx * 0.81;
+                            const outerBandW = spanPx * 0.28;
+                            const bandAlpha = clamp(0.24 + 0.16 * densityNorm, 0.26, 0.44);
+                            pushRingletArcs('ring-major-B', innerBandRx, innerBandW, bandAlpha);
+                            pushRingletArcs('ring-major-A', outerBandRx, outerBandW, bandAlpha * 0.78);
+                          } else if (isDenseRing) {
+                            // Moderate optical depth: visible rocky/silicate debris band with inner & outer ringlets
+                            const midRx = rInnerPx + spanPx * 0.5;
+                            const bandAlpha = clamp(0.11 + 0.14 * densityNorm, 0.14, 0.25);
+                            pushRingletArcs('ring-dense-main', midRx, spanPx * 0.68, bandAlpha);
                           } else {
-                            ringFrontNodes.push(upperArc);
-                            ringBackNodes.push(lowerArc);
+                            // Faint dusty rings (low optical depth τ < 0.28): gossamer translucent dust track
+                            const midRx = rInnerPx + spanPx * 0.5;
+                            const bandAlpha = clamp(0.03 + 0.06 * densityNorm, 0.035, 0.085);
+                            pushRingletArcs('ring-faint-dust', midRx, spanPx * 0.45, bandAlpha);
                           }
-                        };
 
-                        const spanPx = Math.max(1.2, rOuterPx - rInnerPx);
-                        if (isMajorRing) {
-                          // Saturn-class high optical depth: distinct dense inner B-ring and outer A-ring separated by Cassini gap
-                          const innerBandRx = rInnerPx + spanPx * 0.3;
-                          const innerBandW = spanPx * 0.48;
-                          const outerBandRx = rInnerPx + spanPx * 0.81;
-                          const outerBandW = spanPx * 0.28;
-                          const bandAlpha = clamp(0.24 + 0.16 * densityNorm, 0.26, 0.44);
-                          pushRingletArcs('ring-major-B', innerBandRx, innerBandW, bandAlpha);
-                          pushRingletArcs('ring-major-A', outerBandRx, outerBandW, bandAlpha * 0.78);
-                        } else if (isDenseRing) {
-                          // Moderate optical depth: visible rocky/silicate debris band with inner & outer ringlets
-                          const midRx = rInnerPx + spanPx * 0.5;
-                          const bandAlpha = clamp(0.11 + 0.14 * densityNorm, 0.14, 0.25);
-                          pushRingletArcs('ring-dense-main', midRx, spanPx * 0.68, bandAlpha);
-                        } else {
-                          // Faint dusty rings (low optical depth τ < 0.28): gossamer translucent dust track
-                          const midRx = rInnerPx + spanPx * 0.5;
-                          const bandAlpha = clamp(0.03 + 0.06 * densityNorm, 0.035, 0.085);
-                          pushRingletArcs('ring-faint-dust', midRx, spanPx * 0.45, bandAlpha);
+                          for (let k = 0; k < speckCount; k++) {
+                            const u1 =
+                              (((Math.sin((k + 1) * 12.9898 + ringSeed) * 43758.5453) % 1) + 1) % 1;
+                            const u2 =
+                              (((Math.sin((k + 1) * 78.233 + ringSeed * 1.7) * 43758.5453) % 1) +
+                                1) %
+                              1;
+                            const u3 =
+                              (((Math.sin((k + 1) * 39.425 + ringSeed * 2.3) * 43758.5453) % 1) +
+                                1) %
+                              1;
+
+                            let uRad = u2;
+                            if (isMajorRing && Math.abs(uRad - 0.62) < 0.045) {
+                              uRad = uRad < 0.62 ? 0.56 : 0.68;
+                            } else if (isDenseRing && Math.abs(uRad - 0.62) < 0.025) {
+                              uRad = uRad < 0.62 ? 0.59 : 0.65;
+                            }
+                            const rPx = rInnerPx + uRad * (rOuterPx - rInnerPx);
+                            const keplerRate = 22 / Math.pow(1 + uRad * 0.8, 1.5);
+                            const ang = u1 * Math.PI * 2 + orreryTimeYr * keplerRate;
+                            const sx = pProj.x + rPx * Math.cos(ang);
+                            const sy = pProj.y + rPx * Math.sin(ang) * tiltY;
+
+                            const isIce = u3 < rSys.iceFrac;
+                            const isMetal = !isIce && u3 < rSys.iceFrac + rSys.metalFrac;
+                            const col = isIce
+                              ? '#e0f2fe'
+                              : isMetal
+                              ? '#d4d4d8'
+                              : '#c7b299';
+                            const densitySizeScale = isMajorRing ? 1.15 : isDenseRing ? 0.98 : 0.78;
+                            const speckSz = clamp(
+                              (0.42 + (k % 3) * 0.24) *
+                                clamp(pRad / 14, 0.65, 1.65) *
+                                densitySizeScale,
+                              0.32,
+                              1.65
+                            );
+                            const speckAlpha = clamp(
+                              0.22 + 0.52 * densityNorm + u3 * 0.24,
+                              0.24,
+                              0.98
+                            );
+                            const rotDeg = Math.round(u1 * 360 + orreryTimeYr * 120);
+                            const node = (
+                              <ellipse
+                                key={`ring-speck-${k}`}
+                                cx={sx}
+                                cy={sy}
+                                rx={speckSz * 1.25}
+                                ry={speckSz * 0.78}
+                                transform={`rotate(${rotDeg} ${sx.toFixed(1)} ${sy.toFixed(1)})`}
+                                fill={col}
+                                fillOpacity={speckAlpha}
+                              />
+                            );
+                            if (Math.sin(ang) * ringFrontSign < 0) {
+                              ringBackNodes.push(node);
+                            } else {
+                              ringFrontNodes.push(node);
+                            }
+                          }
                         }
 
-                        for (let k = 0; k < speckCount; k++) {
-                          const u1 =
-                            (((Math.sin((k + 1) * 12.9898 + ringSeed) * 43758.5453) % 1) + 1) % 1;
-                          const u2 =
-                            (((Math.sin((k + 1) * 78.233 + ringSeed * 1.7) * 43758.5453) % 1) +
-                              1) %
-                            1;
-                          const u3 =
-                            (((Math.sin((k + 1) * 39.425 + ringSeed * 2.3) * 43758.5453) % 1) +
-                              1) %
-                            1;
-
-                          let uRad = u2;
-                          if (isMajorRing && Math.abs(uRad - 0.62) < 0.045) {
-                            uRad = uRad < 0.62 ? 0.56 : 0.68;
-                          } else if (isDenseRing && Math.abs(uRad - 0.62) < 0.025) {
-                            uRad = uRad < 0.62 ? 0.59 : 0.65;
-                          }
-                          const rPx = rInnerPx + uRad * (rOuterPx - rInnerPx);
-                          const keplerRate = 22 / Math.pow(1 + uRad * 0.8, 1.5);
-                          const ang = u1 * Math.PI * 2 + orreryTimeYr * keplerRate;
-                          const sx = pProj.x + rPx * Math.cos(ang);
-                          const sy = pProj.y + rPx * Math.sin(ang) * tiltY;
-
-                          const isIce = u3 < rSys.iceFrac;
-                          const isMetal = !isIce && u3 < rSys.iceFrac + rSys.metalFrac;
-                          const col = isIce
-                            ? '#e0f2fe'
-                            : isMetal
-                            ? '#d4d4d8'
-                            : '#c7b299';
-                          const densitySizeScale = isMajorRing ? 1.15 : isDenseRing ? 0.98 : 0.78;
-                          const speckSz = clamp(
-                            (0.42 + (k % 3) * 0.24) *
-                              clamp(pRad / 14, 0.65, 1.65) *
-                              densitySizeScale,
-                            0.32,
-                            1.65
-                          );
-                          const speckAlpha = clamp(
-                            0.22 + 0.52 * densityNorm + u3 * 0.24,
-                            0.24,
-                            0.98
-                          );
-                          const rotDeg = Math.round(u1 * 360 + orreryTimeYr * 120);
-                          const node = (
-                            <ellipse
-                              key={`ring-speck-${k}`}
-                              cx={sx}
-                              cy={sy}
-                              rx={speckSz * 1.25}
-                              ry={speckSz * 0.78}
-                              transform={`rotate(${rotDeg} ${sx.toFixed(1)} ${sy.toFixed(1)})`}
-                              fill={col}
-                              fillOpacity={speckAlpha}
-                            />
-                          );
-                          if (Math.sin(ang) * ringFrontSign < 0) {
-                            ringBackNodes.push(node);
-                          } else {
-                            ringFrontNodes.push(node);
-                          }
-                        }
-                      }
-
-                      // Push planet & moon 3D globes into depth-sorted queue
-                      depthNodes.push({
-                        zCam: pProj.zCam,
-                        key: `planet-node-${zIdx}-${bIdx}`,
-                        node: (
-                          <g key={`planet-fg-${zIdx}-${bIdx}`}>
-                            {/* Moons around planet in 3D: procedural textures from info view */}
-                            {(pRad > 5 || trackedTarget?.kind === 'moon') &&
-                              b.moons.map((m, mIdx) => {
-                                const mSpeed = 12 + mIdx * 5;
-                                const mAngle =
-                                  theta +
-                                  (mIdx * Math.PI * 2) /
-                                    Math.max(1, b.moons.length) +
-                                  orreryTimeYr * mSpeed;
-                                const mDist =
-                                  pRad +
-                                  ringOffset +
-                                  Math.max(4, pRad * (0.55 + mIdx * 0.38));
-                                const mxPos = pProj.x + mDist * Math.cos(mAngle);
-                                const rawCosP = Math.cos(orreryPitch);
-                                const myPos =
-                                  pProj.y +
-                                  mDist *
-                                    Math.sin(mAngle) *
-                                    (rawCosP < 0 ? -1 : 1) *
-                                    Math.max(0.28, Math.abs(rawCosP));
-                                const relMoonRadius = Math.max(
-                                  0.00001,
-                                  m.radiusKm / 6371 / closestPhysRadEarth
-                                );
-                                const moonRadAU = Math.min(
-                                  0.04,
-                                  visualPlanetRadAU *
-                                    0.35 *
-                                    Math.sqrt(relMoonRadius)
-                                );
-                                const mRad = Math.max(
-                                  0.8,
-                                  Math.min(
-                                    pRad * 0.3,
-                                    moonRadAU * orreryPxPerAU * pProj.scale
-                                  )
-                                );
-                                const moonIconUrl =
-                                  getProceduralPlanetIconDataUrl(
-                                    b,
-                                    m,
-                                    zoneStar?.colorHex || '#fff4e6',
-                                    zoneStar?.Teff || 5778,
-                                    mIdx,
-                                    72,
-                                    0,
-                                    0
+                        // Push planet & moon 3D globes into depth-sorted queue
+                        depthNodes.push({
+                          zCam: pProj.zCam,
+                          key: `planet-node-${zIdx}-${bIdx}`,
+                          node: (
+                            <g key={`planet-fg-${zIdx}-${bIdx}`}>
+                              {/* Moons around planet in 3D: procedural textures from info view */}
+                              {(pRad > 5 || trackedTarget?.kind === 'moon') &&
+                                b.moons.map((m, mIdx) => {
+                                  const mSpeed = 12 + mIdx * 5;
+                                  const mAngle =
+                                    theta +
+                                    (mIdx * Math.PI * 2) /
+                                      Math.max(1, b.moons.length) +
+                                    orreryTimeYr * mSpeed;
+                                  const mDist =
+                                    pRad +
+                                    ringOffset +
+                                    Math.max(4, pRad * (0.55 + mIdx * 0.38));
+                                  const mxPos = pProj.x + mDist * Math.cos(mAngle);
+                                  const rawCosP = Math.cos(orreryPitch);
+                                  const myPos =
+                                    pProj.y +
+                                    mDist *
+                                      Math.sin(mAngle) *
+                                      (rawCosP < 0 ? -1 : 1) *
+                                      Math.max(0.28, Math.abs(rawCosP));
+                                  const relMoonRadius = Math.max(
+                                    0.00001,
+                                    m.radiusKm / 6371 / closestPhysRadEarth
                                   );
-                                const moonImgSize = mRad / 0.44;
+                                  const moonRadAU = Math.min(
+                                    0.04,
+                                    visualPlanetRadAU *
+                                      0.35 *
+                                      Math.sqrt(relMoonRadius)
+                                  );
+                                  const mRad = Math.max(
+                                    0.8,
+                                    Math.min(
+                                      pRad * 0.3,
+                                      moonRadAU * orreryPxPerAU * pProj.scale
+                                    )
+                                  );
+                                  const isMoonInView = isCircleInViewport(
+                                    mxPos,
+                                    myPos,
+                                    mRad + 24,
+                                    24
+                                  );
+                                  const moonIconUrl = isMoonInView
+                                    ? getProceduralPlanetIconDataUrl(
+                                        b,
+                                        m,
+                                        zoneStar?.colorHex || '#fff4e6',
+                                        zoneStar?.Teff || 5778,
+                                        mIdx,
+                                        72,
+                                        0,
+                                        0
+                                      )
+                                    : '';
+                                  const moonImgSize = mRad / 0.44;
 
-                                const isMoonTracked =
-                                  trackedTarget?.kind === 'moon' &&
-                                  trackedTarget.zoneIdx === zIdx &&
-                                  trackedTarget.bodyIdx === bIdx &&
-                                  trackedTarget.moonIdx === mIdx;
-                                const isMoonDossier =
-                                  selectedEntity?.kind === 'moon' &&
-                                  selectedEntity.zoneIdx === zIdx &&
-                                  selectedEntity.bodyIdx === bIdx &&
-                                  selectedEntity.moonIdx === mIdx;
-                                const isMoonSel = isMoonTracked || isMoonDossier;
+                                  const isMoonTracked =
+                                    trackedTarget?.kind === 'moon' &&
+                                    trackedTarget.zoneIdx === zIdx &&
+                                    trackedTarget.bodyIdx === bIdx &&
+                                    trackedTarget.moonIdx === mIdx;
+                                  const isMoonDossier =
+                                    selectedEntity?.kind === 'moon' &&
+                                    selectedEntity.zoneIdx === zIdx &&
+                                    selectedEntity.bodyIdx === bIdx &&
+                                    selectedEntity.moonIdx === mIdx;
+                                  const isMoonSel = isMoonTracked || isMoonDossier;
 
-                                return (
-                                  <g
-                                    key={m.id || mIdx}
-                                    className="cursor-pointer"
-                                    onMouseDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (e.shiftKey) {
-                                        handleTrackBody({
-                                          kind: 'moon',
-                                          zoneIdx: zIdx,
-                                          bodyIdx: bIdx,
-                                          moonIdx: mIdx,
-                                        });
-                                      } else {
-                                        handleZoomToEntity({
-                                          kind: 'moon',
-                                          zoneIdx: zIdx,
-                                          bodyIdx: bIdx,
-                                          moonIdx: mIdx,
-                                        });
-                                      }
-                                    }}
-                                    onDoubleClick={(e) => {
-                                      e.stopPropagation();
-                                      if (onOpenSurfaceGen && systemResult) {
-                                        onOpenSurfaceGen({
-                                          planet: b,
-                                          moon: m,
-                                          zone: systemResult.zones[zIdx],
-                                          stars: systemResult.hierarchy.stars,
-                                        });
-                                      } else {
-                                        setSelectedEntity({
-                                          kind: 'moon',
-                                          zoneIdx: zIdx,
-                                          bodyIdx: bIdx,
-                                          moonIdx: mIdx,
-                                        });
-                                      }
-                                    }}
-                                  >
-                                    <title>{`${m.name} (${m.moonClass})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}</title>
-                                    <ellipse
+                                  return (
+                                    <g
+                                      key={m.id || mIdx}
+                                      className="cursor-pointer"
+                                      onMouseDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (e.shiftKey) {
+                                          handleTrackBody({
+                                            kind: 'moon',
+                                            zoneIdx: zIdx,
+                                            bodyIdx: bIdx,
+                                            moonIdx: mIdx,
+                                          });
+                                        } else {
+                                          handleZoomToEntity({
+                                            kind: 'moon',
+                                            zoneIdx: zIdx,
+                                            bodyIdx: bIdx,
+                                            moonIdx: mIdx,
+                                          });
+                                        }
+                                      }}
+                                      onDoubleClick={(e) => {
+                                        e.stopPropagation();
+                                        if (onOpenSurfaceGen && systemResult) {
+                                          onOpenSurfaceGen({
+                                            planet: b,
+                                            moon: m,
+                                            zone: systemResult.zones[zIdx],
+                                            stars: systemResult.hierarchy.stars,
+                                          });
+                                        } else {
+                                          setSelectedEntity({
+                                            kind: 'moon',
+                                            zoneIdx: zIdx,
+                                            bodyIdx: bIdx,
+                                            moonIdx: mIdx,
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      <title>{`${m.name} (${m.moonClass})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}</title>
+                                      <ellipse
+                                        cx={pProj.x}
+                                        cy={pProj.y}
+                                        rx={mDist}
+                                        ry={
+                                          mDist *
+                                          Math.max(
+                                            0.32,
+                                            Math.cos(orreryPitch * 0.78)
+                                          )
+                                        }
+                                        fill="none"
+                                        stroke="rgba(100,116,139,0.28)"
+                                        strokeWidth={0.7}
+                                        strokeDasharray="2,2"
+                                      />
+                                      {isMoonInView && (
+                                        <>
+                                          {isMoonSel && (
+                                            <circle
+                                              cx={mxPos}
+                                              cy={myPos}
+                                              r={mRad + 3.0}
+                                              fill="none"
+                                              stroke="#38bdf8"
+                                              strokeWidth={1.6}
+                                            />
+                                          )}
+                                          <g
+                                            transform={`translate(${mxPos.toFixed(1)}, ${myPos.toFixed(1)})`}
+                                          >
+                                            <image
+                                              href={moonIconUrl}
+                                              x={-moonImgSize / 2}
+                                              y={-moonImgSize / 2}
+                                              width={moonImgSize}
+                                              height={moonImgSize}
+                                              preserveAspectRatio="xMidYMid meet"
+                                            />
+                                          </g>
+                                          {showLabels && (
+                                            <text
+                                              x={mxPos}
+                                              y={myPos - mRad - 3}
+                                              fill="#bae6fd"
+                                              fontSize={9}
+                                              fontFamily="monospace"
+                                              fontWeight="bold"
+                                              textAnchor="middle"
+                                            >
+                                              {m.name || `Moon ${mIdx + 1}`}
+                                            </text>
+                                          )}
+                                        </>
+                                      )}
+                                    </g>
+                                  );
+                                })}
+
+                              {/* Clickable Dynamically-Sized Procedural Planet Globe, Micro-Asteroid Ring Belt & Label */}
+                              {isPlanetBodyVisible && (
+                                <g
+                                  className="cursor-pointer"
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (e.shiftKey) {
+                                      handleTrackBody({
+                                        kind: 'planet',
+                                        zoneIdx: zIdx,
+                                        bodyIdx: bIdx,
+                                      });
+                                    } else {
+                                      handleZoomToEntity({
+                                        kind: 'planet',
+                                        zoneIdx: zIdx,
+                                        bodyIdx: bIdx,
+                                      });
+                                    }
+                                  }}
+                                  onDoubleClick={(e) => {
+                                    e.stopPropagation();
+                                    if (onOpenSurfaceGen && systemResult) {
+                                      onOpenSurfaceGen({
+                                        planet: b,
+                                        moon: null,
+                                        zone: systemResult.zones[zIdx],
+                                        stars: systemResult.hierarchy.stars,
+                                      });
+                                    } else {
+                                      setSelectedEntity({
+                                        kind: 'planet',
+                                        zoneIdx: zIdx,
+                                        bodyIdx: bIdx,
+                                      });
+                                    }
+                                  }}
+                                >
+                                  <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}${b.ringSystem ? `\nRing System: ${b.ringSystem.ringClass} (${b.ringSystem.innerRadiusKm.toLocaleString()}–${b.ringSystem.outerRadiusKm.toLocaleString()} km, ${b.ringSystem.compositionLabel})` : ''}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Planetary Surface Generator`}</title>
+                                  {/* Invisible click target for easy selection */}
+                                  <circle
+                                    cx={pProj.x}
+                                    cy={pProj.y}
+                                    r={Math.max(8, pRad + ringOffset + 3)}
+                                    fill="transparent"
+                                  />
+
+                                  {/* Planet Selection Halo */}
+                                  {isPlanetSel && (
+                                    <circle
                                       cx={pProj.x}
                                       cy={pProj.y}
-                                      rx={mDist}
-                                      ry={
-                                        mDist *
-                                        Math.max(
-                                          0.32,
-                                          Math.cos(orreryPitch * 0.78)
-                                        )
-                                      }
+                                      r={pRad + 3.5}
                                       fill="none"
-                                      stroke="rgba(100,116,139,0.28)"
-                                      strokeWidth={0.7}
-                                      strokeDasharray="2,2"
+                                      stroke="#38bdf8"
+                                      strokeWidth={1.8}
                                     />
-                                    {isMoonSel && (
-                                      <circle
-                                        cx={mxPos}
-                                        cy={myPos}
-                                        r={mRad + 3.0}
-                                        fill="none"
-                                        stroke="#38bdf8"
-                                        strokeWidth={1.6}
-                                      />
-                                    )}
-                                    <g
-                                      transform={`translate(${mxPos.toFixed(1)}, ${myPos.toFixed(1)})`}
-                                    >
-                                      <image
-                                        href={moonIconUrl}
-                                        x={-moonImgSize / 2}
-                                        y={-moonImgSize / 2}
-                                        width={moonImgSize}
-                                        height={moonImgSize}
-                                        preserveAspectRatio="xMidYMid meet"
-                                      />
-                                    </g>
-                                    {showLabels && (
-                                      <text
-                                        x={mxPos}
-                                        y={myPos - mRad - 3}
-                                        fill="#bae6fd"
-                                        fontSize={9}
-                                        fontFamily="monospace"
-                                        fontWeight="bold"
-                                        textAnchor="middle"
-                                      >
-                                        {m.name || `Moon ${mIdx + 1}`}
-                                      </text>
-                                    )}
+                                  )}
+
+                                  {/* Imperial Sovereignty Halo */}
+                                  {claimInfo && (
+                                    <circle
+                                      cx={pProj.x}
+                                      cy={pProj.y}
+                                      r={pRad + 4.5}
+                                      fill="none"
+                                      stroke={claimInfo.empire.color}
+                                      strokeWidth={2.0}
+                                      strokeDasharray={claimInfo.designation === 'Capital' ? undefined : '3,2'}
+                                      opacity={0.9}
+                                    />
+                                  )}
+
+                                  {/* Back-Half of 3D Micro-Asteroid Ring Belt (occluded by planet globe) */}
+                                  {ringBackNodes}
+
+                                  {/* Procedural Planet Globe Texture (from Planet Info View) */}
+                                  <g
+                                    transform={`translate(${pProj.x.toFixed(1)}, ${pProj.y.toFixed(1)})`}
+                                  >
+                                    <image
+                                      href={planetIconUrl}
+                                      x={-planetImgSize / 2}
+                                      y={-planetImgSize / 2}
+                                      width={planetImgSize}
+                                      height={planetImgSize}
+                                      preserveAspectRatio="xMidYMid meet"
+                                    />
                                   </g>
-                                );
-                              })}
 
-                            {/* Clickable Dynamically-Sized Procedural Planet Globe, Micro-Asteroid Ring Belt & Label */}
-                            <g
-                              className="cursor-pointer"
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (e.shiftKey) {
-                                  handleTrackBody({
-                                    kind: 'planet',
-                                    zoneIdx: zIdx,
-                                    bodyIdx: bIdx,
-                                  });
-                                } else {
-                                  handleZoomToEntity({
-                                    kind: 'planet',
-                                    zoneIdx: zIdx,
-                                    bodyIdx: bIdx,
-                                  });
-                                }
-                              }}
-                              onDoubleClick={(e) => {
-                                e.stopPropagation();
-                                if (onOpenSurfaceGen && systemResult) {
-                                  onOpenSurfaceGen({
-                                    planet: b,
-                                    moon: null,
-                                    zone: systemResult.zones[zIdx],
-                                    stars: systemResult.hierarchy.stars,
-                                  });
-                                } else {
-                                  setSelectedEntity({
-                                    kind: 'planet',
-                                    zoneIdx: zIdx,
-                                    bodyIdx: bIdx,
-                                  });
-                                }
-                              }}
-                            >
-                              <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}${b.ringSystem ? `\nRing System: ${b.ringSystem.ringClass} (${b.ringSystem.innerRadiusKm.toLocaleString()}–${b.ringSystem.outerRadiusKm.toLocaleString()} km, ${b.ringSystem.compositionLabel})` : ''}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Planetary Surface Generator`}</title>
-                              {/* Invisible click target for easy selection */}
-                              <circle
-                                cx={pProj.x}
-                                cy={pProj.y}
-                                r={Math.max(8, pRad + ringOffset + 3)}
-                                fill="transparent"
-                              />
+                                  {/* Front-Half of 3D Micro-Asteroid Ring Belt (passing in front of planet globe) */}
+                                  {ringFrontNodes}
 
-                              {/* Planet Selection Halo */}
-                              {isPlanetSel && (
-                                <circle
-                                  cx={pProj.x}
-                                  cy={pProj.y}
-                                  r={pRad + 3.5}
-                                  fill="none"
-                                  stroke="#38bdf8"
-                                  strokeWidth={1.8}
-                                />
-                              )}
-
-                              {/* Imperial Sovereignty Halo */}
-                              {claimInfo && (
-                                <circle
-                                  cx={pProj.x}
-                                  cy={pProj.y}
-                                  r={pRad + 4.5}
-                                  fill="none"
-                                  stroke={claimInfo.empire.color}
-                                  strokeWidth={2.0}
-                                  strokeDasharray={claimInfo.designation === 'Capital' ? undefined : '3,2'}
-                                  opacity={0.9}
-                                />
-                              )}
-
-                              {/* Back-Half of 3D Micro-Asteroid Ring Belt (occluded by planet globe) */}
-                              {ringBackNodes}
-
-                              {/* Procedural Planet Globe Texture (from Planet Info View) */}
-                              <g
-                                transform={`translate(${pProj.x.toFixed(1)}, ${pProj.y.toFixed(1)})`}
-                              >
-                                <image
-                                  href={planetIconUrl}
-                                  x={-planetImgSize / 2}
-                                  y={-planetImgSize / 2}
-                                  width={planetImgSize}
-                                  height={planetImgSize}
-                                  preserveAspectRatio="xMidYMid meet"
-                                />
-                              </g>
-
-                              {/* Front-Half of 3D Micro-Asteroid Ring Belt (passing in front of planet globe) */}
-                              {ringFrontNodes}
-
-                              {/* Planet Label (#num and AU) */}
-                              {showLabels && rOrbitPx > 24 && (
-                                <text
-                                  x={pProj.x}
-                                  y={pProj.y - pRad - 4}
-                                  fill={claimInfo ? claimInfo.empire.color : '#f8fafc'}
-                                  fontSize={clamp(8 + pRad * 0.08, 8, 13)}
-                                  fontWeight="bold"
-                                  fontFamily="monospace"
-                                  textAnchor="middle"
-                                >
-                                  {claimInfo ? (claimInfo.designation === 'Capital' ? '👑 ' : '🚩 ') : ''}#{bIdx + 1} ({b.a.toFixed(2)} AU)
-                                </text>
+                                  {/* Planet Label (#num and AU) */}
+                                  {showLabels && rOrbitPx > 24 && (
+                                    <text
+                                      x={pProj.x}
+                                      y={pProj.y - pRad - 4}
+                                      fill={claimInfo ? claimInfo.empire.color : '#f8fafc'}
+                                      fontSize={clamp(8 + pRad * 0.08, 8, 13)}
+                                      fontWeight="bold"
+                                      fontFamily="monospace"
+                                      textAnchor="middle"
+                                    >
+                                      {claimInfo ? (claimInfo.designation === 'Capital' ? '👑 ' : '🚩 ') : ''}#{bIdx + 1} ({b.a.toFixed(2)} AU)
+                                    </text>
+                                  )}
+                                </g>
                               )}
                             </g>
-                          </g>
-                        ),
-                      });
+                          ),
+                        });
+                      }
 
                       if (!orbitPath3D) return null;
 
@@ -4501,7 +4705,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               );
             })}
 
-            {/* 3. Push All Stars into 3D Depth-Sorted Render Queue (Scaled Below Closest Planet Orbit, No Max Cap) */}
+            {/* 3. Push All Visible Stars into 3D Depth-Sorted Render Queue */}
             {(() => {
               res.hierarchy.stars.forEach((st, sIdx) => {
                 const pos = layout.starPos[st.label] || { x: 0, y: 0 };
@@ -4526,11 +4730,16 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                 const maxStarAU = Math.max(0.008, minOrbitAU * 0.42);
                 const starRadAU = Math.min(starBaseRadAU, maxStarAU);
 
-                // Star expands dynamically as you zoom in:
-                const sRad = Math.max(
+                // Star expands dynamically as you zoom in, capped at 260px so offscreen/huge radial gradients don't stall SVG rasterization:
+                const sRad = clamp(
+                  starRadAU * orreryPxPerAU * sProj.scale,
                   5.0,
-                  starRadAU * orreryPxPerAU * sProj.scale
+                  260
                 );
+                // Cull star completely if its outer corona is outside the viewport
+                if (!isCircleInViewport(sProj.x, sProj.y, sRad * 2.4 + 32, 64)) {
+                  return;
+                }
                 const starGradId = `star-3d-sphere-${sIdx}`;
 
                 depthNodes.push({
