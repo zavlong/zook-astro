@@ -491,7 +491,9 @@ export function getPlanetaryGoldbergGrid(
   const sumMoist = new Float32Array(tileCount);
   const sumCloud = new Float32Array(tileCount);
   const sumCrater = new Float32Array(tileCount);
+  const maxCrater = new Float32Array(tileCount);
   const sumFracture = new Float32Array(tileCount);
+  const maxFracture = new Float32Array(tileCount);
   const maxVolcano = new Float32Array(tileCount);
 
   for (let y = 0; y < 180; y++) {
@@ -516,8 +518,12 @@ export function getPlanetaryGoldbergGrid(
       sumTemp[tId] += surfaceModel.temperatureGrid[idx] * cosLat;
       sumMoist[tId] += surfaceModel.moistureGrid[idx] * cosLat;
       sumCloud[tId] += surfaceModel.cloudGrid[idx] * cosLat;
-      sumCrater[tId] += surfaceModel.craterGrid[idx] * cosLat;
-      sumFracture[tId] += surfaceModel.fractureGrid[idx] * cosLat;
+      const crVal = surfaceModel.craterGrid[idx];
+      sumCrater[tId] += crVal * cosLat;
+      if (crVal > maxCrater[tId]) maxCrater[tId] = crVal;
+      const frVal = surfaceModel.fractureGrid[idx];
+      sumFracture[tId] += frVal * cosLat;
+      if (frVal > maxFracture[tId]) maxFracture[tId] = frVal;
       if (surfaceModel.volcanoGrid[idx] > maxVolcano[tId]) {
         maxVolcano[tId] = surfaceModel.volcanoGrid[idx];
       }
@@ -671,8 +677,8 @@ export function getPlanetaryGoldbergGrid(
       pressureBar: centerSample.pressureBar,
       moisture: +(sumMoist[tId] / w).toFixed(2),
       cloudCover: +(sumCloud[tId] / w).toFixed(2),
-      craterIntensity: +(sumCrater[tId] / w).toFixed(2),
-      fractureIntensity: +(sumFracture[tId] / w).toFixed(2),
+      craterIntensity: +Math.max(sumCrater[tId] / w, maxCrater[tId] * 0.72).toFixed(2),
+      fractureIntensity: +Math.max(sumFracture[tId] / w, maxFracture[tId] * 0.65).toFixed(2),
       volcanoIntensity: +maxVolcano[tId].toFixed(2),
       featureName: `Tile #${tId + 1} (${cell.isPentagon ? 'Pentagon' : 'Hexagon'}) • ${snappedSample.featureName}`,
       neighbors: cell.neighbors,

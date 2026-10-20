@@ -230,24 +230,6 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
     const flagsMap = new Uint8Array(TEX_RES * TEX_RES);
     const cloudMap = new Uint8Array(TEX_RES * TEX_RES);
 
-    // Local craters
-    const craters: { cx: number; cz: number; rad: number; depth: number; hasCentralPeak: boolean }[] = [];
-    if (activeTile.craterIntensity > 0.08 && !surfaceModel.isNoSurface) {
-      const count = Math.min(20, Math.round(activeTile.craterIntensity * 22));
-      for (let c = 0; c < count; c++) {
-        const angle = hash2(c, 1, tileSeed) * Math.PI * 2;
-        const dist = Math.sqrt(hash2(c, 2, tileSeed)) * 0.85;
-        const rad = 0.05 + hash2(c, 3, tileSeed) * 0.16;
-        craters.push({
-          cx: Math.cos(angle) * dist,
-          cz: Math.sin(angle) * dist,
-          rad,
-          depth: rad * (0.34 + hash2(c, 4, tileSeed) * 0.24),
-          hasCentralPeak: rad > 0.13,
-        });
-      }
-    }
-
     // Primary and optional Secondary (ecotone crossing) biome IDs
     const bId1 = activeTile.biomeId;
     const bId2 = activeTile.secondaryBiomeId;
@@ -269,6 +251,54 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
     const isBiomeOcean = (id: number) => !surfaceModel.isNoSurface && (id <= 2 || id === 17);
     const isBiomeIce = (id: number) => id === 8 || id === 13 || id === 18 || id === 21;
     const anyOceanBiome = isBiomeOcean(bId1) || (bId2 !== null && isBiomeOcean(bId2));
+    const isPureOceanTile = isBiomeOcean(bId1) && (bId2 === null || isBiomeOcean(bId2));
+
+    // Effective crater intensity combines tile peak crater score, craterland biome ID, and thin/airless atmosphere
+    const atmoCraterFloor =
+      pBarAtmo < 0.02 ? 0.72 : pBarAtmo < 0.25 ? 0.48 : pBarAtmo < 0.85 ? 0.26 : 0;
+    const effCraterIntensity =
+      !surfaceModel.isNoSurface && !isPureOceanTile && !surfaceModel.isMoltenWorld
+        ? Math.max(
+            activeTile.craterIntensity,
+            bId1 === 16 || bId2 === 16 ? 0.88 : 0,
+            bId1 === 14 || bId2 === 14 ? 0.38 : 0,
+            atmoCraterFloor
+          )
+        : 0;
+
+    // Local multi-scale craters (hero basins + secondary craters)
+    const craters: { cx: number; cz: number; rad: number; depth: number; hasCentralPeak: boolean }[] = [];
+    if (effCraterIntensity > 0.02) {
+      const heroCount = effCraterIntensity > 0.55 ? 3 : effCraterIntensity > 0.22 ? 2 : 1;
+      for (let h = 0; h < heroCount; h++) {
+        const angle = hash2(h, 11, tileSeed) * Math.PI * 2;
+        const dist = (0.18 + hash2(h, 12, tileSeed) * 0.46) * (h === 0 ? 0.8 : 1.0);
+        const rad =
+          (h === 0 ? 0.19 : 0.13) +
+          hash2(h, 13, tileSeed) * (0.09 * Math.min(1, effCraterIntensity + 0.3));
+        craters.push({
+          cx: Math.cos(angle) * dist,
+          cz: Math.sin(angle) * dist,
+          rad,
+          depth: rad * (0.44 + hash2(h, 14, tileSeed) * 0.22),
+          hasCentralPeak: rad > 0.155,
+        });
+      }
+
+      const secondaryCount = Math.min(26, Math.max(4, Math.round(effCraterIntensity * 26)));
+      for (let c = 0; c < secondaryCount; c++) {
+        const angle = hash2(c, 1, tileSeed) * Math.PI * 2;
+        const dist = Math.sqrt(hash2(c, 2, tileSeed)) * 0.85;
+        const rad = 0.05 + Math.pow(hash2(c, 3, tileSeed), 1.35) * 0.145;
+        craters.push({
+          cx: Math.cos(angle) * dist,
+          cz: Math.sin(angle) * dist,
+          rad,
+          depth: rad * (0.38 + hash2(c, 4, tileSeed) * 0.24),
+          hasCentralPeak: rad > 0.13,
+        });
+      }
+    }
 
     // Volcanic cones
     const volcanicCones: { vx: number; vz: number; rad: number; height: number }[] = [];
@@ -380,6 +410,8 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         return {
           hLocal: bandWave * 0.045,
           craterRimTint: 0,
+          craterBowlTint: 0,
+          isOceanPoint: false,
           isCalderaLava: false,
           isLavaRiver: false,
           isFissureFloor: false,
@@ -406,24 +438,36 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         hLocal = h1 * (1 - biomeMix) + h2 * biomeMix;
       }
 
+      const oceanWeightAtPoint =
+        (isBiomeOcean(bId1) ? 1 - biomeMix : 0) + (bId2 !== null && isBiomeOcean(bId2) ? biomeMix : 0);
+      const isOceanPoint = !surfaceModel.isNoSurface && anyOceanBiome && oceanWeightAtPoint >= 0.45;
+      if (!isOceanPoint) {
+        hLocal = Math.max(0.025, hLocal);
+      }
+
       let craterRimTint = 0;
-      for (let c = 0; c < craters.length; c++) {
-        const cr = craters[c];
-        const d = Math.hypot(px - cr.cx, pz - cr.cz);
-        if (d < cr.rad * 1.45) {
-          const u = d / cr.rad;
-          if (u < 0.82) {
-            const bowl = 1.0 - (u / 0.82) * (u / 0.82);
-            hLocal -= cr.depth * bowl;
-            if (cr.hasCentralPeak && u < 0.26) {
-              const pk = 1.0 - (u / 0.26) * (u / 0.26);
-              hLocal += cr.depth * 0.42 * pk;
+      let craterBowlTint = 0;
+      if (!isOceanPoint) {
+        for (let c = 0; c < craters.length; c++) {
+          const cr = craters[c];
+          const d = Math.hypot(px - cr.cx, pz - cr.cz);
+          if (d < cr.rad * 1.55) {
+            const u = d / cr.rad;
+            if (u < 0.82) {
+              const bowl = 1.0 - (u / 0.82) * (u / 0.82);
+              hLocal -= cr.depth * 1.25 * bowl;
+              craterBowlTint = Math.max(craterBowlTint, bowl);
+              if (cr.hasCentralPeak && u < 0.28) {
+                const pk = 1.0 - (u / 0.28) * (u / 0.28);
+                hLocal += cr.depth * 0.58 * pk;
+                craterRimTint = Math.max(craterRimTint, pk * 0.65);
+              }
+            } else if (u < 1.48) {
+              const rimPhase = (u - 0.82) / 0.66;
+              const rim = Math.sin(rimPhase * Math.PI);
+              hLocal += cr.depth * 0.44 * rim;
+              craterRimTint = Math.max(craterRimTint, rim);
             }
-          } else if (u < 1.38) {
-            const rimPhase = (u - 0.82) / 0.56;
-            const rim = Math.sin(rimPhase * Math.PI);
-            hLocal += cr.depth * 0.36 * rim;
-            craterRimTint = Math.max(craterRimTint, rim);
           }
         }
       }
@@ -473,15 +517,11 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         }
       }
 
-      const oceanWeightAtPoint =
-        (isBiomeOcean(bId1) ? 1 - biomeMix : 0) + (bId2 !== null && isBiomeOcean(bId2) ? biomeMix : 0);
-      if (!anyOceanBiome || oceanWeightAtPoint < 0.45) {
-        hLocal = Math.max(0.012, hLocal);
-      }
-
       return {
         hLocal,
         craterRimTint,
+        craterBowlTint,
+        isOceanPoint,
         isCalderaLava,
         isLavaRiver,
         isFissureFloor,
@@ -496,6 +536,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
     const macroFbmGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroRidgeGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroRimGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroBowlGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroShadowGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroMixGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroSpecialGrid = new Uint8Array(MACRO_N * MACRO_N);
@@ -510,11 +551,13 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         macroFbmGrid[mIdx] = sh.baseFbm;
         macroRidgeGrid[mIdx] = sh.ridge;
         macroRimGrid[mIdx] = sh.craterRimTint;
+        macroBowlGrid[mIdx] = sh.craterBowlTint;
         macroShadowGrid[mIdx] = sampleCloudDensityAt(px, pz);
         macroMixGrid[mIdx] = sh.biomeMix;
         let sp = 0;
         if (sh.isCalderaLava || sh.isLavaRiver) sp |= 1;
         if (sh.isFissureFloor) sp |= 2;
+        if (sh.isOceanPoint) sp |= 4;
         macroSpecialGrid[mIdx] = sp;
       }
     }
@@ -661,23 +704,23 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         const cell = cellularFeature2D(px * 22.0, pz * 22.0, tileSeed + 937);
         let microRelief = (fine1 - 0.5) * 22 + (fine2 - 0.5) * 16 + grain * 18;
 
-        if (cell.dist < 0.26) {
-          const uCr = cell.dist / 0.26;
-          if (cell.cellHash > 0.45 && activeTile.craterIntensity > 0.05) {
-            if (uCr < 0.75) {
-              nx -= (cell.dx / 0.26) * 1.25;
-              nz -= (cell.dy / 0.26) * 1.25;
-              microRelief -= (1 - uCr) * 18;
-              hDelta -= (1 - uCr) * 0.008;
+        if (cell.dist < 0.28) {
+          const uCr = cell.dist / 0.28;
+          if (cell.cellHash > 0.32 && effCraterIntensity > 0.04) {
+            if (uCr < 0.76) {
+              nx -= (cell.dx / 0.28) * 1.55;
+              nz -= (cell.dy / 0.28) * 1.55;
+              microRelief -= (1 - uCr) * 24;
+              hDelta -= (1 - uCr) * 0.011;
             } else {
-              nx += (cell.dx / 0.26) * 1.1;
-              nz += (cell.dy / 0.26) * 1.1;
-              microRelief += 14;
-              hDelta += 0.005;
+              nx += (cell.dx / 0.28) * 1.3;
+              nz += (cell.dy / 0.28) * 1.3;
+              microRelief += 18;
+              hDelta += 0.007;
             }
           } else {
-            nx += (cell.dx / 0.26) * 1.2;
-            nz += (cell.dy / 0.26) * 1.2;
+            nx += (cell.dx / 0.28) * 1.2;
+            nz += (cell.dy / 0.28) * 1.2;
             microRelief += (1 - uCr) * 16;
             hDelta += (1 - uCr) * 0.012;
           }
@@ -740,6 +783,11 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           macroRimGrid[i10] * w10 +
           macroRimGrid[i01] * w01 +
           macroRimGrid[i11] * w11;
+        const craterBowlTint =
+          macroBowlGrid[i00] * w00 +
+          macroBowlGrid[i10] * w10 +
+          macroBowlGrid[i01] * w01 +
+          macroBowlGrid[i11] * w11;
         const cShadow =
           macroShadowGrid[i00] * w00 +
           macroShadowGrid[i10] * w10 +
@@ -758,6 +806,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         const spMask = macroSpecialGrid[i00] | macroSpecialGrid[i10] | macroSpecialGrid[i01] | macroSpecialGrid[i11];
         const isLavaSpecial = (spMask & 1) !== 0;
         const isFissureFloor = (spMask & 2) !== 0;
+        const isOceanPoint = (spMask & 4) !== 0;
 
         const fine1 = valueNoise2D(px * 28.0, pz * 28.0, tileSeed + 313);
         const fine2 = valueNoise2D(px * 64.0, pz * 64.0, tileSeed + 419);
@@ -765,8 +814,8 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
 
         const fineRight = valueNoise2D((px + 0.006) * 42.0, pz * 42.0, tileSeed + 313);
         const fineDown = valueNoise2D(px * 42.0, (pz + 0.006) * 42.0, tileSeed + 313);
-        let nx = -dhx + (fine1 - fineRight) * 1.8;
-        let nz = -dhz + (fine1 - fineDown) * 1.8;
+        let nx = -dhx * 1.35 + (fine1 - fineRight) * 1.8;
+        let nz = -dhz * 1.35 + (fine1 - fineDown) * 1.8;
 
         let r = baseRgb1[0];
         let g = baseRgb1[1];
@@ -780,7 +829,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           g = Math.round(pal.bandDarkRgb[1] + (pal.bandLightRgb[1] - pal.bandDarkRgb[1]) * swirl);
           b = Math.round(pal.bandDarkRgb[2] + (pal.bandLightRgb[2] - pal.bandDarkRgb[2]) * swirl);
         } else {
-          const hasSeaHere = anyOceanBiome && hLocal < 0;
+          const hasSeaHere = isOceanPoint && hLocal < 0;
           const waterDepth = hasSeaHere ? Math.max(0, -hLocal) : 0;
 
           if (isLavaSpecial || (isFissureFloor && isVolcanicAny)) {
@@ -915,7 +964,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
               g = Math.round(g * (1 - pkT) + (targetPeak[1] + snowGrain) * pkT);
               b = Math.round(b * (1 - pkT) + (targetPeak[2] + snowGrain) * pkT);
               if (activeTile.temperatureK < 308) flags |= FLAG_ICE_SPEC;
-            } else if (hLocal < 0.034 && anyOceanBiome && surfaceModel.hasLiquid && !activeTile.isIce) {
+            } else if (hLocal < 0.034 && isOceanPoint && surfaceModel.hasLiquid && !activeTile.isIce) {
               const cT = Math.max(0, Math.min(1, (0.034 - hLocal) / 0.034)) * 0.72;
               const sandGrain = grain * 18 + (fine2 - 0.5) * 14;
               r = Math.round(r * (1 - cT) + (alluvialRgb[0] + sandGrain) * cT);
@@ -923,11 +972,35 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
               b = Math.round(b * (1 - cT) + (alluvialRgb[2] + sandGrain * 0.85) * cT);
             }
 
-            if (craterRimTint > 0.04 && surfaceModel.compositionPalette.iceEjectaBoost > 0) {
-              const ej = craterRimTint * surfaceModel.compositionPalette.iceEjectaBoost * (0.45 + fine1 * 0.35);
-              r = Math.min(255, Math.round(r + (238 - r) * ej));
-              g = Math.min(255, Math.round(g + (246 - g) * ej));
-              b = Math.min(255, Math.round(b + (255 - b) * ej));
+            // Impact crater bowl darkening (impact melt & terraced wall strata)
+            if (craterBowlTint > 0.03) {
+              const bowlShade = Math.min(0.68, craterBowlTint * (0.48 + (1 - fine1) * 0.22));
+              const meltR = Math.round(basaltRgb[0] * 0.62 + r * 0.2);
+              const meltG = Math.round(basaltRgb[1] * 0.62 + g * 0.2);
+              const meltB = Math.round(basaltRgb[2] * 0.62 + b * 0.2);
+              r = Math.round(r * (1 - bowlShade) + meltR * bowlShade);
+              g = Math.round(g * (1 - bowlShade) + meltG * bowlShade);
+              b = Math.round(b * (1 - bowlShade) + meltB * bowlShade);
+            }
+
+            // Bright crater rim & radial ejecta blanket rays (rocky breccia + icy ejecta)
+            if (craterRimTint > 0.03) {
+              const iceBoost = surfaceModel.compositionPalette.iceEjectaBoost;
+              const rayPattern = 0.55 + 0.45 * Math.sin(px * 34.0 + pz * 34.0 + fine1 * 5.2);
+              if (iceBoost > 0) {
+                const ej = Math.min(0.85, craterRimTint * (0.38 + iceBoost * 0.45) * rayPattern);
+                r = Math.min(255, Math.round(r + (238 - r) * ej));
+                g = Math.min(255, Math.round(g + (246 - g) * ej));
+                b = Math.min(255, Math.round(b + (255 - b) * ej));
+              } else {
+                const ej = Math.min(0.75, craterRimTint * 0.58 * rayPattern);
+                const ejR = Math.min(255, Math.round(peakRgb[0] * 0.65 + highRgb[0] * 0.35 + 34));
+                const ejG = Math.min(255, Math.round(peakRgb[1] * 0.65 + highRgb[1] * 0.35 + 32));
+                const ejB = Math.min(255, Math.round(peakRgb[2] * 0.65 + highRgb[2] * 0.35 + 28));
+                r = Math.min(255, Math.round(r + (ejR - r) * ej));
+                g = Math.min(255, Math.round(g + (ejG - g) * ej));
+                b = Math.min(255, Math.round(b + (ejB - b) * ej));
+              }
             }
           }
         }

@@ -224,24 +224,6 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       corners.push([Math.cos(ang), Math.sin(ang)]);
     }
 
-    // Generate local craters if tile has craterIntensity > 0.08
-    const craters: { cx: number; cz: number; rad: number; depth: number; hasCentralPeak: boolean }[] = [];
-    if (activeTile.craterIntensity > 0.08 && !surfaceModel.isNoSurface) {
-      const count = Math.min(20, Math.round(activeTile.craterIntensity * 22));
-      for (let c = 0; c < count; c++) {
-        const angle = hash2(c, 1, tileSeed) * Math.PI * 2;
-        const dist = Math.sqrt(hash2(c, 2, tileSeed)) * 0.92;
-        const rad = 0.045 + hash2(c, 3, tileSeed) * 0.16;
-        craters.push({
-          cx: Math.cos(angle) * dist,
-          cz: Math.sin(angle) * dist,
-          rad,
-          depth: rad * (0.34 + hash2(c, 4, tileSeed) * 0.24),
-          hasCentralPeak: rad > 0.13,
-        });
-      }
-    }
-
     // Primary and optional Secondary (ecotone crossing) biome IDs
     const bId1 = activeTile.biomeId;
     const bId2 = activeTile.secondaryBiomeId;
@@ -264,6 +246,54 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const isBiomeOcean = (id: number) => !surfaceModel.isNoSurface && (id <= 2 || id === 17);
     const isBiomeIce = (id: number) => id === 8 || id === 13 || id === 18 || id === 21;
     const anyOceanBiome = isBiomeOcean(bId1) || (bId2 !== null && isBiomeOcean(bId2));
+    const isPureOceanTile = isBiomeOcean(bId1) && (bId2 === null || isBiomeOcean(bId2));
+
+    // Effective crater intensity combines tile peak crater score, craterland biome ID, and thin/airless atmosphere
+    const atmoCraterFloor =
+      pBarAtmo < 0.02 ? 0.72 : pBarAtmo < 0.25 ? 0.48 : pBarAtmo < 0.85 ? 0.26 : 0;
+    const effCraterIntensity =
+      !surfaceModel.isNoSurface && !isPureOceanTile && !surfaceModel.isMoltenWorld
+        ? Math.max(
+            activeTile.craterIntensity,
+            bId1 === 16 || bId2 === 16 ? 0.88 : 0,
+            bId1 === 14 || bId2 === 14 ? 0.38 : 0,
+            atmoCraterFloor
+          )
+        : 0;
+
+    // Generate multi-scale 3D impact craters (hero primary basins + secondary craters)
+    const craters: { cx: number; cz: number; rad: number; depth: number; hasCentralPeak: boolean }[] = [];
+    if (effCraterIntensity > 0.02) {
+      const heroCount = effCraterIntensity > 0.55 ? 3 : effCraterIntensity > 0.22 ? 2 : 1;
+      for (let h = 0; h < heroCount; h++) {
+        const angle = hash2(h, 11, tileSeed) * Math.PI * 2;
+        const dist = (0.14 + hash2(h, 12, tileSeed) * 0.46) * (h === 0 ? 0.75 : 1.0);
+        const rad =
+          (h === 0 ? 0.19 : 0.13) +
+          hash2(h, 13, tileSeed) * (0.09 * Math.min(1, effCraterIntensity + 0.3));
+        craters.push({
+          cx: Math.cos(angle) * dist,
+          cz: Math.sin(angle) * dist,
+          rad,
+          depth: rad * (0.44 + hash2(h, 14, tileSeed) * 0.22),
+          hasCentralPeak: rad > 0.155,
+        });
+      }
+
+      const secondaryCount = Math.min(26, Math.max(4, Math.round(effCraterIntensity * 26)));
+      for (let c = 0; c < secondaryCount; c++) {
+        const angle = hash2(c, 1, tileSeed) * Math.PI * 2;
+        const dist = Math.sqrt(hash2(c, 2, tileSeed)) * 0.88;
+        const rad = 0.045 + Math.pow(hash2(c, 3, tileSeed), 1.35) * 0.145;
+        craters.push({
+          cx: Math.cos(angle) * dist,
+          cz: Math.sin(angle) * dist,
+          rad,
+          depth: rad * (0.38 + hash2(c, 4, tileSeed) * 0.24),
+          hasCentralPeak: rad > 0.13,
+        });
+      }
+    }
 
     // Volcanic cones for volcanic / tectonic worlds (checks both primary and secondary biomes)
     const volcanicCones: { vx: number; vz: number; rad: number; height: number }[] = [];
@@ -386,6 +416,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         return {
           hLocal: bandWave * 0.045,
           craterRimTint: 0,
+          craterBowlTint: 0,
+          isOceanPoint: false,
           isCalderaLava: false,
           isLavaRiver: false,
           isFissureFloor: false,
@@ -415,25 +447,38 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         hLocal = h1 * (1 - biomeMix) + h2 * biomeMix;
       }
 
-      // Carve impact craters with raised ejecta rims and central peaks
+      // Determine whether this point belongs to an ocean/sea biome before carving craters
+      const oceanWeightAtPoint =
+        (isBiomeOcean(bId1) ? 1 - biomeMix : 0) + (bId2 !== null && isBiomeOcean(bId2) ? biomeMix : 0);
+      const isOceanPoint = !surfaceModel.isNoSurface && anyOceanBiome && oceanWeightAtPoint >= 0.45;
+      if (!isOceanPoint) {
+        hLocal = Math.max(0.025, hLocal);
+      }
+
+      // Carve impact craters with deep concave bowls, raised ejecta rims, and central peaks on solid terrain
       let craterRimTint = 0;
-      for (let c = 0; c < craters.length; c++) {
-        const cr = craters[c];
-        const d = Math.hypot(px - cr.cx, pz - cr.cz);
-        if (d < cr.rad * 1.45) {
-          const u = d / cr.rad;
-          if (u < 0.82) {
-            const bowl = 1.0 - (u / 0.82) * (u / 0.82);
-            hLocal -= cr.depth * bowl;
-            if (cr.hasCentralPeak && u < 0.26) {
-              const pk = 1.0 - (u / 0.26) * (u / 0.26);
-              hLocal += cr.depth * 0.42 * pk;
+      let craterBowlTint = 0;
+      if (!isOceanPoint) {
+        for (let c = 0; c < craters.length; c++) {
+          const cr = craters[c];
+          const d = Math.hypot(px - cr.cx, pz - cr.cz);
+          if (d < cr.rad * 1.55) {
+            const u = d / cr.rad;
+            if (u < 0.82) {
+              const bowl = 1.0 - (u / 0.82) * (u / 0.82);
+              hLocal -= cr.depth * 1.25 * bowl;
+              craterBowlTint = Math.max(craterBowlTint, bowl);
+              if (cr.hasCentralPeak && u < 0.28) {
+                const pk = 1.0 - (u / 0.28) * (u / 0.28);
+                hLocal += cr.depth * 0.58 * pk;
+                craterRimTint = Math.max(craterRimTint, pk * 0.65);
+              }
+            } else if (u < 1.48) {
+              const rimPhase = (u - 0.82) / 0.66;
+              const rim = Math.sin(rimPhase * Math.PI);
+              hLocal += cr.depth * 0.44 * rim;
+              craterRimTint = Math.max(craterRimTint, rim);
             }
-          } else if (u < 1.38) {
-            const rimPhase = (u - 0.82) / 0.56;
-            const rim = Math.sin(rimPhase * Math.PI);
-            hLocal += cr.depth * 0.36 * rim;
-            craterRimTint = Math.max(craterRimTint, rim);
           }
         }
       }
@@ -485,16 +530,11 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         }
       }
 
-      // Ensure non-ocean tiles (and land portions of coastal tiles) never drop below sea level to create spurious water
-      const oceanWeightAtPoint =
-        (isBiomeOcean(bId1) ? 1 - biomeMix : 0) + (bId2 !== null && isBiomeOcean(bId2) ? biomeMix : 0);
-      if (!anyOceanBiome || oceanWeightAtPoint < 0.45) {
-        hLocal = Math.max(0.012, hLocal);
-      }
-
       return {
         hLocal,
         craterRimTint,
+        craterBowlTint,
+        isOceanPoint,
         isCalderaLava,
         isLavaRiver,
         isFissureFloor,
@@ -507,11 +547,11 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     // Build 3D vertices and smooth vertex normals strictly within the active tile
     const vertices: LocalVertex[] = [];
     const buildVertex = (px: number, pz: number, edgeFrac: number): LocalVertex => {
-      const { hLocal } = sampleHeightOnly(px, pz);
-      const eps = 0.024;
+      const { hLocal, isOceanPoint } = sampleHeightOnly(px, pz);
+      const eps = 0.022;
       const hx = sampleHeightOnly(px + eps, pz).hLocal;
       const hz = sampleHeightOnly(px, pz + eps).hLocal;
-      const hasSeaHere = !surfaceModel.isNoSurface && anyOceanBiome && hLocal < 0;
+      const hasSeaHere = isOceanPoint && hLocal < 0;
       const rawY = hasSeaHere ? 0 : hLocal;
       // Smoothly meet the y=0 perspective plane right at the tile perimeter so there is no cliff wall at the border
       const edgeTaper = edgeFrac > 0.85 ? Math.max(0, 1.0 - (edgeFrac - 0.85) / 0.15) : 1.0;
@@ -599,6 +639,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const macroFbmGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroRidgeGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroRimGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroBowlGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroShadowGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroMixGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroSpecialGrid = new Uint8Array(MACRO_N * MACRO_N);
@@ -613,11 +654,13 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         macroFbmGrid[mIdx] = sh.baseFbm;
         macroRidgeGrid[mIdx] = sh.ridge;
         macroRimGrid[mIdx] = sh.craterRimTint;
+        macroBowlGrid[mIdx] = sh.craterBowlTint;
         macroShadowGrid[mIdx] = sampleCloudDensityAt(px + 0.08, pz - 0.06);
         macroMixGrid[mIdx] = sh.biomeMix;
         let sp = 0;
         if (sh.isCalderaLava || sh.isLavaRiver) sp |= 1;
         if (sh.isFissureFloor) sp |= 2;
+        if (sh.isOceanPoint) sp |= 4;
         macroSpecialGrid[mIdx] = sp;
       }
     }
@@ -764,21 +807,21 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         const cell = cellularFeature2D(px * 22.0, pz * 22.0, tileSeed + 937);
         let microRelief = (fine1 - 0.5) * 22 + (fine2 - 0.5) * 16 + grain * 18;
 
-        if (cell.dist < 0.26) {
-          const uCr = cell.dist / 0.26;
-          if (cell.cellHash > 0.45 && activeTile.craterIntensity > 0.05) {
-            if (uCr < 0.75) {
-              bumpX -= (cell.dx / 0.26) * 1.35;
-              bumpZ -= (cell.dy / 0.26) * 1.35;
-              microRelief -= (1 - uCr) * 18;
+        if (cell.dist < 0.28) {
+          const uCr = cell.dist / 0.28;
+          if (cell.cellHash > 0.32 && effCraterIntensity > 0.04) {
+            if (uCr < 0.76) {
+              bumpX -= (cell.dx / 0.28) * 1.65;
+              bumpZ -= (cell.dy / 0.28) * 1.65;
+              microRelief -= (1 - uCr) * 24;
             } else {
-              bumpX += (cell.dx / 0.26) * 1.15;
-              bumpZ += (cell.dy / 0.26) * 1.15;
-              microRelief += 14;
+              bumpX += (cell.dx / 0.28) * 1.35;
+              bumpZ += (cell.dy / 0.28) * 1.35;
+              microRelief += 18;
             }
           } else {
-            bumpX += (cell.dx / 0.26) * 1.25;
-            bumpZ += (cell.dy / 0.26) * 1.25;
+            bumpX += (cell.dx / 0.28) * 1.25;
+            bumpZ += (cell.dy / 0.28) * 1.25;
             microRelief += (1 - uCr) * 16;
           }
         }
@@ -841,6 +884,11 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           macroRimGrid[i10] * w10 +
           macroRimGrid[i01] * w01 +
           macroRimGrid[i11] * w11;
+        const craterBowlTint =
+          macroBowlGrid[i00] * w00 +
+          macroBowlGrid[i10] * w10 +
+          macroBowlGrid[i01] * w01 +
+          macroBowlGrid[i11] * w11;
         const cShadow =
           macroShadowGrid[i00] * w00 +
           macroShadowGrid[i10] * w10 +
@@ -860,17 +908,18 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         const spMask = macroSpecialGrid[i00] | macroSpecialGrid[i10] | macroSpecialGrid[i01] | macroSpecialGrid[i11];
         const isLavaSpecial = (spMask & 1) !== 0;
         const isFissureFloor = (spMask & 2) !== 0;
+        const isOceanPoint = (spMask & 4) !== 0;
 
         // High-frequency micro-texture noises at pixel resolution
         const fine1 = valueNoise2D(px * 28.0, pz * 28.0, tileSeed + 313);
         const fine2 = valueNoise2D(px * 64.0, pz * 64.0, tileSeed + 419);
         const grain = hash2(tx, tz, tileSeed + 521) - 0.5;
 
-        // Micro-normal gradient from fine procedural noise
+        // Micro-normal gradient from fine procedural noise + macro crater/hill slope
         const fineRight = valueNoise2D((px + 0.006) * 42.0, pz * 42.0, tileSeed + 313);
         const fineDown = valueNoise2D(px * 42.0, (pz + 0.006) * 42.0, tileSeed + 313);
-        let bumpX = (fine1 - fineRight) * 2.2;
-        let bumpZ = (fine1 - fineDown) * 2.2;
+        let bumpX = -dhx * 1.45 + (fine1 - fineRight) * 2.2;
+        let bumpZ = -dhz * 1.45 + (fine1 - fineDown) * 2.2;
 
         let r = baseRgb1[0];
         let g = baseRgb1[1];
@@ -884,7 +933,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           g = Math.round(pal.bandDarkRgb[1] + (pal.bandLightRgb[1] - pal.bandDarkRgb[1]) * swirl);
           b = Math.round(pal.bandDarkRgb[2] + (pal.bandLightRgb[2] - pal.bandDarkRgb[2]) * swirl);
         } else {
-          const hasSeaHere = anyOceanBiome && hLocal < 0;
+          const hasSeaHere = isOceanPoint && hLocal < 0;
           const waterDepth = hasSeaHere ? Math.max(0, -hLocal) : 0;
 
           if (isLavaSpecial || (isFissureFloor && isVolcanicAny)) {
@@ -1025,7 +1074,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
               g = Math.round(g * (1 - pkT) + (targetPeak[1] + snowGrain) * pkT);
               b = Math.round(b * (1 - pkT) + (targetPeak[2] + snowGrain) * pkT);
               if (activeTile.temperatureK < 308) flags |= FLAG_ICE_SPEC;
-            } else if (hLocal < 0.034 && anyOceanBiome && surfaceModel.hasLiquid && !activeTile.isIce) {
+            } else if (hLocal < 0.034 && isOceanPoint && surfaceModel.hasLiquid && !activeTile.isIce) {
               // Coastal littoral pebble/sand beach bank along water edge
               const cT = Math.max(0, Math.min(1, (0.034 - hLocal) / 0.034)) * 0.72;
               const sandGrain = grain * 18 + (fine2 - 0.5) * 14;
@@ -1034,12 +1083,35 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
               b = Math.round(b * (1 - cT) + (alluvialRgb[2] + sandGrain * 0.85) * cT);
             }
 
-            // Bright crater ejecta blanket rays
-            if (craterRimTint > 0.04 && surfaceModel.compositionPalette.iceEjectaBoost > 0) {
-              const ej = craterRimTint * surfaceModel.compositionPalette.iceEjectaBoost * (0.45 + fine1 * 0.35);
-              r = Math.min(255, Math.round(r + (238 - r) * ej));
-              g = Math.min(255, Math.round(g + (246 - g) * ej));
-              b = Math.min(255, Math.round(b + (255 - b) * ej));
+            // Impact crater bowl darkening (impact melt & terraced wall strata)
+            if (craterBowlTint > 0.03) {
+              const bowlShade = Math.min(0.68, craterBowlTint * (0.48 + (1 - fine1) * 0.22));
+              const meltR = Math.round(basaltRgb[0] * 0.62 + r * 0.2);
+              const meltG = Math.round(basaltRgb[1] * 0.62 + g * 0.2);
+              const meltB = Math.round(basaltRgb[2] * 0.62 + b * 0.2);
+              r = Math.round(r * (1 - bowlShade) + meltR * bowlShade);
+              g = Math.round(g * (1 - bowlShade) + meltG * bowlShade);
+              b = Math.round(b * (1 - bowlShade) + meltB * bowlShade);
+            }
+
+            // Bright crater rim & radial ejecta blanket rays (rocky breccia + icy ejecta)
+            if (craterRimTint > 0.03) {
+              const iceBoost = surfaceModel.compositionPalette.iceEjectaBoost;
+              const rayPattern = 0.55 + 0.45 * Math.sin(px * 34.0 + pz * 34.0 + fine1 * 5.2);
+              if (iceBoost > 0) {
+                const ej = Math.min(0.85, craterRimTint * (0.38 + iceBoost * 0.45) * rayPattern);
+                r = Math.min(255, Math.round(r + (238 - r) * ej));
+                g = Math.min(255, Math.round(g + (246 - g) * ej));
+                b = Math.min(255, Math.round(b + (255 - b) * ej));
+              } else {
+                const ej = Math.min(0.75, craterRimTint * 0.58 * rayPattern);
+                const ejR = Math.min(255, Math.round(peakRgb[0] * 0.65 + highRgb[0] * 0.35 + 34));
+                const ejG = Math.min(255, Math.round(peakRgb[1] * 0.65 + highRgb[1] * 0.35 + 32));
+                const ejB = Math.min(255, Math.round(peakRgb[2] * 0.65 + highRgb[2] * 0.35 + 28));
+                r = Math.min(255, Math.round(r + (ejR - r) * ej));
+                g = Math.min(255, Math.round(g + (ejG - g) * ej));
+                b = Math.min(255, Math.round(b + (ejB - b) * ej));
+              }
             }
           }
         }
