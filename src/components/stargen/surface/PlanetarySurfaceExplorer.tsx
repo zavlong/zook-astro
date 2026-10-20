@@ -2,8 +2,6 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   Map as MapIcon,
   Globe,
-  Compass,
-  Sun,
   Eye,
   Layers,
   Download,
@@ -34,6 +32,7 @@ import {
   PlanetaryGoldbergGrid,
 } from './goldbergTileGrid';
 import { LocalTileTerrainView } from './LocalTileTerrainView';
+import { FirstPersonSurfaceView } from './FirstPersonSurfaceView';
 import { PlanetaryChemistrySection } from './PlanetaryChemistrySection';
 
 interface PlanetarySurfaceExplorerProps {
@@ -58,7 +57,6 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lon: number }>({ lat: 0, lon: 0 });
   const [hoverCoords, setHoverCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [timeOfDayDeg, setTimeOfDayDeg] = useState<number>(45); // 0 = Sunrise, 90 = Noon, 180 = Sunset, 270 = Midnight
-  const [cameraPanDeg, setCameraPanDeg] = useState<number>(0);
   const [showGrid, setShowGrid] = useState<boolean>(false);
   const [showTileGrid, setShowTileGrid] = useState<boolean>(true);
 
@@ -78,7 +76,6 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
   const mapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const globeCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const horizonCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Generate physics surface model
   const surfaceModel = useMemo<PlanetarySurfaceModel>(() => {
@@ -101,9 +98,9 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
   const activeInspectedTile = hoveredTile || selectedTile;
 
-  // Selected telemetry point (snapped to the Goldberg tile when showTileGrid or terrain mode is active)
+  // Selected telemetry point (snapped to the Goldberg tile when showTileGrid or terrain/horizon mode is active)
   const currentTelemetry = useMemo<SurfacePointTelemetry>(() => {
-    if (showTileGrid || displayMode === 'terrain') {
+    if (showTileGrid || displayMode === 'terrain' || displayMode === 'horizon') {
       const t = activeInspectedTile;
       return {
         lat: t.centerLat,
@@ -334,341 +331,6 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     goldbergGrid,
   ]);
 
-  // Render First-Person Horizon Vista Canvas
-  useEffect(() => {
-    if (displayMode !== 'horizon') return;
-    const canvas = horizonCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const w = 720;
-    const h = 420;
-    canvas.width = w;
-    canvas.height = h;
-
-    const horizonY = h * 0.58;
-
-    // 1. Sky Gradient based on Time of Day & Atmosphere
-    const radTOD = (timeOfDayDeg * Math.PI) / 180;
-    const sunAltitude = Math.sin(radTOD); // 1 = noon, 0 = horizon, -1 = night
-    const isNight = sunAltitude < -0.05;
-    const isSunset = Math.abs(sunAltitude) < 0.25;
-
-    const skyGrad = ctx.createLinearGradient(0, 0, 0, horizonY);
-    if (surfaceModel.isNoSurface) {
-      const pal = surfaceModel.atmospherePalette;
-      const topRgb = isNight ? pal.atmoRgb.map((c) => Math.round(c * 0.25)) : pal.atmoRgb;
-      const botRgb = isNight ? pal.bandDarkRgb.map((c) => Math.round(c * 0.35)) : pal.bandLightRgb;
-      skyGrad.addColorStop(0, `rgb(${topRgb[0]}, ${topRgb[1]}, ${topRgb[2]})`);
-      skyGrad.addColorStop(1, `rgb(${botRgb[0]}, ${botRgb[1]}, ${botRgb[2]})`);
-    } else if (isNight) {
-      skyGrad.addColorStop(0, '#020308');
-      skyGrad.addColorStop(1, '#090e1c');
-    } else if (isSunset) {
-      skyGrad.addColorStop(0, '#1c1c38');
-      skyGrad.addColorStop(0.5, '#5c2d38');
-      skyGrad.addColorStop(1, '#d97736');
-    } else {
-      skyGrad.addColorStop(0, surfaceModel.skyColorHex);
-      skyGrad.addColorStop(1, surfaceModel.skyHorizonHex);
-    }
-    ctx.fillStyle = skyGrad;
-    ctx.fillRect(0, 0, w, horizonY);
-
-    // 2. Stars at night or in thin atmosphere
-    const activePressure = surfaceModel.isNoSurface ? 100 : ((moon || planet).pressureBar ?? 0);
-    if (isNight || activePressure < 0.05) {
-      ctx.fillStyle = '#ffffff';
-      const starCount = isNight ? 180 : 80;
-      for (let i = 0; i < starCount; i++) {
-        const sx = ((i * 137.5 + cameraPanDeg * 3) % w + w) % w;
-        const sy = (i * 93.7) % (horizonY - 10);
-        const sSize = i % 3 === 0 ? 1.5 : 0.8;
-        const sAlpha = 0.3 + ((i * 17) % 70) / 100;
-        ctx.globalAlpha = sAlpha;
-        ctx.fillRect(sx, sy, sSize, sSize);
-      }
-      ctx.globalAlpha = 1.0;
-    }
-
-    // 2b. Atmospheric Cloud Layer in Sky (opacity proportional to atmospheric density)
-    if (surfaceModel.cloudOpacity > 0.02) {
-      ctx.save();
-      const cRgb = surfaceModel.atmospherePalette.cloudRgb;
-      const skyCloudAlpha = isNight ? surfaceModel.cloudOpacity * 0.25 : surfaceModel.cloudOpacity * 0.65;
-      ctx.fillStyle = `rgba(${cRgb[0]}, ${cRgb[1]}, ${cRgb[2]}, ${skyCloudAlpha.toFixed(2)})`;
-      for (let c = 0; c < 9; c++) {
-        const cx = (((c * 115 + cameraPanDeg * 2.2) % (w + 160)) + (w + 160)) % (w + 160) - 80;
-        const cy = 38 + (c % 4) * 36;
-        const cw = 95 + (c % 3) * 45;
-        const ch = 14 + (c % 2) * 8;
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, cw, ch, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-    }
-
-    // 3. Planetary Rings in the Sky (Magnificent arch over the horizon)
-    if (surfaceModel.hasRings) {
-      ctx.save();
-      const latRad = (selectedCoords.lat * Math.PI) / 180;
-      const archHeight = horizonY - 40 - Math.abs(Math.sin(latRad)) * 140;
-      const ringAlpha = isNight ? 0.35 : 0.75;
-
-      ctx.strokeStyle = surfaceModel.ringColorHex;
-      ctx.globalAlpha = ringAlpha * Math.min(1.0, surfaceModel.ringTau * 1.5);
-      ctx.lineWidth = 14;
-
-      ctx.beginPath();
-      ctx.moveTo(-50, horizonY + 20);
-      ctx.quadraticCurveTo(w / 2 + Math.sin(latRad) * 60, archHeight, w + 50, horizonY + 20);
-      ctx.stroke();
-
-      // Shadow cast by planet onto rings
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.lineWidth = 16;
-      ctx.beginPath();
-      ctx.arc(w / 2, archHeight, 25, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.restore();
-    }
-
-    // 4. Moons in the Sky
-    surfaceModel.moonsInSky.forEach((m) => {
-      const moonX = (((m.azimuthDeg + cameraPanDeg) % 360) / 360) * w;
-      const moonY = horizonY - (m.altitudeDeg / 90) * (horizonY * 0.85);
-      if (moonY < horizonY) {
-        const radiusPx = Math.max(3, m.angularDiameterDeg * 16);
-        ctx.save();
-        ctx.fillStyle = m.visualColor;
-        ctx.beginPath();
-        ctx.arc(moonX, moonY, radiusPx, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Moon phase shadow
-        ctx.fillStyle = 'rgba(5, 10, 20, 0.75)';
-        ctx.beginPath();
-        ctx.arc(moonX + radiusPx * (1 - m.phase * 2), moonY, radiusPx, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-    });
-
-    // 5. Host Star (Sun) with Solar Glare & Atmospheric Corona
-    if (!isNight) {
-      const sunX = w * 0.5 + Math.cos(radTOD) * (w * 0.4);
-      const sunY = horizonY - sunAltitude * (horizonY * 0.85);
-      const starRadiusPx = Math.max(6, surfaceModel.starAngularDiameterDeg * 18);
-
-      // Glare corona
-      const glareGrad = ctx.createRadialGradient(sunX, sunY, starRadiusPx * 0.5, sunX, sunY, starRadiusPx * 5);
-      glareGrad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
-      glareGrad.addColorStop(0.25, surfaceModel.starColorHex);
-      glareGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-      ctx.fillStyle = glareGrad;
-      ctx.beginPath();
-      ctx.arc(sunX, sunY, starRadiusPx * 5, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Sharp Stellar Disk
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(sunX, sunY, starRadiusPx, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    if (surfaceModel.isNoSurface) {
-      // Gas Giant, Ice Giant, or Supercritical Water World: Continuous swirling cloud deck below horizon (No Solid Surface)
-      const pal = surfaceModel.atmospherePalette;
-      const deckGrad = ctx.createLinearGradient(0, horizonY, 0, h);
-      const lightRgb = isNight ? pal.bandLightRgb.map((c) => Math.round(c * 0.35)) : pal.bandLightRgb;
-      const darkRgb = isNight ? pal.atmoRgb.map((c) => Math.round(c * 0.25)) : pal.atmoRgb;
-      deckGrad.addColorStop(0, `rgb(${lightRgb[0]}, ${lightRgb[1]}, ${lightRgb[2]})`);
-      deckGrad.addColorStop(1, `rgb(${darkRgb[0]}, ${darkRgb[1]}, ${darkRgb[2]})`);
-      ctx.fillStyle = deckGrad;
-      ctx.fillRect(0, horizonY, w, h - horizonY);
-
-      // Swirling cloud bands across the abyssal envelope
-      for (let bIdx = 0; bIdx < 8; bIdx++) {
-        const by = horizonY + 12 + bIdx * 22;
-        ctx.fillStyle =
-          bIdx % 2 === 0
-            ? `rgba(${pal.bandLightRgb[0]}, ${pal.bandLightRgb[1]}, ${pal.bandLightRgb[2]}, ${isNight ? 0.18 : 0.42})`
-            : `rgba(${pal.bandDarkRgb[0]}, ${pal.bandDarkRgb[1]}, ${pal.bandDarkRgb[2]}, ${isNight ? 0.22 : 0.45})`;
-        ctx.beginPath();
-        ctx.moveTo(0, by);
-        for (let x = 0; x <= w; x += 24) {
-          const waveY = by + Math.sin((x + cameraPanDeg * 3 + bIdx * 40) * 0.02) * 8;
-          ctx.lineTo(x, waveY);
-        }
-        ctx.lineTo(w, by + 16);
-        ctx.lineTo(0, by + 16);
-        ctx.closePath();
-        ctx.fill();
-      }
-      return;
-    }
-
-    // 6. Horizon Distant Mountain Ranges & Active Volcano Cones (Backdrop Layer tinted by crust composition)
-    ctx.fillStyle = isNight ? '#0b1320' : surfaceModel.compositionPalette.mountainHex;
-    ctx.beginPath();
-    ctx.moveTo(0, horizonY);
-    for (let x = 0; x <= w; x += 20) {
-      const peakHeight = Math.sin((x + cameraPanDeg) * 0.015) * 35 + Math.sin(x * 0.04) * 15;
-      ctx.lineTo(x, horizonY - Math.max(0, peakHeight));
-    }
-    ctx.lineTo(w, horizonY);
-    ctx.closePath();
-    ctx.fill();
-
-    // 6b. Distant Smoking Volcano Cones with Glowing Lava Calderas on Worlds with Active Geology
-    if (surfaceModel.hasActiveGeology) {
-      const volcPositions = [160, 490];
-      volcPositions.forEach((baseVx, vIdx) => {
-        const vx = (((baseVx - cameraPanDeg * 2.5) % (w + 120)) + (w + 120)) % (w + 120) - 60;
-        const coneH = vIdx === 0 ? 54 : 42;
-        const coneHalfW = vIdx === 0 ? 78 : 62;
-        const calderaHalfW = vIdx === 0 ? 12 : 9;
-
-        // Rising ash/SO2 plume from caldera
-        const plumeGrad = ctx.createRadialGradient(vx, horizonY - coneH - 18, 4, vx, horizonY - coneH - 55, 48);
-        plumeGrad.addColorStop(0, surfaceModel.isMoltenWorld ? 'rgba(251, 146, 60, 0.45)' : 'rgba(148, 163, 184, 0.35)');
-        plumeGrad.addColorStop(1, 'rgba(15, 23, 42, 0)');
-        ctx.fillStyle = plumeGrad;
-        ctx.beginPath();
-        ctx.arc(vx, horizonY - coneH - 32, 48, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Conical volcanic edifice
-        ctx.fillStyle = isNight ? '#090d16' : surfaceModel.compositionPalette.basaltHex;
-        ctx.beginPath();
-        ctx.moveTo(vx - coneHalfW, horizonY);
-        ctx.lineTo(vx - calderaHalfW, horizonY - coneH);
-        ctx.lineTo(vx + calderaHalfW, horizonY - coneH);
-        ctx.lineTo(vx + coneHalfW, horizonY);
-        ctx.closePath();
-        ctx.fill();
-
-        // Glowing yellow-orange summit lava caldera & overflow lava stream
-        ctx.fillStyle = '#fbbf24';
-        ctx.beginPath();
-        ctx.ellipse(vx, horizonY - coneH + 1, calderaHalfW, 3.5, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.strokeStyle = '#ea580c';
-        ctx.lineWidth = 2.2;
-        ctx.beginPath();
-        ctx.moveTo(vx - 2, horizonY - coneH + 3);
-        ctx.quadraticCurveTo(vx + 6, horizonY - coneH * 0.5, vx + 14, horizonY - 8);
-        ctx.lineTo(vx + 14, horizonY - 8);
-        ctx.stroke();
-      });
-    }
-
-    // 7. Midground Hills / Ridges (tinted by crust plateau composition)
-    ctx.fillStyle = isNight ? '#080d17' : surfaceModel.compositionPalette.plateauHex;
-    ctx.beginPath();
-    ctx.moveTo(0, horizonY);
-    for (let x = 0; x <= w; x += 15) {
-      const hillH = Math.sin((x + cameraPanDeg * 1.5) * 0.02) * 22 + Math.cos(x * 0.05) * 10;
-      ctx.lineTo(x, horizonY - Math.max(0, hillH) + 12);
-    }
-    ctx.lineTo(w, horizonY + 25);
-    ctx.lineTo(0, horizonY + 25);
-    ctx.closePath();
-    ctx.fill();
-
-    // 8. Foreground Ground / Ocean Surface
-    const groundGrad = ctx.createLinearGradient(0, horizonY, 0, h);
-    if (currentTelemetry.isOcean) {
-      groundGrad.addColorStop(
-        0,
-        surfaceModel.isMoltenWorld ? '#fbbf24' : isNight ? '#040b17' : surfaceModel.seaPalette.horizonTopHex
-      );
-      groundGrad.addColorStop(
-        1,
-        surfaceModel.isMoltenWorld ? '#ea580c' : isNight ? '#02050d' : surfaceModel.seaPalette.horizonBotHex
-      );
-      ctx.fillStyle = groundGrad;
-      ctx.fillRect(0, horizonY, w, h - horizonY);
-
-      if (!isNight || surfaceModel.isMoltenWorld) {
-        const sunTrailX = w * 0.5 + Math.cos(radTOD) * (w * 0.4);
-        ctx.fillStyle = surfaceModel.isMoltenWorld ? 'rgba(254, 240, 138, 0.45)' : 'rgba(255, 255, 255, 0.25)';
-        for (let y = horizonY + 5; y < h; y += 8) {
-          const waveW = ((y - horizonY) / (h - horizonY)) * 80;
-          ctx.fillRect(sunTrailX - waveW / 2 + Math.sin(y * 0.2) * 5, y, waveW, 2);
-        }
-      }
-    } else {
-      // Solid Land / Ice Shell / Basalt Crust Ground (never defaults to green unless F/G water life)
-      const bColor = currentTelemetry.biomeColor || surfaceModel.floraPalette.plainsHex;
-      groundGrad.addColorStop(0, isNight && !surfaceModel.isMoltenWorld ? '#060a12' : bColor);
-      groundGrad.addColorStop(1, isNight && !surfaceModel.isMoltenWorld ? '#020408' : '#101724');
-      ctx.fillStyle = groundGrad;
-      ctx.fillRect(0, horizonY, w, h - horizonY);
-
-      // Tectonic Fissures: Glowing Yellow-Orange Lava Cracks on Molten Worlds, or Cryo-Blue Crevasses on Icy Worlds
-      if (surfaceModel.isMoltenWorld || surfaceModel.isIcyWorld) {
-        ctx.save();
-        for (let c = 0; c < 6; c++) {
-          const baseStartX = (((c * 135 + cameraPanDeg * 3.5 + selectedCoords.lon * 4) % w) + w) % w;
-          ctx.strokeStyle = surfaceModel.isMoltenWorld
-            ? 'rgba(234, 88, 12, 0.75)'
-            : isNight
-            ? 'rgba(125, 211, 252, 0.18)'
-            : 'rgba(224, 242, 254, 0.55)';
-          ctx.lineWidth = 4.5;
-          ctx.beginPath();
-          let cx = baseStartX;
-          let cy = horizonY + 4;
-          ctx.moveTo(cx, cy);
-          for (let step = 1; step <= 6; step++) {
-            cy = horizonY + ((h - horizonY) * step) / 6;
-            cx += Math.sin(c * 2.1 + step * 1.7) * 28 + (c % 2 === 0 ? 14 : -14);
-            ctx.lineTo(cx, cy);
-          }
-          ctx.stroke();
-
-          ctx.strokeStyle = surfaceModel.isMoltenWorld ? '#facc15' : isNight ? '#082f49' : '#0369a1';
-          ctx.lineWidth = 2.2;
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-
-      // Foreground terrain texture & boulders
-      ctx.fillStyle = isNight ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.2)';
-      for (let i = 0; i < 40; i++) {
-        const rx = ((i * 73 + cameraPanDeg * 4) % w + w) % w;
-        const ry = horizonY + 20 + ((i * 47) % (h - horizonY - 30));
-        const rw = 4 + (i % 6);
-        const rh = 2 + (i % 3);
-        ctx.beginPath();
-        ctx.ellipse(rx, ry, rw, rh, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    // 9. Horizon Atmospheric Haze Blend
-    const hazeGrad = ctx.createLinearGradient(0, horizonY - 20, 0, horizonY + 20);
-    hazeGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    hazeGrad.addColorStop(
-      0.5,
-      surfaceModel.isMoltenWorld
-        ? 'rgba(251, 146, 60, 0.28)'
-        : isNight
-        ? 'rgba(10, 16, 30, 0.4)'
-        : `rgba(255, 255, 255, ${(0.08 + surfaceModel.cloudOpacity * 0.22).toFixed(2)})`
-    );
-    hazeGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    ctx.fillStyle = hazeGrad;
-    ctx.fillRect(0, horizonY - 20, w, 40);
-  }, [displayMode, surfaceModel, currentTelemetry, timeOfDayDeg, cameraPanDeg, selectedCoords, moon, planet]);
-
   // Click on 2D map to inspect and land
   const handleMapClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = mapCanvasRef.current;
@@ -793,9 +455,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
                 ? 'bg-amber-950/80 border-amber-500 text-amber-200'
                 : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
             }`}
+            title="Explore the active Goldberg Tile in a real-time 3D First-Person Surface View (WASD + Mouse Look)"
           >
             <Eye className="w-3.5 h-3.5" />
-            Ground Horizon Vista
+            First-Person View
           </button>
         </div>
 
@@ -872,43 +535,6 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             >
               <Download className="w-3.5 h-3.5" />
             </button>
-          </div>
-        ) : displayMode === 'horizon' ? (
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <Sun className="w-3.5 h-3.5 text-amber-400" />
-              <span className="text-[10px] text-slate-400">TIME:</span>
-              <input
-                type="range"
-                min="0"
-                max="360"
-                value={timeOfDayDeg}
-                onChange={(e) => setTimeOfDayDeg(+e.target.value)}
-                className="w-24 accent-amber-400 cursor-pointer"
-              />
-              <span className="text-[10px] text-amber-300 w-12 font-bold">
-                {timeOfDayDeg <= 45 || timeOfDayDeg >= 315
-                  ? 'Dawn'
-                  : timeOfDayDeg < 135
-                  ? 'Noon'
-                  : timeOfDayDeg <= 225
-                  ? 'Sunset'
-                  : 'Night'}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <Compass className="w-3.5 h-3.5 text-sky-400" />
-              <span className="text-[10px] text-slate-400">PAN:</span>
-              <input
-                type="range"
-                min="-180"
-                max="180"
-                value={cameraPanDeg}
-                onChange={(e) => setCameraPanDeg(+e.target.value)}
-                className="w-20 accent-sky-400 cursor-pointer"
-              />
-            </div>
           </div>
         ) : null}
       </div>
@@ -1113,16 +739,22 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             onBackToGlobe={() => setDisplayMode('globe')}
           />
         ) : (
-          <div className="w-full flex flex-col items-center">
-            <canvas
-              ref={horizonCanvasRef}
-              className="w-full max-w-4xl h-auto rounded-lg border border-slate-800/80 shadow-2xl transition"
-            />
-            <div className="w-full flex justify-between items-center text-[10px] text-slate-400 px-2 mt-1">
-              <span>First-Person Horizon Vantage Point: Lat {selectedCoords.lat}°, Lon {selectedCoords.lon}°</span>
-              <span>Host Star: {surfaceModel.starAngularDiameterDeg}° Angular Size ({surfaceModel.starTeff} K)</span>
-            </div>
-          </div>
+          <FirstPersonSurfaceView
+            surfaceModel={surfaceModel}
+            goldbergGrid={goldbergGrid}
+            activeTile={selectedTile}
+            planet={planet}
+            moon={moon}
+            timeOfDayDeg={timeOfDayDeg}
+            onChangeTimeOfDay={setTimeOfDayDeg}
+            onSelectTile={(nextTile) =>
+              setSelectedCoords({
+                lat: Math.round(nextTile.centerLat),
+                lon: Math.round(nextTile.centerLon),
+              })
+            }
+            onSwitchToBlockView={() => setDisplayMode('terrain')}
+          />
         )}
       </div>
 
@@ -1130,7 +762,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 bg-[#151d2c] p-3 rounded-xl border border-slate-800">
         <div>
           <span className="text-slate-400 block text-[10px]">
-            {showTileGrid || displayMode === 'terrain'
+            {showTileGrid || displayMode === 'terrain' || displayMode === 'horizon'
               ? `GOLDBERG TILE #${activeInspectedTile.tileId + 1} (${activeInspectedTile.isPentagon ? 'PENT' : 'HEX'})`
               : 'COORDINATES'}
           </span>
@@ -1190,7 +822,9 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
         <div className="col-span-2">
           <span className="text-slate-400 block text-[10px]">
-            {showTileGrid || displayMode === 'terrain' ? 'UNIFIED TILE BIOME & GEOLOGY' : 'LOCAL BIOME & GEOLOGY'}
+            {showTileGrid || displayMode === 'terrain' || displayMode === 'horizon'
+              ? 'UNIFIED TILE BIOME & GEOLOGY'
+              : 'LOCAL BIOME & GEOLOGY'}
           </span>
           <div className="flex items-center gap-1.5 mt-0.5">
             <span
@@ -1213,9 +847,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
                 <button
                   type="button"
                   onClick={() => setDisplayMode('horizon')}
-                  className="px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 border border-sky-700 text-sky-200 text-[10px] font-bold cursor-pointer transition"
+                  className="px-2 py-0.5 rounded bg-amber-950 hover:bg-amber-900 border border-amber-700 text-amber-200 text-[10px] font-bold cursor-pointer transition"
+                  title="Explore this Goldberg Tile in real-time 3D First-Person Surface View"
                 >
-                  Horizon
+                  First-Person
                 </button>
               )}
             </div>
