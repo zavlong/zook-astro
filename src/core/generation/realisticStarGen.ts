@@ -1693,10 +1693,18 @@ export function generateZoneSystem(
         iceKm: 0,
         siKm: 0,
       };
-    } else if (muMin > 64) {
+    } else if (muMin > 64 && !(b.massEarth >= 0.25 && b.iceFrac >= 0.04 && Teq >= 195)) {
       atmoType = 'Airless Barren Vacuum';
       pBar = 0;
       Tsurf = Teq;
+      // If Teq >= 245 K on an airless body, any surface water ice sublimated and escaped to space
+      if (Teq >= 245 && b.iceFrac > 0) {
+        b.iceFrac = 0;
+        b.rockFrac = +(1 - b.gasFrac).toFixed(4);
+        rE = Math.max(0.08, Math.pow(b.coreMassEarth, 0.279) * 0.98);
+        dens = (5.514 * b.massEarth) / Math.pow(rE, 3);
+        grav = b.massEarth / (rE * rE);
+      }
       pClass =
         b.iceFrac >= 0.2
           ? 'Frozen World'
@@ -1706,16 +1714,18 @@ export function generateZoneSystem(
     } else {
       const mSc2 = Math.pow(10, 0.5 * z.feh);
       // If a warm planet (Teq >= 200 K) has muMin > 28 (where H2O and N2 escape), it either:
-      // 1) Sustains a thick outgassed atmosphere if it is a massive water-rich world (massEarth >= 0.45, iceFrac >= 0.08, muMin <= 36), OR
+      // 1) Sustains a thick outgassed/steam atmosphere if it is a water-rich world (massEarth >= 0.25, iceFrac >= 0.04), OR
       // 2) Loses its volatile ice reservoir to XUV desiccation over geological time, becoming a dry rocky world!
       let effMuMin = muMin;
       if (muMin > 28 && b.iceFrac >= 0.015 && Teq >= 200) {
-        if (b.massEarth >= 0.45 && b.iceFrac >= 0.08 && muMin <= 36 && random() < 0.65) {
+        if (b.massEarth >= 0.25 && b.iceFrac >= 0.04) {
           effMuMin = Math.min(muMin, 24.0);
         } else {
           b.iceFrac = 0;
           b.rockFrac = +(1 - b.gasFrac).toFixed(4);
           rE = Math.max(0.08, Math.pow(b.coreMassEarth, 0.279) * 0.98);
+          dens = (5.514 * b.massEarth) / Math.pow(rE, 3);
+          grav = b.massEarth / (rE * rE);
         }
       }
 
@@ -1755,7 +1765,7 @@ export function generateZoneSystem(
       const isUnbufferedOceanGreenhouse =
         !hasCont && (Teq > 282 || rH2 >= 1.5 || (Teq >= 242 && random() < 0.42));
 
-      if (Teq > 325 || (Tpot >= 340 && (rH2 >= 1.5 || isUnbufferedOceanGreenhouse))) {
+      if (Teq > 325 || (!hasCont && Teq >= 310) || (Tpot >= 340 && (rH2 >= 1.5 || isUnbufferedOceanGreenhouse))) {
         pC = avCO2;
         if (hasCont && Teq > 325) {
           // Hot inner rocky world: either sulfate-buffered Sulfuric Acid (H2SO4) Seas/Ocean, dry Venusian, or Molten Planet (if Tsurf >= 800 K)
@@ -1783,7 +1793,7 @@ export function generateZoneSystem(
           pC = clamp(avCO2 * rand(0.04, 0.16), 0.12, 5.5);
           pN = clamp(pN, 0.25, 2.8);
           let Tit = Math.max(295, Teq + ghDelta(pC, pN, pH, 0, 0.08, 0, 0, Teq, grav));
-          for (let s = 0; s < 6; s++) {
+          for (let s = 0; s < 10; s++) {
             const pSatW =
               Tit < 273.15
                 ? 0.0061
@@ -1791,9 +1801,11 @@ export function generateZoneSystem(
                 ? 220.6
                 : 1.013 * Math.exp(13.7 * (1 - 373.15 / Tit));
             pW = Math.max(pSatW, (pC + pN + pH) * 0.08);
-            Tit = 0.5 * Tit + 0.5 * (Teq + ghDelta(pC, pN, pH, 0, pW, 0, 0, Teq, grav));
+            Tit = 0.35 * Tit + 0.65 * (Teq + ghDelta(pC, pN, pH, 0, pW, 0, 0, Teq, grav));
           }
-          if (Tit >= 647.1 || pW >= 220.6) {
+          // Above the Komabayashi-Ingersoll runaway steam limit (Teq >= 310 K for water-rich worlds),
+          // the surface ocean inevitably vaporizes into a continuous supercritical H2O envelope
+          if (Tit >= 647.1 || pW >= 220.6 || (Teq >= 310 && b.iceFrac >= 0.03 && b.massEarth >= 0.25)) {
             pW = 220.6;
             isSupercriticalWater = true;
             atmoType = 'Continuous Supercritical Steam-Fluid Envelope (No Surface)';
@@ -2488,7 +2500,33 @@ export function generateZoneSystem(
       // 1. If an icy planet (b.iceFrac >= 0.015) has a warm dayside/equator (surfTmax >= 230 K) where ice sublimates/melts,
       // it cannot remain a 0-bar vacuum with an intact ice shell!
       if (b.iceFrac >= 0.015 && surfTmax >= 230 && pBar < 0.05) {
-        if (b.massEarth >= 0.12 && b.iceFrac >= 0.05 && muMin <= 85) {
+        if (b.massEarth >= 0.25 && b.iceFrac >= 0.04 && (Teq >= 310 || Tsurf >= 350)) {
+          // Massive water-rich world at high temperature transitions to a Supercritical Water World
+          pBar = null;
+          ghK = 0;
+          Tsurf = Tatm;
+          atmoType = 'Continuous Supercritical Steam-Fluid Envelope (No Surface)';
+          pClass = 'Supercritical Water World';
+          for (const k of Object.keys(gases)) delete gases[k];
+          gases.H2O = 0.88;
+          gases.CO2 = 0.09;
+          gases.N2 = 0.03;
+          const totW = Math.max(
+            80,
+            Math.round(rE * 6371 * (1 - Math.pow(1 - Math.max(0.02, b.iceFrac), 0.42)))
+          );
+          const scK = Math.min(Math.round(totW * 0.32), Math.round(420 / grav));
+          const siK = Math.round((totW - scK) * 0.7);
+          hydro = {
+            state: 'Continuous Supercritical Fluid -> Superionic Ice XVIII (No Surface)',
+            solvent: 'Supercritical H2O',
+            biosphere: null,
+            liqKm: 0,
+            scKm: scK,
+            iceKm: Math.max(0, totW - scK - siK),
+            siKm: siK,
+          };
+        } else if (b.massEarth >= 0.12 && b.iceFrac >= 0.05 && muMin <= 85) {
           // Massive volatile reservoir sublimates/outgasses a self-sustaining N2-CO2-H2O atmosphere in equilibrium with the warm dayside/equatorial ocean
           const pN_sub = +clamp(Math.pow(b.massEarth, 0.65) * rand(0.35, 1.35), 0.18, 2.2).toFixed(3);
           const pC_sub = +clamp(Math.pow(b.massEarth, 0.75) * rand(0.12, 1.4), 0.08, 2.8).toFixed(3);
@@ -2522,7 +2560,7 @@ export function generateZoneSystem(
 
       // 2. If an icy planet (b.iceFrac >= 0.015) with atmosphere (pBar >= 0.01) has a dayside/equator warm enough to melt brine/water
       // (surfTmax >= 222 K), ensure it forms a dayside eyeball or equatorial liquid ocean and saturates its atmosphere with H2O!
-      if (b.iceFrac >= 0.015 && pBar >= 0.01 && surfTmax >= 222 && (!hydro || (hydro.coveragePct ?? 0) === 0)) {
+      if (b.iceFrac >= 0.015 && pBar !== null && pBar >= 0.01 && surfTmax >= 222 && (!hydro || (hydro.coveragePct ?? 0) === 0)) {
         const effOceanT = Math.max(222.0, Tsurf, surfTmax * 0.86);
         const pSatW = 1.013 * Math.exp(13.7 * (1 - 373.15 / effOceanT));
         const satFrac = clamp(pSatW / Math.max(0.05, pBar + pSatW), 0.045, 0.85);
@@ -2569,7 +2607,7 @@ export function generateZoneSystem(
       }
 
       // 3. Reconcile hydro.coveragePct and hydro.state with actual surface freezing/melting on all deep water/ammonia-water ocean worlds!
-      if (hydro && (hydro.coveragePct ?? 0) > 0 && b.iceFrac >= 0.015) {
+      if (hydro && pBar !== null && (hydro.coveragePct ?? 0) > 0 && b.iceFrac >= 0.015) {
         const solv = hydro.solvent || '';
         const isAqOrNH3 =
           solv === 'H2O' ||
@@ -2619,6 +2657,53 @@ export function generateZoneSystem(
           }
         }
       }
+    }
+
+    // Universal thermodynamic safeguard: a water-rich world (b.iceFrac >= 0.04, b.massEarth >= 0.25)
+    // with Teq >= 310 K or Tsurf >= 373.15 K cannot remain solid ice or a subcritical ocean — it is a Supercritical Water World!
+    if (
+      !hasEnv &&
+      b.massEarth >= 0.25 &&
+      b.iceFrac >= 0.04 &&
+      (Teq >= 310 || (Tsurf ?? Teq) >= 373.15)
+    ) {
+      pBar = null;
+      ghK = 0;
+      Tsurf = Tatm;
+      atmoType = 'Continuous Supercritical Steam-Fluid Envelope (No Surface)';
+      pClass = 'Supercritical Water World';
+      for (const k of Object.keys(gases)) delete gases[k];
+      gases.H2O = 0.88;
+      gases.CO2 = 0.09;
+      gases.N2 = 0.03;
+      const totW = Math.max(
+        80,
+        Math.round(rE * 6371 * (1 - Math.pow(1 - Math.max(0.02, b.iceFrac), 0.42)))
+      );
+      const scK = Math.min(Math.round(totW * 0.32), Math.round(420 / grav));
+      const siK = Math.round((totW - scK) * 0.7);
+      hydro = {
+        state: 'Continuous Supercritical Fluid -> Superionic Ice XVIII (No Surface)',
+        solvent: 'Supercritical H2O',
+        biosphere: null,
+        liqKm: 0,
+        scKm: scK,
+        iceKm: Math.max(0, totW - scK - siK),
+        siKm: siK,
+      };
+    } else if (
+      !hasEnv &&
+      b.iceFrac > 0 &&
+      (Tsurf ?? Teq) >= 273.15 &&
+      (!hydro || (hydro.coveragePct ?? 0) === 0) &&
+      hydro?.solvent !== 'Supercritical H2O'
+    ) {
+      // Any smaller body above 273.15 K with no liquid hydrosphere cannot retain solid surface water ice
+      b.iceFrac = 0;
+      b.rockFrac = +(1 - b.gasFrac).toFixed(4);
+      rE = +Math.max(0.08, Math.pow(b.coreMassEarth, 0.279) * 0.98).toFixed(3);
+      dens = +(5.514 * (b.massEarth / Math.pow(rE, 3))).toFixed(2);
+      grav = +(b.massEarth / Math.pow(rE, 2)).toFixed(2);
     }
 
     const effT = Tsurf ?? Tatm ?? Teq;
@@ -2782,19 +2867,19 @@ export function generateZoneSystem(
             Math.pow(Math.max(0.15, (aRp * rE) / 66), -7.5)
           : 0;
 
-      // Intense Io-like tidal heating bakes out volatile ices
-      if (tW >= 1.0) {
-        iceF = Math.min(iceF, 0.01);
+      // Intense Io-like tidal heating or warm stellar insolation on small moons bakes out volatile ices
+      if (tW >= 1.0 || (Teq >= 245 && mE < 0.15)) {
+        iceF = 0;
       } else if (tW >= 0.2) {
         iceF *= 0.45;
       }
-      const rockF = +(1.0 - iceF).toFixed(4);
+      let rockF = +(1.0 - iceF).toFixed(4);
       iceF = +iceF.toFixed(4);
 
-      const rmE = Math.max(0.0005, (0.98 * rockF + 1.19 * iceF) * Math.pow(mE, 0.275));
-      const rKm = Math.max(8, Math.round(rmE * 6371));
-      const mDens = +((5.514 * mE) / Math.pow(rmE, 3)).toFixed(2);
-      const mGrav = +(mE / (rmE * rmE)).toFixed(3);
+      let rmE = Math.max(0.0005, (0.98 * rockF + 1.19 * iceF) * Math.pow(mE, 0.275));
+      let rKm = Math.max(8, Math.round(rmE * 6371));
+      let mDens = +((5.514 * mE) / Math.pow(rmE, 3)).toFixed(2);
+      let mGrav = +(mE / (rmE * rmE)).toFixed(3);
       const aKm = Math.round(aRp * rE * 6371);
 
       let mc =
@@ -3155,7 +3240,7 @@ export function generateZoneSystem(
           iceKm: 0,
           siKm: 0,
         };
-      } else if (iceF >= 0.2 && (tW >= 0.015 || mE >= 0.008)) {
+      } else if (mTsurf < 273.15 && iceF >= 0.2 && (tW >= 0.015 || mE >= 0.008)) {
         const totW = Math.max(15, Math.round(rKm * 0.32 * iceF));
         const shellKm = clamp(
           Math.round(28 / Math.pow(Math.max(0.02, tW * 10 + mE * 25), 0.35)),
@@ -3175,6 +3260,16 @@ export function generateZoneSystem(
           iceKm: shellKm + highPIceKm,
           siKm: 0,
         };
+      }
+
+      // Moon thermodynamic safeguard: no solid water ice above 273.15 K without a liquid/supercritical hydrosphere
+      if (iceF > 0 && (mTsurf ?? mTeq) >= 273.15 && (!mHydro || (mHydro.coveragePct ?? 0) === 0)) {
+        iceF = 0;
+        rockF = 1;
+        rmE = Math.max(0.0005, 0.98 * Math.pow(mE, 0.275));
+        rKm = Math.max(8, Math.round(rmE * 6371));
+        mDens = +((5.514 * mE) / Math.pow(rmE, 3)).toFixed(2);
+        mGrav = +(mE / (rmE * rmE)).toFixed(3);
       }
 
       const isRetro = inc > 90;
@@ -3556,6 +3651,133 @@ export function runRealisticGenerator(
     zones: pZones,
     seedUsed,
   };
+}
+
+/**
+ * Sanitizes any cached or imported RealisticStarSystemResult in-place so that
+ * water-rich worlds (massEarth >= 0.25, iceFrac >= 0.04) at high temperatures (Teq >= 310 K or Tsurf >= 373.15 K)
+ * are properly upgraded to Supercritical Water Worlds, and smaller warm bodies above 273.15 K without liquid
+ * do not retain solid surface water ice.
+ */
+export function sanitizeRealisticSystem(
+  sys: RealisticStarSystemResult | null | undefined
+): RealisticStarSystemResult | null {
+  if (!sys || !Array.isArray(sys.zones)) return sys ?? null;
+  for (const zone of sys.zones) {
+    if (!zone || !Array.isArray(zone.bodies)) continue;
+    for (const body of zone.bodies) {
+      if (!body || body.kind !== 'planet') continue;
+      const hasEnv = body.gasFrac >= 0.015 || body.massEarth >= 12;
+      const Teq = body.T_eq ?? 255;
+      const Tatm = body.T_atm ?? Teq;
+      const Tsurf = body.surfaceTempK ?? Tatm;
+      const isAlreadySupercritical =
+        body.hydrosphere?.solvent === 'Supercritical H2O' ||
+        Boolean(body.hydrosphere?.state?.includes('Supercritical')) ||
+        body.planetClass?.includes('Supercritical') ||
+        body.planetClass?.includes('Steam');
+
+      if (
+        !hasEnv &&
+        !isAlreadySupercritical &&
+        body.massEarth >= 0.25 &&
+        body.iceFrac >= 0.04 &&
+        (Teq >= 310 || Tsurf >= 373.15)
+      ) {
+        const grav = Math.max(0.05, body.gravityG || 1.0);
+        const rE = Math.max(0.1, body.radiusEarth || 1.0);
+        const totW = Math.max(
+          80,
+          Math.round(rE * 6371 * (1 - Math.pow(1 - Math.max(0.02, body.iceFrac), 0.42)))
+        );
+        const scK = Math.min(Math.round(totW * 0.32), Math.round(420 / grav));
+        const siK = Math.round((totW - scK) * 0.7);
+        body.pressureBar = null;
+        body.greenhouseK = 0;
+        body.surfaceTempK = Tatm;
+        body.gases = { H2O: 0.88, CO2: 0.09, N2: 0.03 };
+        body.hydrosphere = {
+          state: 'Continuous Supercritical Fluid -> Superionic Ice XVIII (No Surface)',
+          solvent: 'Supercritical H2O',
+          biosphere: null,
+          liqKm: 0,
+          scKm: scK,
+          iceKm: Math.max(0, totW - scK - siK),
+          siKm: siK,
+        };
+        body.planetClass = resolvePlanetClass(
+          'Supercritical Water World',
+          body.surfaceTempK,
+          body.hydrosphere,
+          body.massEarth,
+          body.iceFrac,
+          false,
+          false,
+          body.pressureBar,
+          body.gases
+        );
+        body.atmosphereType = deriveAtmosphereClassification(
+          body.pressureBar,
+          body.gases,
+          false,
+          true
+        );
+      } else if (
+        !hasEnv &&
+        !isAlreadySupercritical &&
+        body.iceFrac > 0 &&
+        Tsurf >= 273.15 &&
+        (!body.hydrosphere || (body.hydrosphere.coveragePct ?? 0) === 0)
+      ) {
+        body.iceFrac = 0;
+        body.rockFrac = +(1 - body.gasFrac).toFixed(4);
+        const rE = +Math.max(0.08, Math.pow(body.massEarth, 0.279) * 0.98).toFixed(3);
+        body.radiusEarth = rE;
+        body.densityGcm3 = +(5.514 * (body.massEarth / Math.pow(rE, 3))).toFixed(2);
+        body.gravityG = +(body.massEarth / Math.pow(rE, 2)).toFixed(2);
+        body.planetClass = resolvePlanetClass(
+          body.planetClass,
+          Tsurf,
+          body.hydrosphere,
+          body.massEarth,
+          body.iceFrac,
+          body.planetClass.includes('Chthonian'),
+          false,
+          body.pressureBar,
+          body.gases
+        );
+      }
+
+      if (Array.isArray(body.moons)) {
+        for (const m of body.moons) {
+          const mT = m.surfaceTempK ?? m.T_atm ?? m.T_eq ?? 200;
+          if (
+            m.iceFrac > 0 &&
+            mT >= 273.15 &&
+            (!m.hydrosphere || (m.hydrosphere.coveragePct ?? 0) === 0)
+          ) {
+            m.iceFrac = 0;
+            m.rockFrac = 1;
+            const rmE = Math.max(0.0005, 0.98 * Math.pow(m.massEarth, 0.275));
+            m.radiusEarth = +rmE.toFixed(4);
+            m.radiusKm = Math.max(8, Math.round(rmE * 6371));
+            m.densityGcm3 = +((5.514 * m.massEarth) / Math.pow(rmE, 3)).toFixed(2);
+            m.gravityG = +(m.massEarth / (rmE * rmE)).toFixed(3);
+            m.moonClass = resolveMoonClass(
+              m.moonClass,
+              mT,
+              m.hydrosphere,
+              m.iceFrac,
+              m.massEarth,
+              m.pressureBar,
+              m.gases
+            );
+          }
+        }
+      }
+    }
+  }
+  return sys;
 }
 
 export function getPlanetVisualColor(b: RealisticPlanetBody): string {

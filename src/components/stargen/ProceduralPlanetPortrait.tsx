@@ -264,19 +264,20 @@ function renderInteriorComposition(
     : clamp(coreFraction + (1 - coreFraction) * rockRatio * 0.88, coreFraction + 0.14, 0.94);
   const rMantle = Math.max(rCore + 8, Math.round(R * mantleFraction));
 
-  const hasIce = iceF >= 0.04;
-  const rIce = hasIce ? Math.max(rMantle + 5, Math.round(R * 0.94)) : rMantle;
-
   const hasOcean = Boolean(
     hydro &&
     hydro.solvent &&
     (hydro.coveragePct === undefined || hydro.coveragePct > 0 || hydro.liqKm > 0 || hydro.scKm > 0)
   );
-  const rOcean = hasOcean ? Math.round(R * 0.98) : rIce;
+  const hasIce = iceF >= 0.04;
+  const rIce = hasIce
+    ? Math.max(rMantle + 5, Math.round(R * (isSupercritical || hasOcean ? 0.86 : 0.94)))
+    : rMantle;
+  const rOcean = hasOcean || isSupercritical ? Math.round(R * 0.98) : rIce;
   const rGas = R;
 
   // Layer 5: Atmosphere / Gas Envelope
-  if (gasF > 0.02 || isGasGiant) {
+  if (gasF > 0.02 || isGasGiant || isSupercritical) {
     const gasGrad = ctx.createRadialGradient(cx, cy, rOcean, cx, cy, rGas + 5);
     gasGrad.addColorStop(0, 'rgba(56, 189, 248, 0.55)');
     gasGrad.addColorStop(0.65, 'rgba(99, 102, 241, 0.25)');
@@ -287,7 +288,7 @@ function renderInteriorComposition(
     ctx.fill();
   }
 
-  // Layer 4: Hydrosphere / Ocean
+  // Layer 4: Hydrosphere / Ocean / Supercritical Envelope
   if (hasOcean || isSupercritical) {
     const s = (hydro?.solvent || '').toLowerCase();
     let col1 = '#0284c7';
@@ -302,7 +303,7 @@ function renderInteriorComposition(
       col1 = '#14b8a6';
       col2 = '#0f766e';
     } else if (isSupercritical || s.includes('supercritical')) {
-      col1 = '#818cf8';
+      col1 = '#38bdf8';
       col2 = '#4f46e5';
     }
     const oceanGrad = ctx.createRadialGradient(cx, cy, rIce, cx, cy, rOcean);
@@ -317,9 +318,15 @@ function renderInteriorComposition(
   // Layer 3: Ice Shell / High-Pressure Ice Mantle
   if (hasIce) {
     const iceGrad = ctx.createRadialGradient(cx, cy, rMantle, cx, cy, rIce);
-    iceGrad.addColorStop(0, '#0369a1');
-    iceGrad.addColorStop(0.5, '#38bdf8');
-    iceGrad.addColorStop(1, '#bae6fd');
+    if (isSupercritical) {
+      iceGrad.addColorStop(0, '#312e81');
+      iceGrad.addColorStop(0.5, '#0284c7');
+      iceGrad.addColorStop(1, '#38bdf8');
+    } else {
+      iceGrad.addColorStop(0, '#0369a1');
+      iceGrad.addColorStop(0.5, '#38bdf8');
+      iceGrad.addColorStop(1, '#bae6fd');
+    }
     ctx.fillStyle = iceGrad;
     ctx.beginPath();
     ctx.arc(cx, cy, rIce, 0, Math.PI * 2);
@@ -388,15 +395,25 @@ function renderInteriorComposition(
   }
   if (hasOcean || isSupercritical) {
     layers.push({
-      label: formatSolventName(hydro?.solvent) || 'Hydrosphere',
-      sub: hydro?.liqKm ? `${hydro.liqKm} km depth` : `${hydro?.coveragePct ?? 100}% cov`,
+      label: isSupercritical ? 'Supercritical H2O' : formatSolventName(hydro?.solvent) || 'Hydrosphere',
+      sub: isSupercritical
+        ? hydro?.scKm
+          ? `${hydro.scKm} km Fluid`
+          : 'Fluid Envelope'
+        : hydro?.liqKm
+        ? `${hydro.liqKm} km depth`
+        : `${hydro?.coveragePct ?? 100}% cov`,
       color: '#38bdf8',
     });
   }
   if (hasIce) {
     layers.push({
-      label: 'Ice Shell',
-      sub: `${(iceF * 100).toFixed(1)}% Ice`,
+      label: isSupercritical
+        ? 'Superionic Ice XVIII'
+        : hasOcean && !hydro?.state?.toLowerCase().includes('subsurface')
+        ? 'Deep Ice VI/VII'
+        : 'Ice Shell',
+      sub: `${(iceF * 100).toFixed(1)}% ${isSupercritical ? 'H2O' : 'Ice'}`,
       color: '#7dd3fc',
     });
   }
@@ -916,6 +933,8 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
           planet.planetClass.includes('Gas Dwarf'));
       const isSC =
         pClass.includes('Supercritical') ||
+        pClass.includes('Steam') ||
+        pClass.includes('Water Giant') ||
         (hydro?.solvent?.toLowerCase().includes('supercritical') ?? false);
       renderInteriorComposition(iCanvas, rockF, iceF, gasF, hydro, isGG, isSC);
     }

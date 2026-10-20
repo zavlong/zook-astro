@@ -6,6 +6,7 @@
 
 import { GalaxyConfig, DEFAULT_GALAXY_CONFIG } from '../generation/galaxyGen';
 import { SectorHexGridData } from '../generation/sectorHex';
+import { sanitizeRealisticSystem } from '../generation/realisticStarGen';
 
 export interface SavedGalaxy {
   id: string; // unique ID, e.g. "gal_4289_1698284729"
@@ -179,7 +180,7 @@ class UniverseCacheManager {
         reqSys.onsuccess = (e) => {
           const cursor = (e.target as any).result;
           if (cursor) {
-            this.systemCache.set(cursor.key as string, cursor.value);
+            this.systemCache.set(cursor.key as string, sanitizeRealisticSystem(cursor.value) || cursor.value);
             cursor.continue();
           }
         };
@@ -483,21 +484,24 @@ class UniverseCacheManager {
   private lastActiveSystem: any | null = null;
 
   public getCachedSystem(systemId: string): any | null {
-    return this.systemCache.get(systemId) || null;
+    const sys = this.systemCache.get(systemId) || null;
+    return sys ? sanitizeRealisticSystem(sys) : null;
   }
 
   public getLastActiveSystem(): any | null {
-    return this.lastActiveSystem || this.systemCache.get('STARGEN_ACTIVE_SYSTEM') || null;
+    const sys = this.lastActiveSystem || this.systemCache.get('STARGEN_ACTIVE_SYSTEM') || null;
+    return sys ? sanitizeRealisticSystem(sys) : null;
   }
 
   public setLastActiveSystem(data: any): void {
     if (!data) return;
-    this.lastActiveSystem = data;
-    const sysId = data?.step1?.id || 'STARGEN_ACTIVE_SYSTEM';
-    this.systemCache.set(sysId, data);
-    this.systemCache.set('STARGEN_ACTIVE_SYSTEM', data);
-    idbSet(IDB_STORE_SYSTEMS, sysId, data);
-    idbSet(IDB_STORE_SYSTEMS, 'STARGEN_ACTIVE_SYSTEM', data);
+    const sanitized = sanitizeRealisticSystem(data) || data;
+    this.lastActiveSystem = sanitized;
+    const sysId = sanitized?.step1?.id || 'STARGEN_ACTIVE_SYSTEM';
+    this.systemCache.set(sysId, sanitized);
+    this.systemCache.set('STARGEN_ACTIVE_SYSTEM', sanitized);
+    idbSet(IDB_STORE_SYSTEMS, sysId, sanitized);
+    idbSet(IDB_STORE_SYSTEMS, 'STARGEN_ACTIVE_SYSTEM', sanitized);
   }
 
   public hasCachedSystem(systemId: string): boolean {
@@ -509,12 +513,13 @@ class UniverseCacheManager {
   }
 
   public cacheLoadedSystem(systemId: string, data: any): void {
-    this.lastActiveSystem = data;
-    this.systemCache.set(systemId, data);
-    this.systemCache.set('STARGEN_ACTIVE_SYSTEM', data);
+    const sanitized = sanitizeRealisticSystem(data) || data;
+    this.lastActiveSystem = sanitized;
+    this.systemCache.set(systemId, sanitized);
+    this.systemCache.set('STARGEN_ACTIVE_SYSTEM', sanitized);
     // Asynchronously persist into IndexedDB
-    idbSet(IDB_STORE_SYSTEMS, systemId, data);
-    idbSet(IDB_STORE_SYSTEMS, 'STARGEN_ACTIVE_SYSTEM', data);
+    idbSet(IDB_STORE_SYSTEMS, systemId, sanitized);
+    idbSet(IDB_STORE_SYSTEMS, 'STARGEN_ACTIVE_SYSTEM', sanitized);
   }
 
   public getLoadedSystemCount(): number {

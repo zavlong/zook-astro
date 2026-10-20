@@ -322,7 +322,9 @@ export function formatRockyBodyClass(
     fallbackClass.includes('Steam World') ||
     fallbackClass.includes('Steam Moon') ||
     hydro?.solvent === 'Supercritical H2O' ||
-    hydro?.state?.includes('Supercritical')
+    hydro?.state?.includes('Supercritical') ||
+    (!isMoon && massEarth >= 0.25 && iceFrac >= 0.04 && T >= 310) ||
+    (isMoon && massEarth >= 0.25 && iceFrac >= 0.05 && T >= 310)
   ) {
     if (isMoon) {
       return T > 500 ? 'Steam Moon' : 'Supercritical Water Moon';
@@ -407,7 +409,10 @@ export function formatRockyBodyClass(
   } else if (is100Pct) {
     compClass = 'Ocean';
   } else {
-    const isIcy = iceFrac >= 0.15 || fallbackClass.includes('Ice') || fallbackClass.includes('Icy');
+    // Solid surface water ice cannot exist when T >= 273.15 K
+    const isIcy =
+      T < 273.15 &&
+      (iceFrac >= 0.15 || fallbackClass.includes('Ice') || fallbackClass.includes('Icy'));
     compClass = isIcy ? 'Icy' : isMoon ? 'Rocky' : 'Terrestrial';
   }
 

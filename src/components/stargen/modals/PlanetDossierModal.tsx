@@ -25,7 +25,11 @@ import {
   formatSemiMajorAxisKm,
   formatDistanceKm,
 } from '../types';
-import { getMoonVisualColor, getPlanetVisualColor } from '../../../core/generation/realisticStarGen';
+import {
+  getMoonVisualColor,
+  getPlanetVisualColor,
+  sanitizeRealisticSystem,
+} from '../../../core/generation/realisticStarGen';
 import {
   resolvePlanetClass,
   resolveMoonClass,
@@ -102,6 +106,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
     }
   }, [planetClaimInfo, currentEmpire, sectorEmpires]);
 
+  sanitizeRealisticSystem(systemResult);
   const zone = systemResult.zones[selectedEntity.zoneIdx];
   const hostPlanet = zone?.bodies[selectedEntity.bodyIdx] as RealisticPlanetBody | undefined;
   if (!zone || !hostPlanet || hostPlanet.kind !== 'planet') return null;
