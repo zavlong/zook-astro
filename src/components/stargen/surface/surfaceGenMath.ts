@@ -912,6 +912,7 @@ export const BIOMES = [
   { id: 20, name: 'Gas Giant Cloud Deck (Continuous Envelope)', color: '#b88656', isWater: false },
   { id: 21, name: 'Cryotectonic Ice Fissure (Linea)', color: '#3b7ea1', isWater: false },
   { id: 22, name: 'Active Volcanic Shield & Lava Caldera', color: '#f97316', isWater: false },
+  { id: 23, name: 'Algal Sea', color: '#1b7a5e', isWater: true },
 ];
 
 // Fast PRNG
@@ -2562,8 +2563,13 @@ export function generatePlanetarySurfaceModel(
           hNorm = Math.max(0.01, 0.5 * (1.0 - waterDepthRatio));
           hypsometry[idx] = hNorm;
 
+          const algalBloom = hasBiosphere
+            ? sphericalFbm(lat * 2.5 + warpLat * 0.4, lon * 2.5 + warpLon * 0.4, seed + 1483, 4)
+            : 0;
           if (waterDepthRatio > 0.62) {
             biomeGrid[idx] = 0; // Abyssal Trench
+          } else if (hasBiosphere && (waterDepthRatio <= 0.34 || (waterDepthRatio <= 0.56 && algalBloom > 0.47))) {
+            biomeGrid[idx] = 23; // Algal Sea (Photic Bloom & Kelp Reefs)
           } else if (waterDepthRatio > 0.24) {
             biomeGrid[idx] = 1; // Deep Ocean
           } else {
@@ -2619,7 +2625,7 @@ export function generatePlanetarySurfaceModel(
             warmMeltCandidates.push({ idx, score: waterPatchScore, rockBiome });
 
             if (waterPatchScore > 0.67 && altRatio < 0.58) {
-              biomeGrid[idx] = waterPatchScore > 0.75 ? 1 : 2; // Small patch of liquid water
+              biomeGrid[idx] = waterPatchScore > 0.75 ? 1 : hasBiosphere ? 23 : 2; // Small patch of liquid water
               meltwaterPatchCount++;
             } else {
               biomeGrid[idx] = rockBiome;
@@ -2645,8 +2651,13 @@ export function generatePlanetarySurfaceModel(
       } else if (isBelowSeaLevel) {
         // Unfrozen liquid sea/ocean (freezingPointK <= Tlocal <= localBoilingPointK)
         const waterDepthRatio = (seaLevelNormalized - hNorm) / Math.max(0.001, seaLevelNormalized);
+        const algalBloom = hasBiosphere
+          ? sphericalFbm(lat * 2.5 + warpLat * 0.4, lon * 2.5 + warpLon * 0.4, seed + 1483, 4)
+          : 0;
         if (waterDepthRatio > 0.6) {
           biomeGrid[idx] = 0; // Abyssal Trench (colored by seaPalette)
+        } else if (hasBiosphere && (waterDepthRatio <= 0.34 || (waterDepthRatio <= 0.56 && algalBloom > 0.47))) {
+          biomeGrid[idx] = 23; // Algal Sea (Photic Bloom & Kelp Reefs)
         } else if (waterDepthRatio > 0.25) {
           biomeGrid[idx] = 1; // Deep Ocean (colored by seaPalette)
         } else {
@@ -2669,12 +2680,14 @@ export function generatePlanetarySurfaceModel(
           } else {
             biomeGrid[idx] = 16; // Regolith Craterlands
           }
-        } else if (freezingPointK > 0 && Tlocal < freezingPointK + 14 && Tbase < 380) {
+        } else if (freezingPointK > 0 && Tlocal < freezingPointK + (hasBiosphere ? 8 : 14) && Tbase < 380) {
           // Cold sub-polar / periglacial zone just above freezing point
           if (craterGrid[idx] > 0.35 && pBar < 0.3) {
             biomeGrid[idx] = 16; // Cratered highlands in thin atmosphere
           } else if (altRatio > 0.48 + topoVar) {
             biomeGrid[idx] = 11; // Cold Highland Plateau / Badlands
+          } else if (hasBiosphere && localMoisture >= 0.28) {
+            biomeGrid[idx] = 6; // Boreal Forest / Taiga
           } else {
             biomeGrid[idx] = 7; // Tundra / Permafrost Regolith
           }
@@ -2694,21 +2707,34 @@ export function generatePlanetarySurfaceModel(
             seaPalette.solventKey === 'H2O' ||
             seaPalette.solventKey === 'H2O + CO2' ||
             seaPalette.solventKey === 'NH3-H2O';
+          const plateauCutoff = (hasBiosphere ? 0.46 : 0.36) + topoVar;
+          const mountainCutoff = (hasBiosphere ? 0.62 : 0.54) + topoVar;
 
-          if (altRatio > 0.54 + topoVar) {
+          if (altRatio > mountainCutoff) {
             biomeGrid[idx] = 12; // Mountain Cordillera
-          } else if (altRatio > 0.36 + topoVar) {
+          } else if (altRatio > plateauCutoff) {
             biomeGrid[idx] = 11; // High Plateau / Badlands
-          } else if (!isAqueousOrAmmonia) {
+          } else if (!isAqueousOrAmmonia && !hasBiosphere) {
             biomeGrid[idx] = localMoisture < 0.46 ? 10 : 9; // Hyper-Arid Dunes or Arid Steppe
-          } else if (freezingPointK > 0 && Tlocal < freezingPointK + 24) {
-            biomeGrid[idx] = localMoisture < 0.3 ? 9 : 6; // Boreal Taiga / High-Latitude Steppe (organic thermal contour!)
+          } else if (freezingPointK > 0 && Tlocal < freezingPointK + 22) {
+            biomeGrid[idx] = localMoisture < (hasBiosphere ? 0.22 : 0.3) ? 9 : 6; // Boreal Forest / Taiga or Steppe
+          } else if (hasBiosphere) {
+            // Worlds with life prominently develop Forest and Grassland biomes across temperate & warm landmasses!
+            if (localMoisture < 0.18) {
+              biomeGrid[idx] = 10; // Hyper-Arid Desert Basin
+            } else if (localMoisture < 0.25) {
+              biomeGrid[idx] = 9; // Semi-Arid Scrub Steppe
+            } else if (altRatio < 0.06 && localMoisture > 0.68) {
+              biomeGrid[idx] = 3; // Coastal Marsh / Mangrove Wetland
+            } else if (localMoisture >= 0.46) {
+              biomeGrid[idx] = 5; // Forest Canopy
+            } else {
+              biomeGrid[idx] = 4; // Grassland / Savanna Plains
+            }
           } else if (localMoisture < 0.27) {
-            biomeGrid[idx] = 10; // Contiguous Hyper-Arid Desert Basin (driven by organic moisture field, never boxes!)
+            biomeGrid[idx] = 10; // Contiguous Hyper-Arid Desert Basin
           } else if (localMoisture < 0.41) {
             biomeGrid[idx] = 9; // Arid Steppe / Savanna Scrub transition belt
-          } else if (hasLiquid && hasBiosphere) {
-            biomeGrid[idx] = altRatio < 0.06 && localMoisture > 0.62 ? 3 : localMoisture > 0.58 ? 5 : 4; // Marsh, Forest, or Plains
           } else if (hasLiquid) {
             biomeGrid[idx] = 4; // Lowland Plains
           } else {
@@ -2719,7 +2745,7 @@ export function generatePlanetarySurfaceModel(
 
       // 3. Physical Tropospheric Weather & Circulation Cloud Modeling (for all solid-surface worlds with atmosphere)
       if (!isNoSurface && cloudOpacity > 0) {
-        const isLiquidOceanCell = biomeGrid[idx] <= 2 && !isMoltenLavaPool;
+        const isLiquidOceanCell = (biomeGrid[idx] <= 2 || biomeGrid[idx] === 23) && !isMoltenLavaPool;
         const evapBoost = isLiquidOceanCell ? 1.18 : hasLiquid ? 0.74 + 0.38 * localMoisture : 0.88;
         const baseDeck = cloudOpacity > 0.78 ? 0.54 : 0.0;
 
@@ -2856,15 +2882,15 @@ export function generatePlanetarySurfaceModel(
       const deepCutoff = Math.max(1, Math.floor(targetPatches * 0.25));
       for (let i = 0; i < targetPatches && i < warmMeltCandidates.length; i++) {
         const cand = warmMeltCandidates[i];
-        if (biomeGrid[cand.idx] > 2) {
+        if (biomeGrid[cand.idx] > 2 && biomeGrid[cand.idx] !== 23) {
           meltwaterPatchCount++;
         }
-        biomeGrid[cand.idx] = i < deepCutoff ? 1 : 2;
+        biomeGrid[cand.idx] = i < deepCutoff ? 1 : hasBiosphere ? 23 : 2;
       }
     } else if (meltwaterPatchCount > maxPatches) {
       for (let i = maxPatches; i < warmMeltCandidates.length; i++) {
         const cand = warmMeltCandidates[i];
-        if (biomeGrid[cand.idx] <= 2) {
+        if (biomeGrid[cand.idx] <= 2 || biomeGrid[cand.idx] === 23) {
           biomeGrid[cand.idx] = cand.rockBiome;
           meltwaterPatchCount--;
         }
@@ -2877,7 +2903,7 @@ export function generatePlanetarySurfaceModel(
   // 2-Pass Cellular Majority-Vote Smoothing Filter over land biomes so regions are contiguous without isolated speckle
   if (!isNoSurface) {
     const tempBiomes = new Uint8Array(width * height);
-    const counts = new Uint8Array(24);
+    const counts = new Uint8Array(25);
     for (let pass = 0; pass < 2; pass++) {
       tempBiomes.set(biomeGrid);
       for (let y = 0; y < height; y++) {
@@ -2886,8 +2912,8 @@ export function generatePlanetarySurfaceModel(
         for (let x = 0; x < width; x++) {
           const idx = y * width + x;
           const bCenter = tempBiomes[idx];
-          // Preserve water cells, volcanic cones/calderas, and cryotectonic ice fissures
-          if (bCenter <= 2 || bCenter === 15 || bCenter === 21 || bCenter === 22 || volcanoGrid[idx] > 0.35) {
+          // Preserve water cells (including Algal Sea 23), volcanic cones/calderas, and cryotectonic ice fissures
+          if (bCenter <= 2 || bCenter === 23 || bCenter === 15 || bCenter === 21 || bCenter === 22 || volcanoGrid[idx] > 0.35) {
             continue;
           }
           counts.fill(0);
@@ -2898,7 +2924,7 @@ export function generatePlanetarySurfaceModel(
             for (let dx = -1; dx <= 1; dx++) {
               const nx = (x + dx + width) % width;
               const nb = tempBiomes[ny * width + nx];
-              if (nb <= 2 || nb === 21 || nb === 22) continue;
+              if (nb <= 2 || nb === 23 || nb === 21 || nb === 22) continue;
               const weight = dx === 0 && ny === y ? 2 : 1;
               counts[nb] += weight;
               if (nb === bCenter && !(dx === 0 && ny === y)) sameCount++;
@@ -2970,7 +2996,7 @@ export function generatePlanetarySurfaceModel(
         for (let x = 0; x < width; x++) {
           const idx = y * width + x;
           const bCenter = biomeGrid[idx];
-          const isWaterCenter = !isNoSurface && bCenter <= 2;
+          const isWaterCenter = !isNoSurface && (bCenter <= 2 || bCenter === 23);
           if (isWaterCenter || volcanoGrid[idx] > 1.1) {
             dst[idx * 3] = src[idx * 3];
             dst[idx * 3 + 1] = src[idx * 3 + 1];
@@ -2987,7 +3013,7 @@ export function generatePlanetarySurfaceModel(
               const nx = (x + dx + width) % width;
               const nIdx = ny * width + nx;
               const nBiome = biomeGrid[nIdx];
-              const isWaterNeighbor = !isNoSurface && nBiome <= 2;
+              const isWaterNeighbor = !isNoSurface && (nBiome <= 2 || nBiome === 23);
               if (isWaterNeighbor || volcanoGrid[nIdx] > 1.1) continue;
               const w = dx === 0 && dy === 0 ? 4 : dx === 0 || dy === 0 ? 2 : 1;
               sumR += src[nIdx * 3] * w;
@@ -3277,8 +3303,8 @@ export function evaluateSurfaceMapTexel(
   const h = hypsometry[idx];
   const volcVal = volcanoGrid[idx];
   const biomeId = biomeGrid[idx];
-  // Any cell with biomeId 0, 1, or 2 is liquid water/ocean (including small meltwater patches > 273 K on ice-dominated worlds!)
-  const isWater = !isNoSurface && (biomeId === 0 || biomeId === 1 || biomeId === 2);
+  // Any cell with biomeId 0, 1, 2, or 23 (Algal Sea) is liquid water/ocean (including small meltwater patches > 273 K on ice-dominated worlds!)
+  const isWater = !isNoSurface && (biomeId === 0 || biomeId === 1 || biomeId === 2 || biomeId === 23);
   const isMoltenLiquid = isWater && (isMoltenWorld || seaPalette.solventKey === 'Silicate Magma');
   const isIceCell = biomeId === 8 || biomeId === 13 || biomeId === 18 || biomeId === 21;
   const isFrozenSeaIce =
@@ -3332,10 +3358,16 @@ export function evaluateSurfaceMapTexel(
           ? 0.42
           : 0.14;
       if (activeLayer === 'biomes') {
-        const rgb = biomeId === 0 ? seaPalette.trenchRgb : biomeId === 1 ? seaPalette.deepRgb : seaPalette.shallowRgb;
-        r = rgb[0];
-        g = rgb[1];
-        b = rgb[2];
+        if (biomeId === 23) {
+          r = Math.round(seaPalette.shallowRgb[0] * 0.42 + floraPalette.lowRgb[0] * 0.58);
+          g = Math.round(seaPalette.shallowRgb[1] * 0.42 + floraPalette.lowRgb[1] * 0.58);
+          b = Math.round(seaPalette.shallowRgb[2] * 0.42 + floraPalette.lowRgb[2] * 0.58);
+        } else {
+          const rgb = biomeId === 0 ? seaPalette.trenchRgb : biomeId === 1 ? seaPalette.deepRgb : seaPalette.shallowRgb;
+          r = rgb[0];
+          g = rgb[1];
+          b = rgb[2];
+        }
       } else {
         if (depthRatio < 0.35) {
           const t = depthRatio / 0.35;
@@ -3347,6 +3379,19 @@ export function evaluateSurfaceMapTexel(
           r = seaPalette.deepRgb[0] + (seaPalette.trenchRgb[0] - seaPalette.deepRgb[0]) * t;
           g = seaPalette.deepRgb[1] + (seaPalette.trenchRgb[1] - seaPalette.deepRgb[1]) * t;
           b = seaPalette.deepRgb[2] + (seaPalette.trenchRgb[2] - seaPalette.deepRgb[2]) * t;
+        }
+        if (biomeId === 23 && floraPalette.hasAnyLife) {
+          // Swirling marine algal bloom & kelp reef tinting in satellite view
+          const lat = 90 - gy;
+          const lon = gx - 180;
+          const bloomSwirl = sphericalFbm(lat * 4.2, lon * 4.2, surfaceModel.seed + 1907, 3);
+          const algalMix = Math.max(0.24, Math.min(0.66, (1 - depthRatio * 1.15) * (0.38 + 0.46 * bloomSwirl)));
+          const algR = floraPalette.lowRgb[0] * 0.72 + seaPalette.shallowRgb[0] * 0.28;
+          const algG = floraPalette.lowRgb[1] * 0.78 + seaPalette.shallowRgb[1] * 0.22;
+          const algB = floraPalette.lowRgb[2] * 0.68 + seaPalette.shallowRgb[2] * 0.32;
+          r = r * (1 - algalMix) + algR * algalMix;
+          g = g * (1 - algalMix) + algG * algalMix;
+          b = b * (1 - algalMix) + algB * algalMix;
         }
       }
     } else {
@@ -4256,7 +4301,7 @@ export function sampleSurfacePoint(
   const hNorm = model.hypsometry[idx];
   const volcVal = model.volcanoGrid[idx];
   const biomeId = model.biomeGrid[idx];
-  const isOcean = !model.isNoSurface && (biomeId === 0 || biomeId === 1 || biomeId === 2);
+  const isOcean = !model.isNoSurface && (biomeId === 0 || biomeId === 1 || biomeId === 2 || biomeId === 23);
   const isIceCell = biomeId === 8 || biomeId === 13 || biomeId === 18 || biomeId === 21;
   const isFrozenSea =
     !model.isNoSurface &&
@@ -4313,8 +4358,16 @@ export function sampleSurfacePoint(
     biomeColor = '#4a2518';
   } else if (isOcean) {
     const pal = model.seaPalette;
+    const fp = model.floraPalette;
     const isElevatedMeltPond = model.isIcyWorld && hNorm >= model.seaLevelNormalized;
-    if (isElevatedMeltPond && (pal.solventKey === 'H2O' || pal.solventKey === 'H2O + CO2')) {
+    if (biomeId === 23 && fp.hasAnyLife) {
+      biomeName = `Algal Sea (${fp.pigmentName})`;
+      biomeColor = rgbToHex([
+        Math.round(pal.shallowRgb[0] * 0.42 + fp.lowRgb[0] * 0.58),
+        Math.round(pal.shallowRgb[1] * 0.42 + fp.lowRgb[1] * 0.58),
+        Math.round(pal.shallowRgb[2] * 0.42 + fp.lowRgb[2] * 0.58),
+      ]);
+    } else if (isElevatedMeltPond && (pal.solventKey === 'H2O' || pal.solventKey === 'H2O + CO2')) {
       biomeName =
         biomeId === 1 ? 'Deep Meltwater Lake (Liquid H2O)' : 'Surface Meltwater Patch (Liquid H2O)';
       biomeColor = rgbToHex(biomeId === 1 ? pal.deepRgb : pal.shallowRgb);
@@ -4360,16 +4413,16 @@ export function sampleSurfacePoint(
     const fp = model.floraPalette;
     if (fp.hasAnyLife) {
       if (biomeId === 3) {
-        biomeName = `Coastal Marsh (${fp.pigmentName})`;
+        biomeName = `Coastal Marsh & Mangrove Forest (${fp.pigmentName})`;
         biomeColor = fp.marshHex;
       } else if (biomeId === 4) {
-        biomeName = `Vegetated Lowland Plains (${fp.pigmentName})`;
+        biomeName = `Grassland (${fp.pigmentName})`;
         biomeColor = fp.plainsHex;
       } else if (biomeId === 5) {
-        biomeName = `Temperate Forest / Flora (${fp.pigmentName})`;
+        biomeName = `Forest (${fp.pigmentName})`;
         biomeColor = fp.woodlandHex;
       } else {
-        biomeName = `High-Latitude Boreal Flora (${fp.pigmentName})`;
+        biomeName = `Boreal Forest (${fp.pigmentName})`;
         biomeColor = fp.taigaHex;
       }
     } else {

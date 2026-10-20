@@ -479,10 +479,10 @@ export function getPlanetaryGoldbergGrid(
   const { tileCount, cells, texelTileId } = topology;
 
   // Accumulators per tile over the 360x180 spherical grid (weighted by cos(lat) solid angle)
-  const biomeWeights = Array.from({ length: tileCount }, () => new Float32Array(24));
-  const biomeRepLat = Array.from({ length: tileCount }, () => new Float32Array(24));
-  const biomeRepLon = Array.from({ length: tileCount }, () => new Float32Array(24));
-  const biomeHasRep = Array.from({ length: tileCount }, () => new Uint8Array(24));
+  const biomeWeights = Array.from({ length: tileCount }, () => new Float32Array(25));
+  const biomeRepLat = Array.from({ length: tileCount }, () => new Float32Array(25));
+  const biomeRepLon = Array.from({ length: tileCount }, () => new Float32Array(25));
+  const biomeHasRep = Array.from({ length: tileCount }, () => new Uint8Array(25));
   const sumWeight = new Float32Array(tileCount);
   const sumHNorm = new Float32Array(tileCount);
   const minHNorm = new Float32Array(tileCount).fill(1.0);
@@ -540,7 +540,7 @@ export function getPlanetaryGoldbergGrid(
     // Pick primary dominant biome for this tile
     let bestBiome = 4;
     let bestW = -1;
-    for (let b = 0; b < 24; b++) {
+    for (let b = 0; b < 25; b++) {
       if (weights[b] > bestW) {
         bestW = weights[b];
         bestBiome = b;
@@ -549,7 +549,7 @@ export function getPlanetaryGoldbergGrid(
     // If the tile contains an active volcanic cone/caldera hotspot, preserve that geological feature
     if (maxVolcano[tId] > 1.1) {
       bestBiome = 15;
-    } else if (maxVolcano[tId] > 0.45 && bestBiome > 2) {
+    } else if (maxVolcano[tId] > 0.45 && bestBiome > 2 && bestBiome !== 23) {
       bestBiome = 22;
     }
 
@@ -600,7 +600,7 @@ export function getPlanetaryGoldbergGrid(
       let candW = 0;
       let candSample: ReturnType<typeof sampleSurfacePoint> | null = null;
 
-      for (let b = 0; b < 24; b++) {
+      for (let b = 0; b < 25; b++) {
         if (b === bestBiome) continue;
         const bw = weights[b];
         if (bw / w >= 0.08 && bw > candW && biomeHasRep[tId][b]) {
@@ -637,7 +637,7 @@ export function getPlanetaryGoldbergGrid(
         ? `${primaryBiomeName} + ${secondaryBiomeName}`
         : primaryBiomeName;
 
-    const isOcean = !surfaceModel.isNoSurface && (bestBiome <= 2 || bestBiome === 17);
+    const isOcean = !surfaceModel.isNoSurface && (bestBiome <= 2 || bestBiome === 17 || bestBiome === 23);
     const isIce = bestBiome === 8 || bestBiome === 13 || bestBiome === 18 || bestBiome === 21;
     const isLava =
       bestBiome === 15 ||

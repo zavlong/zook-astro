@@ -73,8 +73,9 @@ function valueNoise2D(x: number, y: number, seed: number): number {
   const iy = Math.floor(y);
   const fx = x - ix;
   const fy = y - iy;
-  const ux = fx * fx * (3 - 2 * fx);
-  const uy = fy * fy * (3 - 2 * fy);
+  // Quintic C2 smoothstep eliminates second-derivative kinks and square lattice lines
+  const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
+  const uy = fy * fy * (fy * (fy * 6 - 15) + 10) * fy;
 
   const n00 = hash2(ix, iy, seed);
   const n10 = hash2(ix + 1, iy, seed);
@@ -86,15 +87,29 @@ function valueNoise2D(x: number, y: number, seed: number): number {
   return nx0 + (nx1 - nx0) * uy;
 }
 
+// Dual-rotated isotropic 2D noise with zero axis-aligned square grid structure
+function isotropicNoise2D(x: number, y: number, seed: number): number {
+  const n1 = valueNoise2D(x, y, seed);
+  const rx = x * 0.788 - y * 0.6156 + 13.7;
+  const ry = x * 0.6156 + y * 0.788 - 9.3;
+  const n2 = valueNoise2D(rx, ry, seed + 101);
+  return (n1 + n2) * 0.5;
+}
+
 function fbm2D(x: number, y: number, seed: number, octaves = 5): number {
   let val = 0;
   let amp = 0.5;
-  let freq = 1.0;
   let norm = 0;
+  let rx = x;
+  let ry = y;
   for (let i = 0; i < octaves; i++) {
-    val += amp * valueNoise2D(x * freq, y * freq, seed + i * 31);
+    val += amp * valueNoise2D(rx, ry, seed + i * 31);
     norm += amp;
-    freq *= 2.04;
+    // Rotate domain by ~36.87 deg between octaves so grid axes never align
+    const nx = (rx * 0.8 - ry * 0.6) * 2.04 + 17.3;
+    const ny = (rx * 0.6 + ry * 0.8) * 2.04 - 11.7;
+    rx = nx;
+    ry = ny;
     amp *= 0.5;
   }
   return val / (norm || 1);
@@ -103,14 +118,19 @@ function fbm2D(x: number, y: number, seed: number, octaves = 5): number {
 function ridgedFbm2D(x: number, y: number, seed: number, octaves = 5): number {
   let val = 0;
   let amp = 0.5;
-  let freq = 1.0;
   let norm = 0;
+  let rx = x;
+  let ry = y;
   for (let i = 0; i < octaves; i++) {
-    const n = valueNoise2D(x * freq, y * freq, seed + i * 47);
-    const ridge = 1.0 - Math.abs(n * 2.0 - 1.0);
+    const n = valueNoise2D(rx, ry, seed + i * 47);
+    const centered = n * 2.0 - 1.0;
+    const ridge = 1.0 - Math.sqrt(centered * centered + 0.0015);
     val += amp * ridge * ridge;
     norm += amp;
-    freq *= 2.12;
+    const nx = (rx * 0.8 - ry * 0.6) * 2.12 + 23.1;
+    const ny = (rx * 0.6 + ry * 0.8) * 2.12 - 14.9;
+    rx = nx;
+    ry = ny;
     amp *= 0.5;
   }
   return val / (norm || 1);
@@ -242,10 +262,14 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       return t * t * (3 - 2 * t);
     };
 
-    const isBiomeOcean = (id: number) => !surfaceModel.isNoSurface && (id <= 2 || id === 17);
+    const isBiomeOcean = (id: number) => !surfaceModel.isNoSurface && (id <= 2 || id === 17 || id === 23);
     const isBiomeIce = (id: number) => id === 8 || id === 13 || id === 18 || id === 21;
     const anyOceanBiome = isBiomeOcean(bId1) || (bId2 !== null && isBiomeOcean(bId2));
     const isPureOceanTile = isBiomeOcean(bId1) && (bId2 === null || isBiomeOcean(bId2));
+    const hasAlgalSeaBiome =
+      !surfaceModel.isNoSurface &&
+      surfaceModel.floraPalette.hasAnyLife &&
+      (bId1 === 23 || bId2 === 23);
 
     // Effective crater intensity combines tile peak crater score, craterland biome ID, and thin/airless atmosphere
     const atmoCraterFloor =
@@ -416,10 +440,9 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           hLocal: bandWave * 0.045,
           craterRimTint: 0,
           craterBowlTint: 0,
-          isOceanPoint: false,
-          isCalderaLava: false,
-          isLavaRiver: false,
-          isFissureFloor: false,
+          oceanWeight: 0,
+          lavaWeight: 0,
+          fissureWeight: 0,
           baseFbm: bandWave * 0.5 + 0.5,
           ridge: 0.5,
           biomeMix: 0,
@@ -446,18 +469,20 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         hLocal = h1 * (1 - biomeMix) + h2 * biomeMix;
       }
 
-      // Determine whether this point belongs to an ocean/sea biome before carving craters
+      // Smooth continuous ocean weight (no blocky step)
       const oceanWeightAtPoint =
         (isBiomeOcean(bId1) ? 1 - biomeMix : 0) + (bId2 !== null && isBiomeOcean(bId2) ? biomeMix : 0);
-      const isOceanPoint = !surfaceModel.isNoSurface && anyOceanBiome && oceanWeightAtPoint >= 0.45;
-      if (!isOceanPoint) {
+      const oceanWeight = !surfaceModel.isNoSurface && anyOceanBiome
+        ? Math.max(0, Math.min(1, (oceanWeightAtPoint - 0.35) / 0.2))
+        : 0;
+      if (oceanWeight < 0.5) {
         hLocal = Math.max(0.025, hLocal);
       }
 
       // Carve impact craters with deep concave bowls, raised ejecta rims, and central peaks on solid terrain
       let craterRimTint = 0;
       let craterBowlTint = 0;
-      if (!isOceanPoint) {
+      if (oceanWeight < 0.5) {
         for (let c = 0; c < craters.length; c++) {
           const cr = craters[c];
           const d = Math.hypot(px - cr.cx, pz - cr.cz);
@@ -482,9 +507,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         }
       }
 
-      // Add Volcanic Cones, Summit Calderas & Braided Lava Channels
-      let isCalderaLava = false;
-      let isLavaRiver = false;
+      // Add Volcanic Cones, Summit Calderas & Braided Lava Channels with smooth continuous weights
+      let lavaWeight = 0;
       if (hasVolcanoes) {
         for (let v = 0; v < volcanicCones.length; v++) {
           const vc = volcanicCones[v];
@@ -494,14 +518,17 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             if (uv < 0.20) {
               const pit = 1.0 - (uv / 0.20) * (uv / 0.20);
               hLocal += vc.height * 0.72 - pit * (vc.height * 0.36);
-              if (uv < 0.14) isCalderaLava = true;
+              if (uv < 0.16) {
+                lavaWeight = Math.max(lavaWeight, Math.min(1, (0.16 - uv) / 0.04));
+              }
             } else {
               const cone = Math.pow(Math.max(0, 1.0 - (uv - 0.20) / 1.35), 1.65);
               hLocal += vc.height * cone;
               const lavaAng = Math.atan2(pz - vc.vz, px - vc.vx);
               const flowChannel = Math.sin(lavaAng * 4 + dv * 14 + baseFbm * 5);
-              if (flowChannel > 0.76 && uv < 1.15) {
-                isLavaRiver = true;
+              if (flowChannel > 0.72 && uv < 1.15) {
+                const chW = Math.min(1, (flowChannel - 0.72) / 0.12) * Math.min(1, (1.15 - uv) / 0.15);
+                lavaWeight = Math.max(lavaWeight, chW);
               }
             }
           }
@@ -509,7 +536,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       }
 
       // Apply Cryotectonic Ice Fissure or Tectonic Magma Rift Canyon
-      let isFissureFloor = false;
+      let fissureWeight = 0;
       if (
         activeTile.fractureIntensity > 0.12 ||
         bId1 === 21 ||
@@ -523,8 +550,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         if (fissureCurve < 0.062) {
           const cleft = 1.0 - fissureCurve / 0.062;
           hLocal -= cleft * 0.13;
-          if (fissureCurve < 0.026) {
-            isFissureFloor = true;
+          if (fissureCurve < 0.032) {
+            fissureWeight = Math.min(1, (0.032 - fissureCurve) / 0.012);
           }
         }
       }
@@ -533,10 +560,9 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         hLocal,
         craterRimTint,
         craterBowlTint,
-        isOceanPoint,
-        isCalderaLava,
-        isLavaRiver,
-        isFissureFloor,
+        oceanWeight,
+        lavaWeight,
+        fissureWeight,
         baseFbm,
         ridge,
         biomeMix,
@@ -546,11 +572,11 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     // Build 3D vertices and smooth vertex normals strictly within the active tile
     const vertices: LocalVertex[] = [];
     const buildVertex = (px: number, pz: number, edgeFrac: number): LocalVertex => {
-      const { hLocal, isOceanPoint } = sampleHeightOnly(px, pz);
+      const { hLocal, oceanWeight } = sampleHeightOnly(px, pz);
       const eps = 0.022;
       const hx = sampleHeightOnly(px + eps, pz).hLocal;
       const hz = sampleHeightOnly(px, pz + eps).hLocal;
-      const hasSeaHere = isOceanPoint && hLocal < 0;
+      const hasSeaHere = oceanWeight >= 0.5 && hLocal < 0;
       const rawY = hasSeaHere ? 0 : hLocal;
       // Smoothly meet the y=0 perspective plane right at the tile perimeter so there is no cliff wall at the border
       const edgeTaper = edgeFrac > 0.85 ? Math.max(0, 1.0 - (edgeFrac - 0.85) / 0.15) : 1.0;
@@ -641,7 +667,9 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const macroBowlGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroShadowGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroMixGrid = new Float32Array(MACRO_N * MACRO_N);
-    const macroSpecialGrid = new Uint8Array(MACRO_N * MACRO_N);
+    const macroOceanGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroLavaGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroFissureGrid = new Float32Array(MACRO_N * MACRO_N);
 
     for (let mz = 0; mz < MACRO_N; mz++) {
       const pz = (mz / (MACRO_N - 1)) * 2.0 - 1.0;
@@ -656,11 +684,25 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         macroBowlGrid[mIdx] = sh.craterBowlTint;
         macroShadowGrid[mIdx] = sampleCloudDensityAt(px + 0.08, pz - 0.06);
         macroMixGrid[mIdx] = sh.biomeMix;
-        let sp = 0;
-        if (sh.isCalderaLava || sh.isLavaRiver) sp |= 1;
-        if (sh.isFissureFloor) sp |= 2;
-        if (sh.isOceanPoint) sp |= 4;
-        macroSpecialGrid[mIdx] = sp;
+        macroOceanGrid[mIdx] = sh.oceanWeight;
+        macroLavaGrid[mIdx] = sh.lavaWeight;
+        macroFissureGrid[mIdx] = sh.fissureWeight;
+      }
+    }
+
+    // Precompute vertex-centered central-difference slopes so macro normals interpolate smoothly without cell borders
+    const macroDhxGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroDhzGrid = new Float32Array(MACRO_N * MACRO_N);
+    const stepInv = (MACRO_N - 1) * 0.25;
+    for (let mz = 0; mz < MACRO_N; mz++) {
+      const mzPrev = Math.max(0, mz - 1);
+      const mzNext = Math.min(MACRO_N - 1, mz + 1);
+      for (let mx = 0; mx < MACRO_N; mx++) {
+        const mxPrev = Math.max(0, mx - 1);
+        const mxNext = Math.min(MACRO_N - 1, mx + 1);
+        const mIdx = mz * MACRO_N + mx;
+        macroDhxGrid[mIdx] = (macroHGrid[mz * MACRO_N + mxNext] - macroHGrid[mz * MACRO_N + mxPrev]) * stepInv;
+        macroDhzGrid[mIdx] = (macroHGrid[mzNext * MACRO_N + mx] - macroHGrid[mzPrev * MACRO_N + mx]) * stepInv;
       }
     }
 
@@ -683,7 +725,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       grain: number,
       baseBumpX: number,
       baseBumpZ: number,
-      isFissureFloor: boolean
+      fissureWeight: number
     ): { r: number; g: number; b: number; bumpX: number; bumpZ: number; flags: number } => {
       let r = targetBaseRgb[0];
       let g = targetBaseRgb[1];
@@ -713,12 +755,12 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           surfaceModel.compositionPalette.compositionLabel.includes('Tholin');
         const sastrugiWave = Math.sin(px * 65 - pz * 32 + fine1 * 5.5);
         const crevassePattern = Math.abs(fine1 * 2.0 - 1.0 + (ridge - 0.5) * 0.6);
-        const isCrevasse = crevassePattern < 0.14 || isFissureFloor;
+        const isCrevasse = crevassePattern < 0.14 || fissureWeight > 0.35;
         bumpX += Math.cos(px * 65 - pz * 32 + fine1 * 5.5) * 0.65;
         bumpZ -= Math.sin(px * 65 - pz * 32 + fine1 * 5.5) * 0.45;
 
         if (isCrevasse) {
-          const depthCrev = isFissureFloor ? 0.85 : 1.0 - crevassePattern / 0.14;
+          const depthCrev = Math.max(fissureWeight * 0.85, Math.max(0, 1.0 - crevassePattern / 0.14));
           r = Math.round(targetBaseRgb[0] * (1 - depthCrev * 0.62) + (isTholinIce ? 92 : 38) * (depthCrev * 0.62));
           g = Math.round(targetBaseRgb[1] * (1 - depthCrev * 0.48) + (isTholinIce ? 36 : 128) * (depthCrev * 0.48));
           b = Math.round(targetBaseRgb[2] * (1 - depthCrev * 0.38) + (isTholinIce ? 18 : 210) * (depthCrev * 0.38));
@@ -730,14 +772,15 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           b = Math.round(targetBaseRgb[2] * 0.7 + iceRgb[2] * 0.3 + frostSparkle * (isTholinIce ? 0.42 : 1.1));
         }
       } else if (hasBioB) {
+        const isForestBiome = targetBiomeId === 5 || targetBiomeId === 6;
         const canopyDensity = Math.max(
           0,
-          Math.min(1, baseFbm * 1.2 + (targetBiomeId === 5 ? 0.28 : targetBiomeId === 6 ? 0.18 : -0.08))
+          Math.min(1, baseFbm * 1.18 + (targetBiomeId === 5 ? 0.34 : targetBiomeId === 6 ? 0.22 : -0.14))
         );
         const cell = cellularFeature2D(px * 26.0, pz * 26.0, tileSeed + 809);
-        const crownRadius = 0.28 + canopyDensity * 0.26;
+        const crownRadius = (isForestBiome ? 0.32 : 0.22) + canopyDensity * 0.26;
 
-        if (cell.dist < crownRadius && slope < 0.52 && hLocal > 0.018 && hLocal < 0.27) {
+        if (cell.dist < crownRadius && slope < 0.52 && hLocal > 0.018 && hLocal < 0.29) {
           const uCrown = cell.dist / crownRadius;
           const crownHeightProfile = Math.sqrt(Math.max(0, 1.0 - uCrown * uCrown));
           bumpX = (cell.dx / crownRadius) * 1.45 + (fine2 - 0.5) * 0.45;
@@ -745,20 +788,27 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
 
           const speciesShade =
             (cell.cellHash - 0.5) * 26 + crownHeightProfile * 18 - (1 - crownHeightProfile) * 22;
-          const isJungleOrTaiga = targetBiomeId === 5 || targetBiomeId === 6;
-          const cRgb = isJungleOrTaiga ? forestRgb : plainsRgb;
+          const cRgb = isForestBiome ? forestRgb : plainsRgb;
           r = Math.round(cRgb[0] + speciesShade + fine2 * 14);
           g = Math.round(cRgb[1] + speciesShade * 1.15 + fine2 * 18);
           b = Math.round(cRgb[2] + speciesShade * 0.7 + fine2 * 10);
         } else {
+          // Lush Grassland / Savanna meadow waves & wetland undergrowth
           const wetlandT = hLocal < 0.055 ? Math.max(0, Math.min(1, (0.055 - hLocal) / 0.055)) : 0;
           const grassWave = Math.sin(px * 48 + pz * 32 + fine1 * 6) * 10 + grain * 14;
-          r = Math.round(plainsRgb[0] * (1 - wetlandT * 0.7) + marshRgb[0] * (wetlandT * 0.7) + grassWave);
+          const meadowRgb = isForestBiome
+            ? [
+                Math.round(plainsRgb[0] * 0.55 + forestRgb[0] * 0.45),
+                Math.round(plainsRgb[1] * 0.55 + forestRgb[1] * 0.45),
+                Math.round(plainsRgb[2] * 0.55 + forestRgb[2] * 0.45),
+              ]
+            : plainsRgb;
+          r = Math.round(meadowRgb[0] * (1 - wetlandT * 0.7) + marshRgb[0] * (wetlandT * 0.7) + grassWave);
           g = Math.round(
-            plainsRgb[1] * (1 - wetlandT * 0.7) + marshRgb[1] * (wetlandT * 0.7) + grassWave * 1.1
+            meadowRgb[1] * (1 - wetlandT * 0.7) + marshRgb[1] * (wetlandT * 0.7) + grassWave * 1.1
           );
           b = Math.round(
-            plainsRgb[2] * (1 - wetlandT * 0.7) + marshRgb[2] * (wetlandT * 0.7) + grassWave * 0.8
+            meadowRgb[2] * (1 - wetlandT * 0.7) + marshRgb[2] * (wetlandT * 0.7) + grassWave * 0.8
           );
         }
       } else if (isDesertB) {
@@ -845,6 +895,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       const mfz = vNorm * (MACRO_N - 1);
       const miz = Math.min(MACRO_N - 2, Math.floor(mfz));
       const fz = mfz - miz;
+      // Smoothstep Hermite weight eliminates linear interpolation kinks along MACRO_N rows
+      const sfz = fz * fz * (3 - 2 * fz);
 
       for (let tx = 0; tx < TEX_RES; tx++) {
         const uNorm = tx / (TEX_RES - 1);
@@ -852,16 +904,17 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         const mfx = uNorm * (MACRO_N - 1);
         const mix = Math.min(MACRO_N - 2, Math.floor(mfx));
         const fx = mfx - mix;
+        const sfx = fx * fx * (3 - 2 * fx);
 
         const i00 = miz * MACRO_N + mix;
         const i10 = i00 + 1;
         const i01 = i00 + MACRO_N;
         const i11 = i01 + 1;
 
-        const w00 = (1 - fx) * (1 - fz);
-        const w10 = fx * (1 - fz);
-        const w01 = (1 - fx) * fz;
-        const w11 = fx * fz;
+        const w00 = (1 - sfx) * (1 - sfz);
+        const w10 = sfx * (1 - sfz);
+        const w01 = (1 - sfx) * sfz;
+        const w11 = sfx * sfz;
 
         const hLocal =
           macroHGrid[i00] * w00 +
@@ -899,26 +952,48 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           macroMixGrid[i01] * w01 +
           macroMixGrid[i11] * w11;
 
-        // Macro slope from finite difference on macroHGrid
-        const dhx = (macroHGrid[i10] - macroHGrid[i00]) * (MACRO_N * 0.5);
-        const dhz = (macroHGrid[i01] - macroHGrid[i00]) * (MACRO_N * 0.5);
+        // Smoothly interpolated central-difference macro slope (zero square cell boundaries)
+        const dhx =
+          macroDhxGrid[i00] * w00 +
+          macroDhxGrid[i10] * w10 +
+          macroDhxGrid[i01] * w01 +
+          macroDhxGrid[i11] * w11;
+        const dhz =
+          macroDhzGrid[i00] * w00 +
+          macroDhzGrid[i10] * w10 +
+          macroDhzGrid[i01] * w01 +
+          macroDhzGrid[i11] * w11;
         const slope = Math.hypot(dhx, dhz);
 
-        const spMask = macroSpecialGrid[i00] | macroSpecialGrid[i10] | macroSpecialGrid[i01] | macroSpecialGrid[i11];
-        const isLavaSpecial = (spMask & 1) !== 0;
-        const isFissureFloor = (spMask & 2) !== 0;
-        const isOceanPoint = (spMask & 4) !== 0;
+        // Smoothly interpolated feature weights instead of coarse bitwise cell masks
+        const oceanWeight =
+          macroOceanGrid[i00] * w00 +
+          macroOceanGrid[i10] * w10 +
+          macroOceanGrid[i01] * w01 +
+          macroOceanGrid[i11] * w11;
+        const lavaWeight =
+          macroLavaGrid[i00] * w00 +
+          macroLavaGrid[i10] * w10 +
+          macroLavaGrid[i01] * w01 +
+          macroLavaGrid[i11] * w11;
+        const fissureWeight =
+          macroFissureGrid[i00] * w00 +
+          macroFissureGrid[i10] * w10 +
+          macroFissureGrid[i01] * w01 +
+          macroFissureGrid[i11] * w11;
+        const isOceanPoint = oceanWeight >= 0.48;
 
-        // High-frequency micro-texture noises at pixel resolution
-        const fine1 = valueNoise2D(px * 28.0, pz * 28.0, tileSeed + 313);
-        const fine2 = valueNoise2D(px * 64.0, pz * 64.0, tileSeed + 419);
-        const grain = hash2(tx, tz, tileSeed + 521) - 0.5;
+        // Isotropic dual-rotated continuous micro-texture noises at pixel resolution
+        const fine1 = isotropicNoise2D(px * 28.0, pz * 28.0, tileSeed + 313);
+        const fine2 = isotropicNoise2D(px * 64.0, pz * 64.0, tileSeed + 419);
+        const fine3 = isotropicNoise2D(px * 148.0, pz * 148.0, tileSeed + 521);
+        const grain = (fine3 - 0.5) * 0.65 + (fine2 - 0.5) * 0.35;
 
-        // Micro-normal gradient from fine procedural noise + macro crater/hill slope
-        const fineRight = valueNoise2D((px + 0.006) * 42.0, pz * 42.0, tileSeed + 313);
-        const fineDown = valueNoise2D(px * 42.0, (pz + 0.006) * 42.0, tileSeed + 313);
-        let bumpX = -dhx * 1.45 + (fine1 - fineRight) * 2.2;
-        let bumpZ = -dhz * 1.45 + (fine1 - fineDown) * 2.2;
+        // Micro-normal gradient evaluated at the exact same frequency (28.0) as fine1 so no square grid embosses
+        const fineRight = isotropicNoise2D((px + 0.005) * 28.0, pz * 28.0, tileSeed + 313);
+        const fineDown = isotropicNoise2D(px * 28.0, (pz + 0.005) * 28.0, tileSeed + 313);
+        let bumpX = -dhx * 1.35 + (fine1 - fineRight) * 2.1;
+        let bumpZ = -dhz * 1.35 + (fine1 - fineDown) * 2.1;
 
         let r = baseRgb1[0];
         let g = baseRgb1[1];
@@ -935,9 +1010,9 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           const hasSeaHere = isOceanPoint && hLocal < 0;
           const waterDepth = hasSeaHere ? Math.max(0, -hLocal) : 0;
 
-          if (isLavaSpecial || (isFissureFloor && isVolcanicAny)) {
+          if (lavaWeight > 0.35 || (fissureWeight > 0.45 && isVolcanicAny)) {
             // Incandescent magma channel with dark cooling crust plates & white-hot core veins
-            const crustCrack = valueNoise2D(px * 45, pz * 45, tileSeed + 601);
+            const crustCrack = isotropicNoise2D(px * 45, pz * 45, tileSeed + 601);
             if (crustCrack > 0.32) {
               const hot = Math.min(1, (crustCrack - 0.32) / 0.55);
               r = 255;
@@ -983,6 +1058,22 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                 b = Math.round(dp[2] + (tr[2] - dp[2]) * u);
               }
 
+              // Lush swirling Algal Sea blooms & kelp reef filaments on life-bearing marine tiles
+              if (hasAlgalSeaBiome || (surfaceModel.floraPalette.hasAnyLife && depthT < 0.52)) {
+                const bloomSwirl = Math.sin(px * 24.0 + pz * 19.0 + baseFbm * 7.5 + fine1 * 3.2) * 0.5 + 0.5;
+                const kelpFronds = Math.max(0, fine2 * 0.7 + bloomSwirl * 0.5 - 0.36);
+                const algalStrength =
+                  (hasAlgalSeaBiome ? 0.68 : 0.32) *
+                  Math.max(0.15, 1.0 - depthT * 0.85) *
+                  Math.min(1.0, kelpFronds * 1.55);
+                const algR = plainsRgb[0] * 0.65 + forestRgb[0] * 0.35;
+                const algG = plainsRgb[1] * 0.68 + forestRgb[1] * 0.32;
+                const algB = plainsRgb[2] * 0.55 + sh[2] * 0.45;
+                r = Math.round(r * (1 - algalStrength) + algR * algalStrength);
+                g = Math.round(g * (1 - algalStrength) + algG * algalStrength);
+                b = Math.round(b * (1 - algalStrength) + algB * algalStrength);
+              }
+
               // Shallow subsurface reef/shoal caustics & lacy shoreline breaking surf foam
               if (waterDepth < 0.045) {
                 const shoalT = (1.0 - waterDepth / 0.045) * 0.48;
@@ -1024,7 +1115,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
               grain,
               bumpX,
               bumpZ,
-              isFissureFloor
+              fissureWeight
             );
 
             if (hasSecondaryBiome && bId2 !== null && biomeMix > 0.03) {
@@ -1044,7 +1135,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                 grain,
                 bumpX,
                 bumpZ,
-                isFissureFloor
+                fissureWeight
               );
               // Perturb mix with fine micro-patch noise so individual rocks, trees, and dunes interleave naturally
               const microMix = Math.max(0, Math.min(1, biomeMix + (fine1 - 0.5) * 0.28));
@@ -1114,6 +1205,12 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             }
           }
         }
+
+        // Smoothly taper perpendicular bump slopes right at the [-1, +1] tile edges so mirrored infinite plane has zero seam lines
+        const edgeX = Math.abs(px) > 0.88 ? Math.max(0, 1.0 - (Math.abs(px) - 0.88) / 0.12) : 1.0;
+        const edgeZ = Math.abs(pz) > 0.88 ? Math.max(0, 1.0 - (Math.abs(pz) - 0.88) / 0.12) : 1.0;
+        bumpX *= edgeX * edgeX * (3 - 2 * edgeX);
+        bumpZ *= edgeZ * edgeZ * (3 - 2 * edgeZ);
 
         const tIdx = tz * TEX_RES + tx;
         texR[tIdx] = Math.max(0, Math.min(255, r));
@@ -1435,23 +1532,25 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             if (depth < zBuffer[pIdx]) {
               zBuffer[pIdx] = depth;
 
-              // Interpolate texture coordinates (u, v) and sample with bilinear filtering
+              // Interpolate texture coordinates (u, v) and sample with Hermite smoothstep filtering
               const tu = Math.max(0, Math.min(texMax - 0.001, w0 * u0 + w1 * u1 + w2 * u2));
               const tv = Math.max(0, Math.min(texMax - 0.001, w0 * tv0 + w1 * tv1 + w2 * tv2));
               const iu = tu | 0;
               const iv = tv | 0;
               const fu = tu - iu;
               const fv = tv - iv;
+              const sfu = fu * fu * (3 - 2 * fu);
+              const sfv = fv * fv * (3 - 2 * fv);
 
               const ti00 = iv * TEX_RES + iu;
               const ti10 = ti00 + 1;
               const ti01 = ti00 + TEX_RES;
               const ti11 = ti01 + 1;
 
-              const tw00 = (1 - fu) * (1 - fv);
-              const tw10 = fu * (1 - fv);
-              const tw01 = (1 - fu) * fv;
-              const tw11 = fu * fv;
+              const tw00 = (1 - sfu) * (1 - sfv);
+              const tw10 = sfu * (1 - sfv);
+              const tw01 = (1 - sfu) * sfv;
+              const tw11 = sfu * sfv;
 
               let r = texR[ti00] * tw00 + texR[ti10] * tw10 + texR[ti01] * tw01 + texR[ti11] * tw11;
               let g = texG[ti00] * tw00 + texG[ti10] * tw10 + texG[ti01] * tw01 + texG[ti11] * tw11;
@@ -1464,10 +1563,21 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                 (texBumpZ[ti00] * tw00 + texBumpZ[ti10] * tw10 + texBumpZ[ti01] * tw01 + texBumpZ[ti11] * tw11) *
                 (1 / 64);
 
-              const flags = texFlags[ti00];
-              const isLava = (flags & FLAG_LAVA) !== 0;
+              const f00 = texFlags[ti00];
+              const f10 = texFlags[ti10];
+              const f01 = texFlags[ti01];
+              const f11 = texFlags[ti11];
+              const lavaW =
+                ((f00 & FLAG_LAVA) ? tw00 : 0) +
+                ((f10 & FLAG_LAVA) ? tw10 : 0) +
+                ((f01 & FLAG_LAVA) ? tw01 : 0) +
+                ((f11 & FLAG_LAVA) ? tw11 : 0);
 
-              if (!isLava) {
+              if (lavaW < 0.99) {
+                const rawR = r;
+                const rawG = g;
+                const rawB = b;
+
                 // Combine Gouraud-interpolated macro terrain normal with per-pixel texture bump normal
                 const mnx = (w0 * v0.nx + w1 * v1.nx + w2 * v2.nx) * verticalExag + bx * 0.42;
                 const mny = w0 * v0.ny + w1 * v1.ny + w2 * v2.ny;
@@ -1478,7 +1588,13 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                 const nz = mnz * invN;
 
                 const ndotl = Math.max(0, nx * lx + ny * ly + nz * lz);
-                const cShad = (texCloudShadow[ti00] * (1 / 255)) * cloudShadowStrength;
+                const cShad =
+                  (texCloudShadow[ti00] * tw00 +
+                    texCloudShadow[ti10] * tw10 +
+                    texCloudShadow[ti01] * tw01 +
+                    texCloudShadow[ti11] * tw11) *
+                  (1 / 255) *
+                  cloudShadowStrength;
                 const shadowAtten = 1.0 - cShad;
                 const diff = (0.30 + 0.78 * ndotl * shadowAtten) * nightDim;
 
@@ -1486,18 +1602,29 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                 g *= diff;
                 b *= diff;
 
-                // Per-pixel specular highlights on water wave facets & crystalline glacial ice facets
-                if (!isNight && (flags & (FLAG_WATER | FLAG_ICE_SPEC)) !== 0) {
-                  const ndoth = Math.max(0, nx * halfX + ny * halfY + nz * halfZ);
-                  const isWater = (flags & FLAG_WATER) !== 0;
-                  const isTholinSpec = !isWater && isTholinWorldSpec;
-                  const specPow = isWater
-                    ? Math.pow(ndoth, 24) * 0.58
-                    : Math.pow(ndoth, 16) * (isTholinSpec ? 0.18 : 0.30);
-                  const spec = specPow * shadowAtten;
-                  r += (isTholinSpec ? 245 : 230) * spec;
-                  g += (isTholinSpec ? 185 : 244) * spec;
-                  b += (isTholinSpec ? 120 : 255) * spec;
+                // Smoothly interpolated specular highlights on water wave facets & crystalline glacial ice facets
+                if (!isNight) {
+                  const waterW =
+                    ((f00 & FLAG_WATER) ? tw00 : 0) +
+                    ((f10 & FLAG_WATER) ? tw10 : 0) +
+                    ((f01 & FLAG_WATER) ? tw01 : 0) +
+                    ((f11 & FLAG_WATER) ? tw11 : 0);
+                  const iceW =
+                    ((f00 & FLAG_ICE_SPEC) ? tw00 : 0) +
+                    ((f10 & FLAG_ICE_SPEC) ? tw10 : 0) +
+                    ((f01 & FLAG_ICE_SPEC) ? tw01 : 0) +
+                    ((f11 & FLAG_ICE_SPEC) ? tw11 : 0);
+                  if (waterW + iceW > 0.01) {
+                    const ndoth = Math.max(0, nx * halfX + ny * halfY + nz * halfZ);
+                    const isTholinSpec = waterW < 0.5 && isTholinWorldSpec;
+                    const specPow =
+                      waterW * (Math.pow(ndoth, 24) * 0.58) +
+                      iceW * (Math.pow(ndoth, 16) * (isTholinSpec ? 0.18 : 0.30));
+                    const spec = specPow * shadowAtten;
+                    r += (isTholinSpec ? 245 : 230) * spec;
+                    g += (isTholinSpec ? 185 : 244) * spec;
+                    b += (isTholinSpec ? 120 : 255) * spec;
+                  }
                 }
 
                 // Distance-based atmospheric aerial perspective haze
@@ -1507,6 +1634,12 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                   r = r * (1 - fog) + hazeRgb[0] * fog;
                   g = g * (1 - fog) + hazeRgb[1] * fog;
                   b = b * (1 - fog) + hazeRgb[2] * fog;
+                }
+
+                if (lavaW > 0.01) {
+                  r = r * (1 - lavaW) + rawR * lavaW;
+                  g = g * (1 - lavaW) + rawG * lavaW;
+                  b = b * (1 - lavaW) + rawB * lavaW;
                 }
               }
 
@@ -1553,8 +1686,10 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         if (zBuffer[pIdx] === 1e9) {
           // Fold world coordinates into [-1, 1] without stretching so texture continues at 1:1 scale to infinity
           const twx = (((wx + 1) * 0.5) % 2 + 2) % 2;
+          const signX = twx <= 1 ? 1 : -1;
           const fxMir = (twx <= 1 ? twx : 2 - twx) * 2 - 1;
           const twz = (((wz + 1) * 0.5) % 2 + 2) % 2;
+          const signZ = twz <= 1 ? 1 : -1;
           const fzMir = (twz <= 1 ? twz : 2 - twz) * 2 - 1;
 
           const tu = Math.max(0, Math.min(texMax - 0.001, (fxMir * 0.5 + 0.5) * texMax));
@@ -1563,16 +1698,18 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           const iv = tv | 0;
           const fu = tu - iu;
           const fv = tv - iv;
+          const sfu = fu * fu * (3 - 2 * fu);
+          const sfv = fv * fv * (3 - 2 * fv);
 
           const ti00 = iv * TEX_RES + iu;
           const ti10 = ti00 + 1;
           const ti01 = ti00 + TEX_RES;
           const ti11 = ti01 + 1;
 
-          const tw00 = (1 - fu) * (1 - fv);
-          const tw10 = fu * (1 - fv);
-          const tw01 = (1 - fu) * fv;
-          const tw11 = fu * fv;
+          const tw00 = (1 - sfu) * (1 - sfv);
+          const tw10 = sfu * (1 - sfv);
+          const tw01 = (1 - sfu) * sfv;
+          const tw11 = sfu * sfv;
 
           let r = texR[ti00] * tw00 + texR[ti10] * tw10 + texR[ti01] * tw01 + texR[ti11] * tw11;
           let g = texG[ti00] * tw00 + texG[ti10] * tw10 + texG[ti01] * tw01 + texG[ti11] * tw11;
@@ -1580,15 +1717,28 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
 
           const bx =
             (texBumpX[ti00] * tw00 + texBumpX[ti10] * tw10 + texBumpX[ti01] * tw01 + texBumpX[ti11] * tw11) *
-            (1 / 64);
+            (1 / 64) *
+            signX;
           const bz =
             (texBumpZ[ti00] * tw00 + texBumpZ[ti10] * tw10 + texBumpZ[ti01] * tw01 + texBumpZ[ti11] * tw11) *
-            (1 / 64);
+            (1 / 64) *
+            signZ;
 
-          const flags = texFlags[ti00];
-          const isLava = (flags & FLAG_LAVA) !== 0;
+          const f00 = texFlags[ti00];
+          const f10 = texFlags[ti10];
+          const f01 = texFlags[ti01];
+          const f11 = texFlags[ti11];
+          const lavaW =
+            ((f00 & FLAG_LAVA) ? tw00 : 0) +
+            ((f10 & FLAG_LAVA) ? tw10 : 0) +
+            ((f01 & FLAG_LAVA) ? tw01 : 0) +
+            ((f11 & FLAG_LAVA) ? tw11 : 0);
 
-          if (!isLava) {
+          if (lavaW < 0.99) {
+            const rawR = r;
+            const rawG = g;
+            const rawB = b;
+
             const mnx = bx * 0.42;
             const mny = 1.0;
             const mnz = bz * 0.42;
@@ -1598,7 +1748,13 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             const nz = mnz * invN;
 
             const ndotl = Math.max(0, nx * lx + ny * ly + nz * lz);
-            const cShad = (texCloudShadow[ti00] * (1 / 255)) * cloudShadowStrength;
+            const cShad =
+              (texCloudShadow[ti00] * tw00 +
+                texCloudShadow[ti10] * tw10 +
+                texCloudShadow[ti01] * tw01 +
+                texCloudShadow[ti11] * tw11) *
+              (1 / 255) *
+              cloudShadowStrength;
             const shadowAtten = 1.0 - cShad;
             const diff = (0.30 + 0.78 * ndotl * shadowAtten) * nightDim;
 
@@ -1606,23 +1762,40 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             g *= diff;
             b *= diff;
 
-            if (!isNight && (flags & (FLAG_WATER | FLAG_ICE_SPEC)) !== 0) {
-              const ndoth = Math.max(0, nx * halfX + ny * halfY + nz * halfZ);
-              const isWater = (flags & FLAG_WATER) !== 0;
-              const isTholinSpec = !isWater && isTholinWorldSpec;
-              const specPow = isWater
-                ? Math.pow(ndoth, 24) * 0.58
-                : Math.pow(ndoth, 16) * (isTholinSpec ? 0.18 : 0.30);
-              const spec = specPow * shadowAtten;
-              r += (isTholinSpec ? 245 : 230) * spec;
-              g += (isTholinSpec ? 185 : 244) * spec;
-              b += (isTholinSpec ? 120 : 255) * spec;
+            if (!isNight) {
+              const waterW =
+                ((f00 & FLAG_WATER) ? tw00 : 0) +
+                ((f10 & FLAG_WATER) ? tw10 : 0) +
+                ((f01 & FLAG_WATER) ? tw01 : 0) +
+                ((f11 & FLAG_WATER) ? tw11 : 0);
+              const iceW =
+                ((f00 & FLAG_ICE_SPEC) ? tw00 : 0) +
+                ((f10 & FLAG_ICE_SPEC) ? tw10 : 0) +
+                ((f01 & FLAG_ICE_SPEC) ? tw01 : 0) +
+                ((f11 & FLAG_ICE_SPEC) ? tw11 : 0);
+              if (waterW + iceW > 0.01) {
+                const ndoth = Math.max(0, nx * halfX + ny * halfY + nz * halfZ);
+                const isTholinSpec = waterW < 0.5 && isTholinWorldSpec;
+                const specPow =
+                  waterW * (Math.pow(ndoth, 24) * 0.58) +
+                  iceW * (Math.pow(ndoth, 16) * (isTholinSpec ? 0.18 : 0.30));
+                const spec = specPow * shadowAtten;
+                r += (isTholinSpec ? 245 : 230) * spec;
+                g += (isTholinSpec ? 185 : 244) * spec;
+                b += (isTholinSpec ? 120 : 255) * spec;
+              }
             }
 
             if (totalFog > 0) {
               r = r * (1 - totalFog) + hazeRgb[0] * totalFog;
               g = g * (1 - totalFog) + hazeRgb[1] * totalFog;
               b = b * (1 - totalFog) + hazeRgb[2] * totalFog;
+            }
+
+            if (lavaW > 0.01) {
+              r = r * (1 - lavaW) + rawR * lavaW;
+              g = g * (1 - lavaW) + rawG * lavaW;
+              b = b * (1 - lavaW) + rawB * lavaW;
             }
           }
 

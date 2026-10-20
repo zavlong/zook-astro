@@ -54,8 +54,9 @@ function valueNoise2D(x: number, y: number, seed: number): number {
   const iy = Math.floor(y);
   const fx = x - ix;
   const fy = y - iy;
-  const ux = fx * fx * (3 - 2 * fx);
-  const uy = fy * fy * (3 - 2 * fy);
+  // Quintic C2 interpolation (6t^5 - 15t^4 + 10t^3) eliminates C1 second-derivative creases along grid lines
+  const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
+  const uy = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
 
   const n00 = hash2(ix, iy, seed);
   const n10 = hash2(ix + 1, iy, seed);
@@ -67,15 +68,29 @@ function valueNoise2D(x: number, y: number, seed: number): number {
   return nx0 + (nx1 - nx0) * uy;
 }
 
+// Isotropic 2D noise: blends two incommensurately rotated value-noise lattices to eliminate axis-aligned square artifacts
+function isotropicNoise2D(x: number, y: number, seed: number): number {
+  const n1 = valueNoise2D(x, y, seed);
+  const rx = x * 0.8 - y * 0.6 + 17.3;
+  const ry = x * 0.6 + y * 0.8 + 31.7;
+  const n2 = valueNoise2D(rx, ry, seed + 193);
+  return (n1 + n2) * 0.5;
+}
+
 function fbm2D(x: number, y: number, seed: number, octaves = 5): number {
   let val = 0;
   let amp = 0.5;
-  let freq = 1.0;
   let norm = 0;
+  let cx = x;
+  let cy = y;
   for (let i = 0; i < octaves; i++) {
-    val += amp * valueNoise2D(x * freq, y * freq, seed + i * 31);
+    val += amp * valueNoise2D(cx, cy, seed + i * 31);
     norm += amp;
-    freq *= 2.04;
+    // Rotate domain by ~37 degrees and scale by 2.04 per octave so square lattices never align
+    const nx = (cx * 0.8 - cy * 0.6) * 2.04 + 13.7;
+    const ny = (cx * 0.6 + cy * 0.8) * 2.04 + 29.3;
+    cx = nx;
+    cy = ny;
     amp *= 0.5;
   }
   return val / (norm || 1);
@@ -84,14 +99,18 @@ function fbm2D(x: number, y: number, seed: number, octaves = 5): number {
 function ridgedFbm2D(x: number, y: number, seed: number, octaves = 5): number {
   let val = 0;
   let amp = 0.5;
-  let freq = 1.0;
   let norm = 0;
+  let cx = x;
+  let cy = y;
   for (let i = 0; i < octaves; i++) {
-    const n = valueNoise2D(x * freq, y * freq, seed + i * 47);
+    const n = valueNoise2D(cx, cy, seed + i * 47);
     const ridge = 1.0 - Math.abs(n * 2.0 - 1.0);
     val += amp * ridge * ridge;
     norm += amp;
-    freq *= 2.12;
+    const nx = (cx * 0.8 - cy * 0.6) * 2.12 + 19.1;
+    const ny = (cx * 0.6 + cy * 0.8) * 2.12 + 41.7;
+    cx = nx;
+    cy = ny;
     amp *= 0.5;
   }
   return val / (norm || 1);
@@ -147,6 +166,12 @@ function foldMirror(v: number): number {
   const period = 4.0; // maps [-1, 1] -> [1, -1] smoothly
   const m = ((v + 1.0) % period + period) % period;
   return m <= 2.0 ? m - 1.0 : 3.0 - m;
+}
+
+function foldMirrorWithSign(v: number): { val: number; sign: number } {
+  const period = 4.0;
+  const m = ((v + 1.0) % period + period) % period;
+  return m <= 2.0 ? { val: m - 1.0, sign: 1.0 } : { val: 3.0 - m, sign: -1.0 };
 }
 
 export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
@@ -245,10 +270,11 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       return t * t * (3 - 2 * t);
     };
 
-    const isBiomeOcean = (id: number) => !surfaceModel.isNoSurface && (id <= 2 || id === 17);
+    const isBiomeOcean = (id: number) => !surfaceModel.isNoSurface && (id <= 2 || id === 17 || id === 23);
     const isBiomeIce = (id: number) => id === 8 || id === 13 || id === 18 || id === 21;
     const anyOceanBiome = isBiomeOcean(bId1) || (bId2 !== null && isBiomeOcean(bId2));
     const isPureOceanTile = isBiomeOcean(bId1) && (bId2 === null || isBiomeOcean(bId2));
+    const hasAlgalSeaBiome = bId1 === 23 || bId2 === 23;
 
     // Effective crater intensity combines tile peak crater score, craterland biome ID, and thin/airless atmosphere
     const atmoCraterFloor =
@@ -408,10 +434,9 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           hLocal: bandWave * 0.045,
           craterRimTint: 0,
           craterBowlTint: 0,
-          isOceanPoint: false,
-          isCalderaLava: false,
-          isLavaRiver: false,
-          isFissureFloor: false,
+          oceanWeight: 0,
+          lavaWeight: 0,
+          fissureWeight: 0,
           baseFbm: bandWave * 0.5 + 0.5,
           ridge: 0.5,
           biomeMix: 0,
@@ -437,7 +462,8 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
 
       const oceanWeightAtPoint =
         (isBiomeOcean(bId1) ? 1 - biomeMix : 0) + (bId2 !== null && isBiomeOcean(bId2) ? biomeMix : 0);
-      const isOceanPoint = !surfaceModel.isNoSurface && anyOceanBiome && oceanWeightAtPoint >= 0.45;
+      const oceanWeight = !surfaceModel.isNoSurface && anyOceanBiome ? oceanWeightAtPoint : 0;
+      const isOceanPoint = oceanWeight >= 0.45;
       if (!isOceanPoint) {
         hLocal = Math.max(0.025, hLocal);
       }
@@ -469,8 +495,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         }
       }
 
-      let isCalderaLava = false;
-      let isLavaRiver = false;
+      let lavaWeight = 0;
       if (hasVolcanoes) {
         for (let v = 0; v < volcanicCones.length; v++) {
           const vc = volcanicCones[v];
@@ -480,21 +505,23 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
             if (uv < 0.20) {
               const pit = 1.0 - (uv / 0.20) * (uv / 0.20);
               hLocal += vc.height * 0.72 - pit * (vc.height * 0.36);
-              if (uv < 0.14) isCalderaLava = true;
+              if (uv < 0.16) {
+                lavaWeight = Math.max(lavaWeight, Math.min(1, (0.16 - uv) / 0.05));
+              }
             } else {
               const cone = Math.pow(Math.max(0, 1.0 - (uv - 0.20) / 1.35), 1.65);
               hLocal += vc.height * cone;
               const lavaAng = Math.atan2(pz - vc.vz, px - vc.vx);
               const flowChannel = Math.sin(lavaAng * 4 + dv * 14 + baseFbm * 5);
-              if (flowChannel > 0.76 && uv < 1.15) {
-                isLavaRiver = true;
+              if (flowChannel > 0.70 && uv < 1.15) {
+                lavaWeight = Math.max(lavaWeight, Math.min(1, (flowChannel - 0.70) / 0.15));
               }
             }
           }
         }
       }
 
-      let isFissureFloor = false;
+      let fissureWeight = 0;
       if (
         activeTile.fractureIntensity > 0.12 ||
         bId1 === 21 ||
@@ -508,8 +535,8 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         if (fissureCurve < 0.062) {
           const cleft = 1.0 - fissureCurve / 0.062;
           hLocal -= cleft * 0.13;
-          if (fissureCurve < 0.026) {
-            isFissureFloor = true;
+          if (fissureCurve < 0.032) {
+            fissureWeight = Math.min(1, (0.032 - fissureCurve) / 0.014);
           }
         }
       }
@@ -518,10 +545,9 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         hLocal,
         craterRimTint,
         craterBowlTint,
-        isOceanPoint,
-        isCalderaLava,
-        isLavaRiver,
-        isFissureFloor,
+        oceanWeight,
+        lavaWeight,
+        fissureWeight,
         baseFbm,
         ridge,
         biomeMix,
@@ -536,7 +562,11 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
     const macroBowlGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroShadowGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroMixGrid = new Float32Array(MACRO_N * MACRO_N);
-    const macroSpecialGrid = new Uint8Array(MACRO_N * MACRO_N);
+    const macroOceanGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroLavaGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroFissureGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroDhxGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroDhzGrid = new Float32Array(MACRO_N * MACRO_N);
 
     for (let mz = 0; mz < MACRO_N; mz++) {
       const pz = (mz / (MACRO_N - 1)) * 2.0 - 1.0;
@@ -551,11 +581,23 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         macroBowlGrid[mIdx] = sh.craterBowlTint;
         macroShadowGrid[mIdx] = sampleCloudDensityAt(px, pz);
         macroMixGrid[mIdx] = sh.biomeMix;
-        let sp = 0;
-        if (sh.isCalderaLava || sh.isLavaRiver) sp |= 1;
-        if (sh.isFissureFloor) sp |= 2;
-        if (sh.isOceanPoint) sp |= 4;
-        macroSpecialGrid[mIdx] = sp;
+        macroOceanGrid[mIdx] = sh.oceanWeight;
+        macroLavaGrid[mIdx] = sh.lavaWeight;
+        macroFissureGrid[mIdx] = sh.fissureWeight;
+      }
+    }
+
+    // Precompute smooth central-difference macro slopes at each vertex so bilinear interpolation is C1-continuous across cell borders
+    const stepScale = (MACRO_N - 1) * 0.25;
+    for (let mz = 0; mz < MACRO_N; mz++) {
+      const mzPrev = Math.max(0, mz - 1);
+      const mzNext = Math.min(MACRO_N - 1, mz + 1);
+      for (let mx = 0; mx < MACRO_N; mx++) {
+        const mxPrev = Math.max(0, mx - 1);
+        const mxNext = Math.min(MACRO_N - 1, mx + 1);
+        const mIdx = mz * MACRO_N + mx;
+        macroDhxGrid[mIdx] = (macroHGrid[mz * MACRO_N + mxNext] - macroHGrid[mz * MACRO_N + mxPrev]) * stepScale;
+        macroDhzGrid[mIdx] = (macroHGrid[mzNext * MACRO_N + mx] - macroHGrid[mzPrev * MACRO_N + mx]) * stepScale;
       }
     }
 
@@ -625,36 +667,53 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           b = Math.round(targetBaseRgb[2] * 0.7 + iceRgb[2] * 0.3 + frostSparkle * (isTholinIce ? 0.42 : 1.1));
         }
       } else if (hasBioB) {
+        const isForestBiome = targetBiomeId === 5 || targetBiomeId === 6;
+        const isGrasslandBiome = targetBiomeId === 4;
         const canopyDensity = Math.max(
           0,
-          Math.min(1, baseFbm * 1.2 + (targetBiomeId === 5 ? 0.28 : targetBiomeId === 6 ? 0.18 : -0.08))
+          Math.min(
+            1,
+            baseFbm * 1.15 +
+              (targetBiomeId === 5 ? 0.38 : targetBiomeId === 6 ? 0.26 : isGrasslandBiome ? -0.18 : 0.08)
+          )
         );
         const cell = cellularFeature2D(px * 32.0, pz * 32.0, tileSeed + 809);
-        const crownRadius = 0.28 + canopyDensity * 0.26;
+        const crownRadius = isForestBiome
+          ? 0.34 + canopyDensity * 0.26
+          : isGrasslandBiome
+          ? 0.16 + canopyDensity * 0.16
+          : 0.25 + canopyDensity * 0.22;
 
-        if (cell.dist < crownRadius && slope < 0.55 && hLocal > 0.015 && hLocal < 0.27) {
+        const hasTreeHere =
+          cell.dist < crownRadius &&
+          slope < 0.55 &&
+          hLocal > 0.015 &&
+          hLocal < 0.27 &&
+          (isForestBiome || cell.cellHash < (isGrasslandBiome ? 0.32 : 0.65));
+
+        if (hasTreeHere) {
           const uCrown = cell.dist / crownRadius;
           const crownHeightProfile = Math.sqrt(Math.max(0, 1.0 - uCrown * uCrown));
-          hDelta += crownHeightProfile * 0.022;
-          nx += (cell.dx / crownRadius) * 1.2 + (fine2 - 0.5) * 0.35;
-          nz += (cell.dy / crownRadius) * 1.2 + grain * 0.35;
+          hDelta += crownHeightProfile * (isForestBiome ? 0.025 : 0.016);
+          nx += (cell.dx / crownRadius) * 1.15 + (fine2 - 0.5) * 0.32;
+          nz += (cell.dy / crownRadius) * 1.15 + grain * 0.32;
 
           const speciesShade =
             (cell.cellHash - 0.5) * 24 + crownHeightProfile * 16 - (1 - crownHeightProfile) * 20;
-          const isJungleOrTaiga = targetBiomeId === 5 || targetBiomeId === 6;
-          const cRgb = isJungleOrTaiga ? forestRgb : plainsRgb;
+          const cRgb = isForestBiome ? forestRgb : plainsRgb;
           r = Math.round(cRgb[0] + speciesShade + fine2 * 12);
           g = Math.round(cRgb[1] + speciesShade * 1.15 + fine2 * 16);
           b = Math.round(cRgb[2] + speciesShade * 0.7 + fine2 * 9);
         } else {
           const wetlandT = hLocal < 0.055 ? Math.max(0, Math.min(1, (0.055 - hLocal) / 0.055)) : 0;
-          const grassWave = Math.sin(px * 56 + pz * 38 + fine1 * 6) * 9 + grain * 12;
-          r = Math.round(plainsRgb[0] * (1 - wetlandT * 0.7) + marshRgb[0] * (wetlandT * 0.7) + grassWave);
+          const windMeadow = Math.sin(px * 44 + pz * 32 + fine1 * 5.5) * 10 + (fine2 - 0.5) * 14 + grain * 10;
+          const baseBioRgb = isForestBiome ? forestRgb : targetBiomeId === 3 ? marshRgb : plainsRgb;
+          r = Math.round(baseBioRgb[0] * (1 - wetlandT * 0.65) + marshRgb[0] * (wetlandT * 0.65) + windMeadow * 0.9);
           g = Math.round(
-            plainsRgb[1] * (1 - wetlandT * 0.7) + marshRgb[1] * (wetlandT * 0.7) + grassWave * 1.1
+            baseBioRgb[1] * (1 - wetlandT * 0.65) + marshRgb[1] * (wetlandT * 0.65) + windMeadow * 1.15
           );
           b = Math.round(
-            plainsRgb[2] * (1 - wetlandT * 0.7) + marshRgb[2] * (wetlandT * 0.7) + grassWave * 0.8
+            baseBioRgb[2] * (1 - wetlandT * 0.65) + marshRgb[2] * (wetlandT * 0.65) + windMeadow * 0.75
           );
         }
       } else if (isDesertB) {
@@ -796,32 +855,51 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           macroMixGrid[i01] * w01 +
           macroMixGrid[i11] * w11;
 
-        // Smooth bilinear derivative of macro height field so grid boundaries are completely invisible
+        // Smooth bilinear interpolation of vertex-centered central-difference slopes so macro grid boundaries are completely invisible
         const dhx =
-          ((macroHGrid[i10] - macroHGrid[i00]) * (1 - fz) +
-            (macroHGrid[i11] - macroHGrid[i01]) * fz) *
-          (MACRO_N * 0.5);
+          macroDhxGrid[i00] * w00 +
+          macroDhxGrid[i10] * w10 +
+          macroDhxGrid[i01] * w01 +
+          macroDhxGrid[i11] * w11;
         const dhz =
-          ((macroHGrid[i01] - macroHGrid[i00]) * (1 - fx) +
-            (macroHGrid[i11] - macroHGrid[i10]) * fx) *
-          (MACRO_N * 0.5);
+          macroDhzGrid[i00] * w00 +
+          macroDhzGrid[i10] * w10 +
+          macroDhzGrid[i01] * w01 +
+          macroDhzGrid[i11] * w11;
         const slope = Math.hypot(dhx, dhz);
 
-        const spMask = macroSpecialGrid[i00] | macroSpecialGrid[i10] | macroSpecialGrid[i01] | macroSpecialGrid[i11];
-        const isLavaSpecial = (spMask & 1) !== 0;
-        const isFissureFloor = (spMask & 2) !== 0;
-        const isOceanPoint = (spMask & 4) !== 0;
+        // Smooth bilinear interpolation of special feature weights (eliminates blocky MACRO_N cell boundaries)
+        const oceanW =
+          macroOceanGrid[i00] * w00 +
+          macroOceanGrid[i10] * w10 +
+          macroOceanGrid[i01] * w01 +
+          macroOceanGrid[i11] * w11;
+        const lavaW =
+          macroLavaGrid[i00] * w00 +
+          macroLavaGrid[i10] * w10 +
+          macroLavaGrid[i01] * w01 +
+          macroLavaGrid[i11] * w11;
+        const fissureW =
+          macroFissureGrid[i00] * w00 +
+          macroFissureGrid[i10] * w10 +
+          macroFissureGrid[i01] * w01 +
+          macroFissureGrid[i11] * w11;
 
-        // Smooth continuous multi-octave micro-noise (replaces discontinuous per-texel random grain)
-        const fine1 = valueNoise2D(px * 28.0, pz * 28.0, tileSeed + 313);
-        const fine2 = valueNoise2D(px * 74.0, pz * 74.0, tileSeed + 419);
-        const fine3 = valueNoise2D(px * 168.0, pz * 168.0, tileSeed + 521);
+        const isLavaSpecial = lavaW > 0.35;
+        const isFissureFloor = fissureW > 0.35;
+        const isOceanPoint = oceanW >= 0.45;
+
+        // Smooth continuous isotropic micro-noise (eliminates axis-aligned square lattice creases)
+        const fine1 = isotropicNoise2D(px * 28.0, pz * 28.0, tileSeed + 313);
+        const fine2 = isotropicNoise2D(px * 74.0, pz * 74.0, tileSeed + 419);
+        const fine3 = isotropicNoise2D(px * 168.0, pz * 168.0, tileSeed + 521);
         const grain = (fine3 - 0.5) * 0.68 + (fine2 - 0.5) * 0.32;
 
-        const fineRight = valueNoise2D((px + 0.004) * 52.0, pz * 52.0, tileSeed + 313);
-        const fineDown = valueNoise2D(px * 52.0, (pz + 0.004) * 52.0, tileSeed + 313);
-        let nx = -dhx * 0.6 + (fine1 - fineRight) * 1.45;
-        let nz = -dhz * 0.6 + (fine1 - fineDown) * 1.45;
+        // Matched-frequency central finite difference for micro-bump normals
+        const fineRight = isotropicNoise2D((px + 0.004) * 28.0, pz * 28.0, tileSeed + 313);
+        const fineDown = isotropicNoise2D(px * 28.0, (pz + 0.004) * 28.0, tileSeed + 313);
+        let nx = -dhx * 0.6 + (fine1 - fineRight) * 2.1;
+        let nz = -dhz * 0.6 + (fine1 - fineDown) * 2.1;
 
         let r = baseRgb1[0];
         let g = baseRgb1[1];
@@ -839,7 +917,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           const waterDepth = hasSeaHere ? Math.max(0, -hLocal) : 0;
 
           if (isLavaSpecial || (isFissureFloor && isVolcanicAny)) {
-            const crustCrack = valueNoise2D(px * 45, pz * 45, tileSeed + 601);
+            const crustCrack = isotropicNoise2D(px * 45, pz * 45, tileSeed + 601);
             if (crustCrack > 0.32) {
               const hot = Math.min(1, (crustCrack - 0.32) / 0.55);
               r = 255;
@@ -882,6 +960,23 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
                 r = Math.round(dp[0] + (tr[0] - dp[0]) * u);
                 g = Math.round(dp[1] + (tr[1] - dp[1]) * u);
                 b = Math.round(dp[2] + (tr[2] - dp[2]) * u);
+              }
+
+              // Photosynthetic Algal Sea / Kelp Reef swirls on worlds with life
+              if (surfaceModel.floraPalette.hasAnyLife && (hasAlgalSeaBiome || waterDepth < 0.14)) {
+                const swirlWave =
+                  Math.sin(px * 26.0 + pz * 19.0 + baseFbm * 6.5 + fine1 * 3.2) * 0.5 + 0.5;
+                const filament = Math.pow(swirlWave, 1.5) * (0.4 + 0.6 * fine2);
+                const bloomStrength =
+                  (hasAlgalSeaBiome ? 0.68 : 0.36) *
+                  Math.max(0.15, 1.0 - depthT * 0.72) *
+                  (0.35 + 0.65 * filament);
+                const algalR = Math.round(marshRgb[0] * 0.55 + plainsRgb[0] * 0.45);
+                const algalG = Math.min(255, Math.round(marshRgb[1] * 0.55 + plainsRgb[1] * 0.45 + 18));
+                const algalB = Math.round(marshRgb[2] * 0.55 + sh[2] * 0.45);
+                r = Math.round(r * (1 - bloomStrength) + algalR * bloomStrength);
+                g = Math.round(g * (1 - bloomStrength) + algalG * bloomStrength);
+                b = Math.round(b * (1 - bloomStrength) + algalB * bloomStrength);
               }
 
               if (waterDepth < 0.045) {
@@ -1010,6 +1105,12 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
             }
           }
         }
+
+        // Smoothly taper normal perturbations to 0 at the tile perimeter (|px|,|pz| -> 1) so mirror-folded tiles have zero lighting seam
+        const edgeFadeX = Math.abs(px) > 0.88 ? Math.max(0, (1.0 - Math.abs(px)) / 0.12) : 1.0;
+        const edgeFadeZ = Math.abs(pz) > 0.88 ? Math.max(0, (1.0 - Math.abs(pz)) / 0.12) : 1.0;
+        nx *= edgeFadeX * edgeFadeX * (3 - 2 * edgeFadeX);
+        nz *= edgeFadeZ * edgeFadeZ * (3 - 2 * edgeFadeZ);
 
         const tIdx = tz * TEX_RES + tx;
         heightMap[tIdx] = hLocal;
@@ -1292,8 +1393,10 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         rdx: number,
         rdz: number
       ): { r: number; g: number; b: number } => {
-        const tu = (foldMirror(wx) * 0.5 + 0.5) * texMax;
-        const tv = (foldMirror(wz) * 0.5 + 0.5) * texMax;
+        const fxFold = foldMirrorWithSign(wx);
+        const fzFold = foldMirrorWithSign(wz);
+        const tu = (fxFold.val * 0.5 + 0.5) * texMax;
+        const tv = (fzFold.val * 0.5 + 0.5) * texMax;
         const iu = tu | 0;
         const iv = tv | 0;
         const fu = tu - iu;
@@ -1317,8 +1420,22 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         let g = texG[i00] * w00 + texG[i10] * w10 + texG[i01] * w01 + texG[i11] * w11;
         let b = texB[i00] * w00 + texB[i10] * w10 + texB[i01] * w01 + texB[i11] * w11;
 
-        const flags = flagsMap[i00];
-        const isLava = (flags & FLAG_LAVA) !== 0;
+        const f00 = flagsMap[i00];
+        const f10 = flagsMap[i10];
+        const f01 = flagsMap[i01];
+        const f11 = flagsMap[i11];
+        const lavaBlend =
+          ((f00 & FLAG_LAVA) !== 0 ? w00 : 0) +
+          ((f10 & FLAG_LAVA) !== 0 ? w10 : 0) +
+          ((f01 & FLAG_LAVA) !== 0 ? w01 : 0) +
+          ((f11 & FLAG_LAVA) !== 0 ? w11 : 0);
+        const waterBlend =
+          ((f00 & FLAG_WATER) !== 0 ? w00 : 0) +
+          ((f10 & FLAG_WATER) !== 0 ? w10 : 0) +
+          ((f01 & FLAG_WATER) !== 0 ? w01 : 0) +
+          ((f11 & FLAG_WATER) !== 0 ? w11 : 0);
+        const flags = f00;
+        const isLava = lavaBlend > 0.5;
 
         if (isLava) {
           const pulse = Math.sin(wx * 45 + wz * 45 + timeSec * 3.5) * 18;
@@ -1329,13 +1446,15 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
 
         let nx =
           (normXMap[i00] * w00 + normXMap[i10] * w10 + normXMap[i01] * w01 + normXMap[i11] * w11) *
-          (1 / 42);
+          (1 / 42) *
+          fxFold.sign;
         let nz =
           (normZMap[i00] * w00 + normZMap[i10] * w10 + normZMap[i01] * w01 + normZMap[i11] * w11) *
-          (1 / 42);
+          (1 / 42) *
+          fzFold.sign;
         const ny = 1.0;
 
-        const isWater = (flags & FLAG_WATER) !== 0;
+        const isWater = waterBlend > 0.5;
         if (isWater) {
           const waveAnim1 = Math.sin(wx * 95 + wz * 55 + timeSec * 2.8);
           const waveAnim2 = Math.cos(wx * 60 - wz * 85 - timeSec * 2.2);
@@ -1376,12 +1495,25 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
 
         const ndotl = Math.max(0, nnx * lx + nny * ly + nnz * lz);
 
-        // Sample drifting overhead cloud shadow
+        // Sample drifting overhead cloud shadow with smooth bilinear interpolation
         const cwx = wx + windDriftX + 0.06;
         const cwz = wz + windDriftZ - 0.05;
-        const ctu = ((foldMirror(cwx) * 0.5 + 0.5) * texMax) | 0;
-        const ctv = ((foldMirror(cwz) * 0.5 + 0.5) * texMax) | 0;
-        const cShad = (cloudMap[ctv * TEX_RES + ctu] * (1 / 255)) * cloudShadowStrength;
+        const ctu = (foldMirror(cwx) * 0.5 + 0.5) * texMax;
+        const ctv = (foldMirror(cwz) * 0.5 + 0.5) * texMax;
+        const ciu = ctu | 0;
+        const civ = ctv | 0;
+        const cfu = ctu - ciu;
+        const cfv = ctv - civ;
+        const ci00 = civ * TEX_RES + ciu;
+        const ci10 = ciu < texMax ? ci00 + 1 : ci00;
+        const ci01 = civ < texMax ? ci00 + TEX_RES : ci00;
+        const ci11 = ciu < texMax && civ < texMax ? ci01 + 1 : ci01;
+        const cVal =
+          cloudMap[ci00] * (1 - cfu) * (1 - cfv) +
+          cloudMap[ci10] * cfu * (1 - cfv) +
+          cloudMap[ci01] * (1 - cfu) * cfv +
+          cloudMap[ci11] * cfu * cfv;
+        const cShad = (cVal * (1 / 255)) * cloudShadowStrength;
         const shadowAtten = 1.0 - cShad;
 
         const diff = (0.30 + 0.78 * ndotl * shadowAtten) * nightDim;
