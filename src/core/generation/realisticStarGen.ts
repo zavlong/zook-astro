@@ -2939,7 +2939,7 @@ export function generateZoneSystem(
     // with Teq >= 310 K, Tsurf >= 647.1 K, or above freezing (Tsurf >= 273.15 K) with no subcritical liquid ocean
     // cannot remain solid surface ice — it transitions to a Supercritical Water World!
     const hasSubcriticalOcean =
-      Boolean(hydro) && (hydro.coveragePct ?? 0) > 0 && hydro.solvent !== 'Supercritical H2O';
+      Boolean(hydro) && (hydro?.coveragePct ?? 0) > 0 && hydro?.solvent !== 'Supercritical H2O';
     if (
       !hasEnv &&
       b.massEarth >= 0.25 &&
