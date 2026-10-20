@@ -164,19 +164,63 @@ const SECTOR_PRESETS: SectorPreset[] = [
 ];
 
 const getBiosphereDisplay = (sys: SectorHexSystem): string => {
-  if (!sys.candidateHabitable || !sys.habitableWorldCount || sys.habitableWorldCount === 0) {
-    return '<none>';
+  const zones = sys.sysResult?.zones;
+  if (zones && zones.length > 0) {
+    let bioCount = 0;
+    let hasWaterBio = false;
+    let hasAmmoniaBio = false;
+    let hasMultiBio = false;
+
+    for (const zone of zones) {
+      for (const body of zone.bodies) {
+        if (body.kind === 'planet') {
+          if (body.hydrosphere?.biosphere) {
+            bioCount++;
+            const solv = (body.hydrosphere.solvent || '').toLowerCase();
+            const bio = body.hydrosphere.biosphere.toLowerCase();
+            if (solv.includes('nh3') || solv.includes('ammonia') || bio.includes('ammonia')) {
+              hasAmmoniaBio = true;
+            } else {
+              hasWaterBio = true;
+            }
+            if (bio.includes('multicellular')) {
+              hasMultiBio = true;
+            }
+          }
+          if (body.moons) {
+            for (const moon of body.moons) {
+              if (moon.hydrosphere?.biosphere) {
+                bioCount++;
+                const solv = (moon.hydrosphere.solvent || '').toLowerCase();
+                const bio = moon.hydrosphere.biosphere.toLowerCase();
+                if (solv.includes('nh3') || solv.includes('ammonia') || bio.includes('ammonia')) {
+                  hasAmmoniaBio = true;
+                } else {
+                  hasWaterBio = true;
+                }
+                if (bio.includes('multicellular')) {
+                  hasMultiBio = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (bioCount === 0) {
+      return '<none>';
+    }
+    const kindLabel =
+      hasWaterBio && hasAmmoniaBio
+        ? 'water & ammonia'
+        : hasAmmoniaBio
+        ? 'ammonia'
+        : 'water';
+    return `${bioCount} ${kindLabel} (${hasMultiBio ? 'multicellular' : 'unicellular'})`;
   }
-  const hasWater = hasWaterWorld(sys);
-  const hasAmmonia = hasAmmoniaWorld(sys);
-  const hasMulti = hasMulticellularLife(sys);
-  const kindLabel =
-    hasWater && hasAmmonia
-      ? 'water & ammonia'
-      : hasAmmonia
-      ? 'ammonia'
-      : 'water';
-  return `${sys.habitableWorldCount} ${kindLabel}${hasMulti ? ' (multicellular)' : ''}`;
+
+  return '<none>';
 };
 
 export const SectorHexApp: React.FC<SectorHexAppProps> = ({

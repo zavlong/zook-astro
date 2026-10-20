@@ -2285,13 +2285,14 @@ export function generateZoneSystem(
             pC = pC_nh3;
             const isContinentalNH3 = b.iceFrac < 0.04;
             const hasIcebergContinents = !isContinentalNH3 && (Tsub < 242 || random() < 0.78);
-            const bioNH3 = z.age >= 1.5 && random() < 0.58;
+            const bioNH3 = z.age >= 2.0 && random() < 0.28;
             if (bioNH3) {
               const pM_bio = +clamp(pM * rand(1.3, 2.2), 0.006, 0.45).toFixed(4);
               if (Teq + ghDelta(pC, pN, pH, pM_bio, 0, pNH3, 0, Teq, grav) <= 265) {
                 pM = pM_bio;
               }
-              const bioNH3Complex = z.age >= 3.0 ? 'Multicellular' : 'Unicellular';
+              const bioNH3Complex =
+                z.age >= 3.5 && random() < 0.45 ? 'Multicellular' : 'Unicellular';
               const isShielded = magField.shieldingEfficiencyPct >= 50;
               biosphereDesc = isContinentalNH3
                 ? isShielded
@@ -2375,9 +2376,10 @@ export function generateZoneSystem(
             pNH3 = Math.max(pNH3, +(pN * 0.025).toFixed(4));
             const isContinentalNH3 = b.iceFrac < 0.04;
             const hasIcebergContinents = !isContinentalNH3 && (Touter < 242 || random() < 0.78);
-            const bioNH3 = z.age >= 1.5 && random() < 0.55;
+            const bioNH3 = z.age >= 2.0 && random() < 0.25;
             if (bioNH3) {
-              const bioNH3Complex = z.age >= 3.0 ? 'Multicellular' : 'Unicellular';
+              const bioNH3Complex =
+                z.age >= 3.5 && random() < 0.42 ? 'Multicellular' : 'Unicellular';
               const isShielded = magField.shieldingEfficiencyPct >= 50;
               biosphereDesc = isContinentalNH3
                 ? isShielded
@@ -3263,10 +3265,10 @@ export function generateZoneSystem(
           mPBar = +(pN + pNH3_m + pM).toFixed(3);
           mGhK = ghTest;
           mTsurf = tTest;
-          const mBioNH3 = z.age >= 1.5 && random() < 0.52;
+          const mBioNH3 = z.age >= 2.0 && random() < 0.24;
           if (mBioNH3) {
             mBioDesc =
-              z.age >= 3.0
+              z.age >= 3.5 && random() < 0.40
                 ? 'Active Multicellular Exomoon Ammoniated (NH3-H2O) Cryo-Biosphere'
                 : 'Active Unicellular Exomoon Ammoniated Cryo-Microbial Biosphere';
             mAtmoType = 'N2-NH3-CH4 Exomoon Cryo-Biosphere Sky (Ammonia Life)';
