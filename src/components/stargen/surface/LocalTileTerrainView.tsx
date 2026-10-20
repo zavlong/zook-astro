@@ -214,9 +214,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
   // Build 3D Hexagonal/Pentagonal Mesh + 512x512 High-Resolution Procedural Biome Texture & Micro-Bump Normal Map
   const meshData = useMemo(() => {
     const sides = activeTile.isPentagon ? 5 : 6;
-    const tileRings = 28; // Rings inside the active Goldberg tile border (edgeFrac = 1.0)
-    const rings = 48; // Total rings including continuous outer terrain apron
-    const maxExtent = 2.25; // World coordinate extent [-maxExtent, +maxExtent] for seamless outward continuation
+    const rings = 30; // Rings strictly inside the active Goldberg tile border (no extended terrain mesh)
     const tileSeed = (surfaceModel.seed * 1664525 + activeTile.tileId * 1013904223) & 0x7fffffff;
 
     // Corner angles in local (x, z) plane aligned with neighbor compass directions
@@ -226,13 +224,13 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       corners.push([Math.cos(ang), Math.sin(ang)]);
     }
 
-    // Generate local craters if tile has craterIntensity > 0.08 (distributed across extended domain)
+    // Generate local craters if tile has craterIntensity > 0.08
     const craters: { cx: number; cz: number; rad: number; depth: number; hasCentralPeak: boolean }[] = [];
     if (activeTile.craterIntensity > 0.08 && !surfaceModel.isNoSurface) {
-      const count = Math.min(26, Math.round(activeTile.craterIntensity * 28));
+      const count = Math.min(20, Math.round(activeTile.craterIntensity * 22));
       for (let c = 0; c < count; c++) {
         const angle = hash2(c, 1, tileSeed) * Math.PI * 2;
-        const dist = Math.sqrt(hash2(c, 2, tileSeed)) * 1.45;
+        const dist = Math.sqrt(hash2(c, 2, tileSeed)) * 0.92;
         const rad = 0.045 + hash2(c, 3, tileSeed) * 0.16;
         craters.push({
           cx: Math.cos(angle) * dist,
@@ -381,7 +379,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       return Math.max(0.032, h);
     };
 
-    // Pure elevation evaluator continuing seamlessly outward past the tile border
+    // Pure elevation evaluator for the tile
     const sampleHeightOnly = (px: number, pz: number) => {
       if (surfaceModel.isNoSurface) {
         const bandWave = Math.sin(pz * 14 + fbm2D(px * 4, pz * 4, tileSeed, 4) * 3.2);
@@ -506,19 +504,23 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       };
     };
 
-    // Build 3D vertices and smooth vertex normals
+    // Build 3D vertices and smooth vertex normals strictly within the active tile
     const vertices: LocalVertex[] = [];
-    const buildVertex = (px: number, pz: number): LocalVertex => {
+    const buildVertex = (px: number, pz: number, edgeFrac: number): LocalVertex => {
       const { hLocal } = sampleHeightOnly(px, pz);
       const eps = 0.024;
       const hx = sampleHeightOnly(px + eps, pz).hLocal;
       const hz = sampleHeightOnly(px, pz + eps).hLocal;
       const hasSeaHere = !surfaceModel.isNoSurface && anyOceanBiome && hLocal < 0;
-      const finalY = hasSeaHere ? 0 : hLocal;
+      const rawY = hasSeaHere ? 0 : hLocal;
+      // Smoothly meet the y=0 perspective plane right at the tile perimeter so there is no cliff wall at the border
+      const edgeTaper = edgeFrac > 0.85 ? Math.max(0, 1.0 - (edgeFrac - 0.85) / 0.15) : 1.0;
+      const smoothTaper = edgeTaper * edgeTaper * (3 - 2 * edgeTaper);
+      const finalY = rawY * smoothTaper;
 
-      let nx = hasSeaHere ? 0 : -(hx - hLocal) / eps;
+      let nx = hasSeaHere ? 0 : (-(hx - hLocal) / eps) * smoothTaper;
       let ny = 1.0;
-      let nz = hasSeaHere ? 0 : -(hz - hLocal) / eps;
+      let nz = hasSeaHere ? 0 : (-(hz - hLocal) / eps) * smoothTaper;
       const nLen = Math.hypot(nx, ny, nz) || 1;
       return {
         x: px,
@@ -530,15 +532,12 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       };
     };
 
-    vertices.push(buildVertex(0, 0));
+    vertices.push(buildVertex(0, 0, 0));
 
     const ringOffsets: number[] = [0];
     for (let r = 1; r <= rings; r++) {
       ringOffsets.push(vertices.length);
-      const edgeFrac =
-        r <= tileRings
-          ? r / tileRings
-          : 1.0 + ((r - tileRings) / (rings - tileRings)) * (maxExtent - 1.0);
+      const edgeFrac = r / rings;
       for (let s = 0; s < sides; s++) {
         const cA = corners[s];
         const cB = corners[(s + 1) % sides];
@@ -546,7 +545,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           const t = k / r;
           const px = (cA[0] * (1 - t) + cB[0] * t) * edgeFrac;
           const pz = (cA[1] * (1 - t) + cB[1] * t) * edgeFrac;
-          vertices.push(buildVertex(px, pz));
+          vertices.push(buildVertex(px, pz, edgeFrac));
         }
       }
     }
@@ -575,11 +574,10 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       }
     }
 
-    // Active Goldberg tile border contour sits at r = tileRings (edgeFrac = 1.0), while terrain continues outward
     const perimeterIndices: { vIdx: number; wedgeIdx: number }[] = [];
     for (let s = 0; s < sides; s++) {
-      for (let k = 0; k < tileRings; k++) {
-        perimeterIndices.push({ vIdx: ringVertIdx(tileRings, s, k), wedgeIdx: s });
+      for (let k = 0; k < rings; k++) {
+        perimeterIndices.push({ vIdx: ringVertIdx(rings, s, k), wedgeIdx: s });
       }
     }
 
@@ -595,7 +593,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const texFlags = new Uint8Array(TEX_RES * TEX_RES);
     const texCloudShadow = new Uint8Array(TEX_RES * TEX_RES);
 
-    // Precompute a 129x129 macro terrain grid across [-maxExtent, +maxExtent]
+    // Precompute a 129x129 macro terrain grid across [-1, +1] (1:1 unstretched tile coordinates)
     const MACRO_N = 129;
     const macroHGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroFbmGrid = new Float32Array(MACRO_N * MACRO_N);
@@ -603,12 +601,12 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const macroRimGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroShadowGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroMixGrid = new Float32Array(MACRO_N * MACRO_N);
-    const macroSpecialGrid = new Uint8Array(MACRO_N * MACRO_N); // bit 0: lava, bit 1: fissure, bit 2: river
+    const macroSpecialGrid = new Uint8Array(MACRO_N * MACRO_N);
 
     for (let mz = 0; mz < MACRO_N; mz++) {
-      const pz = ((mz / (MACRO_N - 1)) * 2.0 - 1.0) * maxExtent;
+      const pz = (mz / (MACRO_N - 1)) * 2.0 - 1.0;
       for (let mx = 0; mx < MACRO_N; mx++) {
-        const px = ((mx / (MACRO_N - 1)) * 2.0 - 1.0) * maxExtent;
+        const px = (mx / (MACRO_N - 1)) * 2.0 - 1.0;
         const mIdx = mz * MACRO_N + mx;
         const sh = sampleHeightOnly(px, pz);
         macroHGrid[mIdx] = sh.hLocal;
@@ -798,17 +796,17 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       return { r, g, b, bumpX, bumpZ, flags };
     };
 
-    // Synthesize every pixel of the 512x512 procedural biome texture + bump map across [-maxExtent, +maxExtent]
+    // Synthesize every pixel of the 512x512 procedural biome texture + bump map across [-1, +1] (1:1 tile scale)
     for (let tz = 0; tz < TEX_RES; tz++) {
       const vNorm = tz / (TEX_RES - 1);
-      const pz = (vNorm * 2.0 - 1.0) * maxExtent;
+      const pz = vNorm * 2.0 - 1.0;
       const mfz = vNorm * (MACRO_N - 1);
       const miz = Math.min(MACRO_N - 2, Math.floor(mfz));
       const fz = mfz - miz;
 
       for (let tx = 0; tx < TEX_RES; tx++) {
         const uNorm = tx / (TEX_RES - 1);
-        const px = (uNorm * 2.0 - 1.0) * maxExtent;
+        const px = uNorm * 2.0 - 1.0;
         const mfx = uNorm * (MACRO_N - 1);
         const mix = Math.min(MACRO_N - 2, Math.floor(mfx));
         const fx = mfx - mix;
@@ -1057,17 +1055,17 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       }
     }
 
-    // Build 3D Volumetric Cloud Canopy Puffs floating above the tile & extended apron
+    // Build 3D Volumetric Cloud Canopy Puffs floating above the tile
     const cloudPuffs: CloudPuff3D[] = [];
     if (!surfaceModel.isNoSurface && surfaceModel.cloudOpacity > 0.015 && effCloudCover > 0.04) {
-      const gridN = 15;
+      const gridN = 13;
       for (let gx = -gridN; gx <= gridN; gx++) {
         for (let gz = -gridN; gz <= gridN; gz++) {
-          const jx = (hash2(gx + 50, gz + 50, tileSeed + 901) - 0.5) * 0.11;
-          const jz = (hash2(gx + 80, gz + 80, tileSeed + 947) - 0.5) * 0.11;
-          const cx = (gx / gridN) * 1.35 + jx;
-          const cz = (gz / gridN) * 1.35 + jz;
-          if (Math.hypot(cx, cz) > 1.38) continue;
+          const jx = (hash2(gx + 50, gz + 50, tileSeed + 901) - 0.5) * 0.09;
+          const jz = (hash2(gx + 80, gz + 80, tileSeed + 947) - 0.5) * 0.09;
+          const cx = (gx / gridN) * 0.95 + jx;
+          const cz = (gz / gridN) * 0.95 + jz;
+          if (Math.hypot(cx, cz) > 1.0) continue;
 
           const dens = sampleCloudDensityAt(cx, cz);
           if (dens > 0.14) {
@@ -1095,7 +1093,6 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       perimeterIndices,
       cloudPuffs,
       effCloudCover,
-      maxExtent,
       TEX_RES,
       texR,
       texG,
@@ -1108,7 +1105,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     };
   }, [surfaceModel, activeTile, neighborTiles, pBarAtmo, hasAtmosphere]);
 
-  // Render the Per-Pixel Textured & Bump-Mapped 3D Hexagonal Biome Block + Atmosphere & 3D Clouds to Canvas
+  // Render the Per-Pixel Textured & Bump-Mapped 3D Hexagonal Biome Block + Infinite Perspective Plane to Canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1234,7 +1231,6 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       corners,
       sides,
       cloudPuffs,
-      maxExtent,
       TEX_RES,
       texR,
       texG,
@@ -1276,7 +1272,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     }
 
     // ============================================================================
-    // 3. PER-PIXEL TEXTURED & BUMP-MAPPED Z-BUFFER RASTERIZER (CONTINUOUS OUTWARD)
+    // 3. PER-PIXEL TEXTURED & BUMP-MAPPED Z-BUFFER RASTERIZER + PERSPECTIVE PLANE
     // ============================================================================
     if (!offscreenCanvasRef.current) {
       offscreenCanvasRef.current = document.createElement('canvas');
@@ -1300,9 +1296,12 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const nightDim = isNight ? 0.36 : 1.0;
     const cloudShadowStrength = showClouds3D ? Math.min(0.42, surfaceModel.cloudOpacity * 0.48) : 0;
     const texMax = TEX_RES - 1;
-    const invExt = 0.5 / maxExtent;
+    const isTholinWorldSpec =
+      surfaceModel.seaPalette.solventKey === 'NH3-H2O' ||
+      surfaceModel.seaPalette.solventKey === 'CH4-C2H6' ||
+      surfaceModel.compositionPalette.compositionLabel.includes('Tholin');
 
-    // Rasterize all 3D terrain triangles (active tile + continuous outward apron) with bilinear texture & bump shading
+    // Step 3A: Rasterize 3D terrain triangles strictly inside the active Goldberg tile
     for (let i = 0; i < triangles.length; i++) {
       const tri = triangles[i];
       const v0 = vertices[tri.v0];
@@ -1331,13 +1330,13 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       if (area <= 0.05) continue;
       const invArea = 1.0 / area;
 
-      // Convert vertex coordinates [-maxExtent, +maxExtent] into texture coordinates [0, TEX_RES - 1]
-      const u0 = (v0.x * invExt + 0.5) * texMax;
-      const tv0 = (v0.z * invExt + 0.5) * texMax;
-      const u1 = (v1.x * invExt + 0.5) * texMax;
-      const tv1 = (v1.z * invExt + 0.5) * texMax;
-      const u2 = (v2.x * invExt + 0.5) * texMax;
-      const tv2 = (v2.z * invExt + 0.5) * texMax;
+      // Convert vertex coordinates [-1, +1] into texture coordinates [0, TEX_RES - 1]
+      const u0 = (v0.x * 0.5 + 0.5) * texMax;
+      const tv0 = (v0.z * 0.5 + 0.5) * texMax;
+      const u1 = (v1.x * 0.5 + 0.5) * texMax;
+      const tv1 = (v1.z * 0.5 + 0.5) * texMax;
+      const u2 = (v2.x * 0.5 + 0.5) * texMax;
+      const tv2 = (v2.z * 0.5 + 0.5) * texMax;
 
       const d0 = p0.depth;
       const d1 = p1.depth;
@@ -1420,11 +1419,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                 if (!isNight && (flags & (FLAG_WATER | FLAG_ICE_SPEC)) !== 0) {
                   const ndoth = Math.max(0, nx * halfX + ny * halfY + nz * halfZ);
                   const isWater = (flags & FLAG_WATER) !== 0;
-                  const isTholinSpec =
-                    !isWater &&
-                    (surfaceModel.seaPalette.solventKey === 'NH3-H2O' ||
-                      surfaceModel.seaPalette.solventKey === 'CH4-C2H6' ||
-                      surfaceModel.compositionPalette.compositionLabel.includes('Tholin'));
+                  const isTholinSpec = !isWater && isTholinWorldSpec;
                   const specPow = isWater
                     ? Math.pow(ndoth, 24) * 0.58
                     : Math.pow(ndoth, 16) * (isTholinSpec ? 0.18 : 0.30);
@@ -1444,24 +1439,129 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                 }
               }
 
-              // Smooth outer-apron feathering at the very edge of the extended horizon
-              const wx = w0 * v0.x + w1 * v1.x + w2 * v2.x;
-              const wz = w0 * v0.z + w1 * v1.z + w2 * v2.z;
-              const rDist = Math.hypot(wx, wz);
-              const edgeFade = rDist > 1.75 ? Math.max(0, Math.min(1, 1.0 - (rDist - 1.75) / (maxExtent - 1.75))) : 1.0;
-              const alpha = Math.round(255 * edgeFade);
-
-              if (alpha > 2) {
-                const ir = r < 0 ? 0 : r > 255 ? 255 : r | 0;
-                const ig = g < 0 ? 0 : g > 255 ? 255 : g | 0;
-                const ib = b < 0 ? 0 : b > 255 ? 255 : b | 0;
-                colorBuffer[pIdx] = (alpha << 24) | (ib << 16) | (ig << 8) | ir;
-              }
+              const ir = r < 0 ? 0 : r > 255 ? 255 : r | 0;
+              const ig = g < 0 ? 0 : g > 255 ? 255 : g | 0;
+              const ib = b < 0 ? 0 : b > 255 ? 255 : b | 0;
+              colorBuffer[pIdx] = (255 << 24) | (ib << 16) | (ig << 8) | ir;
             }
           }
           w1 += dw1dx;
           w2 += dw2dx;
         }
+      }
+    }
+
+    // Step 3B: Extend the unstretched texture on a flat horizontal perspective plane (y = 0) out to infinity at the horizon
+    const invScaleDist = 1.0 / (scale * camDist);
+    for (let py = 0; py < H; py++) {
+      const vs = (cy - (py + 0.5)) * invScaleDist;
+      const denom = sinP - vs * cosP;
+      // Pixels with denom <= 0.0015 are above the perspective plane's horizon line
+      if (denom <= 0.0015) continue;
+
+      const z1 = (-vs * camDist) / denom;
+      const camDepth = camDist - z1 * cosP;
+      if (camDepth <= 1.15) continue;
+
+      const rowOffset = py * W;
+      const wxBase = z1 * sinY;
+      const wzBase = z1 * cosY;
+      const dwx = camDepth * invScaleDist * cosY;
+      const dwz = -camDepth * invScaleDist * sinY;
+
+      // Horizon aerial perspective fog factor as plane extends toward infinity
+      const baseFog = atmoDensityFactor > 0 ? Math.max(0, Math.min(1, (camDepth - 2.9) / 8.5)) * atmoDensityFactor : 0;
+      const horizonFade = Math.max(0, Math.min(1, (camDepth - 5.5) / 18.0));
+      const totalFog = Math.min(0.96, baseFog + horizonFade * (1 - baseFog) * (hasAtmosphere ? 0.92 : 0.75));
+
+      let wx = wxBase + (0.5 - cx) * dwx;
+      let wz = wzBase + (0.5 - cx) * dwz;
+
+      for (let px = 0; px < W; px++) {
+        const pIdx = rowOffset + px;
+        if (zBuffer[pIdx] === 1e9) {
+          // Fold world coordinates into [-1, 1] without stretching so texture continues at 1:1 scale to infinity
+          const twx = (((wx + 1) * 0.5) % 2 + 2) % 2;
+          const fxMir = (twx <= 1 ? twx : 2 - twx) * 2 - 1;
+          const twz = (((wz + 1) * 0.5) % 2 + 2) % 2;
+          const fzMir = (twz <= 1 ? twz : 2 - twz) * 2 - 1;
+
+          const tu = Math.max(0, Math.min(texMax - 0.001, (fxMir * 0.5 + 0.5) * texMax));
+          const tv = Math.max(0, Math.min(texMax - 0.001, (fzMir * 0.5 + 0.5) * texMax));
+          const iu = tu | 0;
+          const iv = tv | 0;
+          const fu = tu - iu;
+          const fv = tv - iv;
+
+          const ti00 = iv * TEX_RES + iu;
+          const ti10 = ti00 + 1;
+          const ti01 = ti00 + TEX_RES;
+          const ti11 = ti01 + 1;
+
+          const tw00 = (1 - fu) * (1 - fv);
+          const tw10 = fu * (1 - fv);
+          const tw01 = (1 - fu) * fv;
+          const tw11 = fu * fv;
+
+          let r = texR[ti00] * tw00 + texR[ti10] * tw10 + texR[ti01] * tw01 + texR[ti11] * tw11;
+          let g = texG[ti00] * tw00 + texG[ti10] * tw10 + texG[ti01] * tw01 + texG[ti11] * tw11;
+          let b = texB[ti00] * tw00 + texB[ti10] * tw10 + texB[ti01] * tw01 + texB[ti11] * tw11;
+
+          const bx =
+            (texBumpX[ti00] * tw00 + texBumpX[ti10] * tw10 + texBumpX[ti01] * tw01 + texBumpX[ti11] * tw11) *
+            (1 / 64);
+          const bz =
+            (texBumpZ[ti00] * tw00 + texBumpZ[ti10] * tw10 + texBumpZ[ti01] * tw01 + texBumpZ[ti11] * tw11) *
+            (1 / 64);
+
+          const flags = texFlags[ti00];
+          const isLava = (flags & FLAG_LAVA) !== 0;
+
+          if (!isLava) {
+            const mnx = bx * 0.42;
+            const mny = 1.0;
+            const mnz = bz * 0.42;
+            const invN = 1.0 / (Math.hypot(mnx, mny, mnz) || 1);
+            const nx = mnx * invN;
+            const ny = mny * invN;
+            const nz = mnz * invN;
+
+            const ndotl = Math.max(0, nx * lx + ny * ly + nz * lz);
+            const cShad = (texCloudShadow[ti00] * (1 / 255)) * cloudShadowStrength;
+            const shadowAtten = 1.0 - cShad;
+            const diff = (0.30 + 0.78 * ndotl * shadowAtten) * nightDim;
+
+            r *= diff;
+            g *= diff;
+            b *= diff;
+
+            if (!isNight && (flags & (FLAG_WATER | FLAG_ICE_SPEC)) !== 0) {
+              const ndoth = Math.max(0, nx * halfX + ny * halfY + nz * halfZ);
+              const isWater = (flags & FLAG_WATER) !== 0;
+              const isTholinSpec = !isWater && isTholinWorldSpec;
+              const specPow = isWater
+                ? Math.pow(ndoth, 24) * 0.58
+                : Math.pow(ndoth, 16) * (isTholinSpec ? 0.18 : 0.30);
+              const spec = specPow * shadowAtten;
+              r += (isTholinSpec ? 245 : 230) * spec;
+              g += (isTholinSpec ? 185 : 244) * spec;
+              b += (isTholinSpec ? 120 : 255) * spec;
+            }
+
+            if (totalFog > 0) {
+              r = r * (1 - totalFog) + hazeRgb[0] * totalFog;
+              g = g * (1 - totalFog) + hazeRgb[1] * totalFog;
+              b = b * (1 - totalFog) + hazeRgb[2] * totalFog;
+            }
+          }
+
+          const ir = r < 0 ? 0 : r > 255 ? 255 : r | 0;
+          const ig = g < 0 ? 0 : g > 255 ? 255 : g | 0;
+          const ib = b < 0 ? 0 : b > 255 ? 255 : b | 0;
+          colorBuffer[pIdx] = (255 << 24) | (ib << 16) | (ig << 8) | ir;
+        }
+        wx += dwx;
+        wz += dwz;
       }
     }
 
