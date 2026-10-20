@@ -3,8 +3,6 @@ import {
   Sun,
   Cloud,
   Navigation,
-  Play,
-  Pause,
   RotateCcw,
   Eye,
   Footprints,
@@ -168,7 +166,6 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
   const colorBufferRef = useRef<Uint32Array | null>(null);
 
   const [heightMode, setHeightMode] = useState<CameraHeightMode>('walk');
-  const [autoRoam, setAutoRoam] = useState<boolean>(true);
   const [showClouds, setShowClouds] = useState<boolean>(true);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [hudHeadingDeg, setHudHeadingDeg] = useState<number>(0);
@@ -216,9 +213,9 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
     }));
   }, [activeTile, goldbergGrid]);
 
-  // Precompute 512x512 High-Resolution Terrain Heightfield, Albedo Texture, Normal Map & Cloud Map
+  // Precompute 1024x1024 High-Resolution Terrain Heightfield, Albedo Texture, Normal Map & Cloud Map
   const terrainData = useMemo(() => {
-    const TEX_RES = 512;
+    const TEX_RES = 1024;
     const tileSeed = (surfaceModel.seed * 1664525 + activeTile.tileId * 1013904223) & 0x7fffffff;
 
     const heightMap = new Float32Array(TEX_RES * TEX_RES);
@@ -531,7 +528,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       };
     };
 
-    const MACRO_N = 129;
+    const MACRO_N = 193;
     const macroHGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroFbmGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroRidgeGrid = new Float32Array(MACRO_N * MACRO_N);
@@ -609,11 +606,11 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           surfaceModel.seaPalette.solventKey === 'NH3-H2O' ||
           surfaceModel.seaPalette.solventKey === 'CH4-C2H6' ||
           surfaceModel.compositionPalette.compositionLabel.includes('Tholin');
-        const sastrugiWave = Math.sin(px * 65 - pz * 32 + fine1 * 5.5);
+        const sastrugiWave = Math.sin(px * 75 - pz * 38 + fine1 * 5.2 + fine2 * 1.8);
         const crevassePattern = Math.abs(fine1 * 2.0 - 1.0 + (ridge - 0.5) * 0.6);
         const isCrevasse = crevassePattern < 0.14 || isFissureFloor;
-        nx += Math.cos(px * 65 - pz * 32 + fine1 * 5.5) * 0.55;
-        nz -= Math.sin(px * 65 - pz * 32 + fine1 * 5.5) * 0.4;
+        nx += Math.cos(px * 75 - pz * 38 + fine1 * 5.2) * 0.48;
+        nz -= Math.sin(px * 75 - pz * 38 + fine1 * 5.2) * 0.36;
 
         if (isCrevasse) {
           const depthCrev = isFissureFloor ? 0.85 : 1.0 - crevassePattern / 0.14;
@@ -622,7 +619,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           b = Math.round(targetBaseRgb[2] * (1 - depthCrev * 0.38) + (isTholinIce ? 18 : 210) * (depthCrev * 0.38));
           hDelta -= depthCrev * 0.015;
         } else {
-          const frostSparkle = sastrugiWave * 14 + grain * 16;
+          const frostSparkle = sastrugiWave * 12 + grain * 14;
           r = Math.round(targetBaseRgb[0] * 0.72 + iceRgb[0] * 0.28 + frostSparkle * (isTholinIce ? 1.15 : 1.0));
           g = Math.round(targetBaseRgb[1] * 0.72 + iceRgb[1] * 0.28 + frostSparkle * (isTholinIce ? 0.76 : 1.0));
           b = Math.round(targetBaseRgb[2] * 0.7 + iceRgb[2] * 0.3 + frostSparkle * (isTholinIce ? 0.42 : 1.1));
@@ -632,26 +629,26 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           0,
           Math.min(1, baseFbm * 1.2 + (targetBiomeId === 5 ? 0.28 : targetBiomeId === 6 ? 0.18 : -0.08))
         );
-        const cell = cellularFeature2D(px * 26.0, pz * 26.0, tileSeed + 809);
+        const cell = cellularFeature2D(px * 32.0, pz * 32.0, tileSeed + 809);
         const crownRadius = 0.28 + canopyDensity * 0.26;
 
         if (cell.dist < crownRadius && slope < 0.55 && hLocal > 0.015 && hLocal < 0.27) {
           const uCrown = cell.dist / crownRadius;
           const crownHeightProfile = Math.sqrt(Math.max(0, 1.0 - uCrown * uCrown));
           hDelta += crownHeightProfile * 0.022;
-          nx += (cell.dx / crownRadius) * 1.35 + (fine2 - 0.5) * 0.4;
-          nz += (cell.dy / crownRadius) * 1.35 + grain * 0.4;
+          nx += (cell.dx / crownRadius) * 1.2 + (fine2 - 0.5) * 0.35;
+          nz += (cell.dy / crownRadius) * 1.2 + grain * 0.35;
 
           const speciesShade =
-            (cell.cellHash - 0.5) * 26 + crownHeightProfile * 18 - (1 - crownHeightProfile) * 22;
+            (cell.cellHash - 0.5) * 24 + crownHeightProfile * 16 - (1 - crownHeightProfile) * 20;
           const isJungleOrTaiga = targetBiomeId === 5 || targetBiomeId === 6;
           const cRgb = isJungleOrTaiga ? forestRgb : plainsRgb;
-          r = Math.round(cRgb[0] + speciesShade + fine2 * 14);
-          g = Math.round(cRgb[1] + speciesShade * 1.15 + fine2 * 18);
-          b = Math.round(cRgb[2] + speciesShade * 0.7 + fine2 * 10);
+          r = Math.round(cRgb[0] + speciesShade + fine2 * 12);
+          g = Math.round(cRgb[1] + speciesShade * 1.15 + fine2 * 16);
+          b = Math.round(cRgb[2] + speciesShade * 0.7 + fine2 * 9);
         } else {
           const wetlandT = hLocal < 0.055 ? Math.max(0, Math.min(1, (0.055 - hLocal) / 0.055)) : 0;
-          const grassWave = Math.sin(px * 48 + pz * 32 + fine1 * 6) * 10 + grain * 14;
+          const grassWave = Math.sin(px * 56 + pz * 38 + fine1 * 6) * 9 + grain * 12;
           r = Math.round(plainsRgb[0] * (1 - wetlandT * 0.7) + marshRgb[0] * (wetlandT * 0.7) + grassWave);
           g = Math.round(
             plainsRgb[1] * (1 - wetlandT * 0.7) + marshRgb[1] * (wetlandT * 0.7) + grassWave * 1.1
@@ -662,31 +659,31 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         }
       } else if (isDesertB) {
         const ripplePhase =
-          px * 115.0 + pz * 52.0 + Math.sin(pz * 14.0 + baseFbm * 5.0) * 6.5 + fine1 * 4.0;
+          px * 128.0 + pz * 58.0 + Math.sin(pz * 14.0 + baseFbm * 5.0) * 6.5 + fine1 * 4.0;
         const rippleWave = Math.sin(ripplePhase);
-        nx += Math.cos(ripplePhase) * 0.65;
-        nz += Math.sin(ripplePhase) * 0.35;
+        nx += Math.cos(ripplePhase) * 0.55;
+        nz += Math.sin(ripplePhase) * 0.3;
 
-        const mineralBand = Math.sin(hLocal * 42 + baseFbm * 6.0) * 14 + rippleWave * 9 + grain * 18;
+        const mineralBand = Math.sin(hLocal * 42 + baseFbm * 6.0) * 14 + rippleWave * 8 + grain * 14;
         r = Math.round(targetBaseRgb[0] + mineralBand * 1.15);
         g = Math.round(targetBaseRgb[1] + mineralBand * 0.92);
         b = Math.round(targetBaseRgb[2] + mineralBand * 0.65);
       } else if (isCanyonB) {
-        const strataPhase = hLocal * 115.0 + fine1 * 2.4 + fine2 * 0.8;
+        const strataPhase = hLocal * 125.0 + fine1 * 2.2 + fine2 * 0.8;
         const strataBand = Math.sin(strataPhase);
-        const fineLayer = Math.sin(strataPhase * 3.2) * 0.5;
-        const bandContrast = strataBand * 22 + fineLayer * 11 + grain * 12;
-        nx += dhx * strataBand * 0.75;
-        nz += dhz * strataBand * 0.75;
+        const fineLayer = Math.sin(strataPhase * 3.4) * 0.5;
+        const bandContrast = strataBand * 22 + fineLayer * 11 + grain * 10;
+        nx += dhx * strataBand * 0.65;
+        nz += dhz * strataBand * 0.65;
 
         r = Math.round(plateauRgb[0] * 0.88 + highRgb[0] * 0.12 + bandContrast * 1.2);
         g = Math.round(plateauRgb[1] * 0.88 + highRgb[1] * 0.12 + bandContrast * 0.85);
         b = Math.round(plateauRgb[2] * 0.88 + highRgb[2] * 0.12 + bandContrast * 0.55);
       } else if (isVolcB) {
-        const pahoehoe = Math.sin(px * 55 + pz * 45 + fine1 * 8.0);
+        const pahoehoe = Math.sin(px * 62 + pz * 50 + fine1 * 7.5);
         const crack = Math.abs(fine1 * 2.0 - 1.0 + (fine2 - 0.5) * 0.5);
-        nx += pahoehoe * 0.65;
-        nz -= pahoehoe * 0.55;
+        nx += pahoehoe * 0.55;
+        nz -= pahoehoe * 0.48;
 
         if (crack < 0.065 && (activeTile.volcanoIntensity > 0.35 || surfaceModel.isMoltenWorld)) {
           const glow = 1.0 - crack / 0.065;
@@ -695,34 +692,34 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           b = Math.round(12 + 30 * glow);
           flags |= FLAG_LAVA;
         } else {
-          const ashVar = pahoehoe * 10 + (fine2 - 0.5) * 24 + grain * 16;
+          const ashVar = pahoehoe * 10 + (fine2 - 0.5) * 22 + grain * 14;
           r = Math.round(basaltRgb[0] + ashVar);
           g = Math.round(basaltRgb[1] + ashVar * 0.9);
           b = Math.round(basaltRgb[2] + ashVar * 0.85);
         }
       } else if (isCraterOrBarrenB) {
-        const cell = cellularFeature2D(px * 22.0, pz * 22.0, tileSeed + 937);
-        let microRelief = (fine1 - 0.5) * 22 + (fine2 - 0.5) * 16 + grain * 18;
+        const cell = cellularFeature2D(px * 28.0, pz * 28.0, tileSeed + 937);
+        let microRelief = (fine1 - 0.5) * 20 + (fine2 - 0.5) * 15 + grain * 14;
 
         if (cell.dist < 0.28) {
           const uCr = cell.dist / 0.28;
           if (cell.cellHash > 0.32 && effCraterIntensity > 0.04) {
             if (uCr < 0.76) {
-              nx -= (cell.dx / 0.28) * 1.55;
-              nz -= (cell.dy / 0.28) * 1.55;
-              microRelief -= (1 - uCr) * 24;
+              nx -= (cell.dx / 0.28) * 1.35;
+              nz -= (cell.dy / 0.28) * 1.35;
+              microRelief -= (1 - uCr) * 22;
               hDelta -= (1 - uCr) * 0.011;
             } else {
-              nx += (cell.dx / 0.28) * 1.3;
-              nz += (cell.dy / 0.28) * 1.3;
-              microRelief += 18;
+              nx += (cell.dx / 0.28) * 1.15;
+              nz += (cell.dy / 0.28) * 1.15;
+              microRelief += 16;
               hDelta += 0.007;
             }
           } else {
-            nx += (cell.dx / 0.28) * 1.2;
-            nz += (cell.dy / 0.28) * 1.2;
-            microRelief += (1 - uCr) * 16;
-            hDelta += (1 - uCr) * 0.012;
+            nx += (cell.dx / 0.28) * 1.05;
+            nz += (cell.dy / 0.28) * 1.05;
+            microRelief += (1 - uCr) * 14;
+            hDelta += (1 - uCr) * 0.011;
           }
         }
 
@@ -730,7 +727,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         g = Math.round(targetBaseRgb[1] + microRelief * 0.95);
         b = Math.round(targetBaseRgb[2] + microRelief * 0.9);
       } else {
-        const texVar = (fine1 - 0.5) * 26 + (fine2 - 0.5) * 18 + grain * 16;
+        const texVar = (fine1 - 0.5) * 24 + (fine2 - 0.5) * 16 + grain * 14;
         r = Math.round(targetBaseRgb[0] + texVar);
         g = Math.round(targetBaseRgb[1] + texVar * 0.96);
         b = Math.round(targetBaseRgb[2] + texVar * 0.9);
@@ -799,8 +796,15 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           macroMixGrid[i01] * w01 +
           macroMixGrid[i11] * w11;
 
-        const dhx = (macroHGrid[i10] - macroHGrid[i00]) * (MACRO_N * 0.5);
-        const dhz = (macroHGrid[i01] - macroHGrid[i00]) * (MACRO_N * 0.5);
+        // Smooth bilinear derivative of macro height field so grid boundaries are completely invisible
+        const dhx =
+          ((macroHGrid[i10] - macroHGrid[i00]) * (1 - fz) +
+            (macroHGrid[i11] - macroHGrid[i01]) * fz) *
+          (MACRO_N * 0.5);
+        const dhz =
+          ((macroHGrid[i01] - macroHGrid[i00]) * (1 - fx) +
+            (macroHGrid[i11] - macroHGrid[i10]) * fx) *
+          (MACRO_N * 0.5);
         const slope = Math.hypot(dhx, dhz);
 
         const spMask = macroSpecialGrid[i00] | macroSpecialGrid[i10] | macroSpecialGrid[i01] | macroSpecialGrid[i11];
@@ -808,14 +812,16 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         const isFissureFloor = (spMask & 2) !== 0;
         const isOceanPoint = (spMask & 4) !== 0;
 
+        // Smooth continuous multi-octave micro-noise (replaces discontinuous per-texel random grain)
         const fine1 = valueNoise2D(px * 28.0, pz * 28.0, tileSeed + 313);
-        const fine2 = valueNoise2D(px * 64.0, pz * 64.0, tileSeed + 419);
-        const grain = hash2(tx, tz, tileSeed + 521) - 0.5;
+        const fine2 = valueNoise2D(px * 74.0, pz * 74.0, tileSeed + 419);
+        const fine3 = valueNoise2D(px * 168.0, pz * 168.0, tileSeed + 521);
+        const grain = (fine3 - 0.5) * 0.68 + (fine2 - 0.5) * 0.32;
 
-        const fineRight = valueNoise2D((px + 0.006) * 42.0, pz * 42.0, tileSeed + 313);
-        const fineDown = valueNoise2D(px * 42.0, (pz + 0.006) * 42.0, tileSeed + 313);
-        let nx = -dhx * 0.6 + (fine1 - fineRight) * 1.8;
-        let nz = -dhz * 0.6 + (fine1 - fineDown) * 1.8;
+        const fineRight = valueNoise2D((px + 0.004) * 52.0, pz * 52.0, tileSeed + 313);
+        const fineDown = valueNoise2D(px * 52.0, (pz + 0.004) * 52.0, tileSeed + 313);
+        let nx = -dhx * 0.6 + (fine1 - fineRight) * 1.45;
+        let nz = -dhz * 0.6 + (fine1 - fineDown) * 1.45;
 
         let r = baseRgb1[0];
         let g = baseRgb1[1];
@@ -1125,7 +1131,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       const keys = keysRef.current;
       const moveSpeed = heightMode === 'flight' ? 0.24 : heightMode === 'skim' ? 0.14 : 0.075;
 
-      let forwardInput = autoRoam ? 0.42 : 0;
+      let forwardInput = 0;
       let strafeInput = 0;
       if (keys.has('KeyW') || keys.has('ArrowUp')) forwardInput = 1.0;
       if (keys.has('KeyS') || keys.has('ArrowDown')) forwardInput = -1.0;
@@ -1134,10 +1140,16 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       if (keys.has('ArrowLeft')) cam.yaw -= 1.15 * dt;
       if (keys.has('ArrowRight')) cam.yaw += 1.15 * dt;
 
+      const accel = Math.min(1, dt * 10.0);
+      cam.velForward += (forwardInput - cam.velForward) * accel;
+      cam.velStrafe += (strafeInput - cam.velStrafe) * accel;
+      if (Math.abs(cam.velForward) < 0.001) cam.velForward = 0;
+      if (Math.abs(cam.velStrafe) < 0.001) cam.velStrafe = 0;
+
       const sinYaw = Math.sin(cam.yaw);
       const cosYaw = Math.cos(cam.yaw);
-      cam.x += (sinYaw * forwardInput + cosYaw * strafeInput) * moveSpeed * dt;
-      cam.z += (cosYaw * forwardInput - sinYaw * strafeInput) * moveSpeed * dt;
+      cam.x += (sinYaw * cam.velForward + cosYaw * cam.velStrafe) * moveSpeed * dt;
+      cam.z += (cosYaw * cam.velForward - sinYaw * cam.velStrafe) * moveSpeed * dt;
 
       const eyeClearance = heightMode === 'flight' ? 0.26 : heightMode === 'skim' ? 0.095 : 0.026;
       const groundH = sampleBilinearHeight(cam.x, cam.z);
@@ -1259,23 +1271,159 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         colorBuffer.fill(baseSkyPixel, rowOff, rowOff + W);
       }
 
-      // 2. Front-to-Back First-Person 3D Terrain Raycasting (Locked 0.6x Relief)
+      // 2. Front-to-Back First-Person 3D Terrain Raycasting (Locked 0.6x Relief + Sub-Texel Detail Synthesis)
       const verticalScale = 0.6;
       const nightDim = isNight ? 0.36 : 1.0;
       const cloudShadowStrength = showClouds ? Math.min(0.45, surfaceModel.cloudOpacity * 0.52) : 0;
       const atmoHazeStrength = hasAtmosphere
         ? Math.min(0.85, 0.22 + surfaceModel.cloudOpacity * 0.45 + Math.min(0.25, pBarAtmo * 0.04))
         : 0.08;
+      const isTholinWorldSpec =
+        surfaceModel.seaPalette.solventKey === 'NH3-H2O' ||
+        surfaceModel.seaPalette.solventKey === 'CH4-C2H6' ||
+        surfaceModel.compositionPalette.compositionLabel.includes('Tholin');
+      const camYScaled = cam.y * verticalScale;
+
+      // Evaluates shaded & micro-textured RGB at world coordinate (wx, wz) and distance zDist
+      const shadeWorldPoint = (
+        wx: number,
+        wz: number,
+        zDist: number,
+        rdx: number,
+        rdz: number
+      ): { r: number; g: number; b: number } => {
+        const tu = (foldMirror(wx) * 0.5 + 0.5) * texMax;
+        const tv = (foldMirror(wz) * 0.5 + 0.5) * texMax;
+        const iu = tu | 0;
+        const iv = tv | 0;
+        const fu = tu - iu;
+        const fv = tv - iv;
+
+        // Smoothstep Hermite weights for ultra-smooth sub-texel interpolation without linear Mach bands
+        const sfu = fu * fu * (3 - 2 * fu);
+        const sfv = fv * fv * (3 - 2 * fv);
+
+        const i00 = iv * TEX_RES + iu;
+        const i10 = iu < texMax ? i00 + 1 : i00;
+        const i01 = iv < texMax ? i00 + TEX_RES : i00;
+        const i11 = iu < texMax && iv < texMax ? i01 + 1 : i01;
+
+        const w00 = (1 - sfu) * (1 - sfv);
+        const w10 = sfu * (1 - sfv);
+        const w01 = (1 - sfu) * sfv;
+        const w11 = sfu * sfv;
+
+        let r = texR[i00] * w00 + texR[i10] * w10 + texR[i01] * w01 + texR[i11] * w11;
+        let g = texG[i00] * w00 + texG[i10] * w10 + texG[i01] * w01 + texG[i11] * w11;
+        let b = texB[i00] * w00 + texB[i10] * w10 + texB[i01] * w01 + texB[i11] * w11;
+
+        const flags = flagsMap[i00];
+        const isLava = (flags & FLAG_LAVA) !== 0;
+
+        if (isLava) {
+          const pulse = Math.sin(wx * 45 + wz * 45 + timeSec * 3.5) * 18;
+          r = Math.min(255, r + pulse);
+          g = Math.min(255, Math.max(0, g + pulse * 0.8));
+          return { r, g, b };
+        }
+
+        let nx =
+          (normXMap[i00] * w00 + normXMap[i10] * w10 + normXMap[i01] * w01 + normXMap[i11] * w11) *
+          (1 / 42);
+        let nz =
+          (normZMap[i00] * w00 + normZMap[i10] * w10 + normZMap[i01] * w01 + normZMap[i11] * w11) *
+          (1 / 42);
+        const ny = 1.0;
+
+        const isWater = (flags & FLAG_WATER) !== 0;
+        if (isWater) {
+          const waveAnim1 = Math.sin(wx * 95 + wz * 55 + timeSec * 2.8);
+          const waveAnim2 = Math.cos(wx * 60 - wz * 85 - timeSec * 2.2);
+          nx += waveAnim1 * 0.32;
+          nz += waveAnim2 * 0.32;
+        } else if (zDist < 1.1) {
+          // Real-time close-range procedural micro-texture & bump normal synthesis:
+          // Adds crisp sub-texel mineral striations, pebbles, sand ripples, and surface grain right under the camera
+          const fade = 1.0 - zDist * (1 / 1.1);
+          const detailWeight = fade * fade;
+
+          // Multi-frequency continuous harmonic micro-relief at 220x and 520x world frequency
+          const p1 = wx * 215.0 + wz * 135.0 + Math.sin(wz * 85.0 - wx * 62.0) * 1.4;
+          const p2 = wx * 480.0 - wz * 390.0 + Math.cos(wx * 195.0 + wz * 170.0) * 1.1;
+          const p3 = (wx + wz) * 890.0 + Math.sin(wx * 510.0 - wz * 460.0) * 0.9;
+
+          const s1 = Math.sin(p1);
+          const c1 = Math.cos(p1);
+          const s2 = Math.sin(p2);
+          const c2 = Math.cos(p2);
+          const s3 = Math.sin(p3);
+
+          // Micro-normal perturbation for crisp close-up surface relief
+          nx += (c1 * 0.22 + c2 * 0.15 + s3 * 0.08) * detailWeight;
+          nz += (s1 * 0.18 - s2 * 0.15 + s3 * 0.08) * detailWeight;
+
+          // Albedo micro-modulation (warm/cool mineral & organic micro-variation)
+          const microDelta = (s1 * 6.5 + s2 * 4.8 + s3 * 3.2) * detailWeight;
+          r += microDelta * 1.06;
+          g += microDelta * 0.98;
+          b += microDelta * 0.88;
+        }
+
+        const invN = 1.0 / Math.hypot(nx, ny, nz);
+        const nnx = nx * invN;
+        const nny = ny * invN;
+        const nnz = nz * invN;
+
+        const ndotl = Math.max(0, nnx * lx + nny * ly + nnz * lz);
+
+        // Sample drifting overhead cloud shadow
+        const cwx = wx + windDriftX + 0.06;
+        const cwz = wz + windDriftZ - 0.05;
+        const ctu = ((foldMirror(cwx) * 0.5 + 0.5) * texMax) | 0;
+        const ctv = ((foldMirror(cwz) * 0.5 + 0.5) * texMax) | 0;
+        const cShad = (cloudMap[ctv * TEX_RES + ctu] * (1 / 255)) * cloudShadowStrength;
+        const shadowAtten = 1.0 - cShad;
+
+        const diff = (0.30 + 0.78 * ndotl * shadowAtten) * nightDim;
+        r *= diff;
+        g *= diff;
+        b *= diff;
+
+        if (!isNight && (isWater || (flags & FLAG_ICE_SPEC) !== 0)) {
+          const halfX = lx - rdx;
+          const halfY = ly + 0.25;
+          const halfZ = lz - rdz;
+          const hInv = 1.0 / Math.hypot(halfX, halfY, halfZ);
+          const ndoth = Math.max(0, nnx * halfX * hInv + nny * halfY * hInv + nnz * halfZ * hInv);
+          const isTholinSpec = !isWater && isTholinWorldSpec;
+          const spec =
+            (isWater
+              ? Math.pow(ndoth, 22) * 0.65
+              : Math.pow(ndoth, 14) * (isTholinSpec ? 0.18 : 0.32)) * shadowAtten;
+          r += (isTholinSpec ? 245 : 235) * spec;
+          g += (isTholinSpec ? 185 : 245) * spec;
+          b += (isTholinSpec ? 120 : 255) * spec;
+        }
+
+        // Distance aerial perspective haze
+        const fog = Math.min(1, Math.pow(zDist / 2.65, 1.35) * atmoHazeStrength);
+        r = r * (1 - fog) + skyHorizonRgb[0] * fog;
+        g = g * (1 - fog) + skyHorizonRgb[1] * fog;
+        b = b * (1 - fog) + skyHorizonRgb[2] * fog;
+
+        return { r, g, b };
+      };
 
       for (let sx = 0; sx < W; sx++) {
         const rdx = rayDirX[sx];
         const rdz = rayDirZ[sx];
 
         let maxY = H - 1;
-        let zDist = 0.014;
-        let dz = 0.0022;
+        let zDist = 0.011;
+        let dz = 0.0011;
 
         let prevProjY = H;
+        let prevZDist = zDist;
         let prevR = skyHorizonRgb[0];
         let prevG = skyHorizonRgb[1];
         let prevB = skyHorizonRgb[2];
@@ -1305,91 +1453,38 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           const hSample =
             (heightMap[i00] * w00 + heightMap[i10] * w10 + heightMap[i01] * w01 + heightMap[i11] * w11) *
             verticalScale;
-          const camYScaled = cam.y * verticalScale;
 
           const projY = clampedHorizon - ((hSample - camYScaled) * focalLen) / zDist;
           const topY = Math.max(0, projY | 0);
 
           if (topY <= maxY) {
-            let r = texR[i00] * w00 + texR[i10] * w10 + texR[i01] * w01 + texR[i11] * w11;
-            let g = texG[i00] * w00 + texG[i10] * w10 + texG[i01] * w01 + texG[i11] * w11;
-            let b = texB[i00] * w00 + texB[i10] * w10 + texB[i01] * w01 + texB[i11] * w11;
-
-            const flags = flagsMap[i00];
-            const isLava = (flags & FLAG_LAVA) !== 0;
-
-            if (isLava) {
-              // Animated glowing lava pulse
-              const pulse = Math.sin(wx * 45 + wz * 45 + timeSec * 3.5) * 18;
-              r = Math.min(255, r + pulse);
-              g = Math.min(255, Math.max(0, g + pulse * 0.8));
-            } else {
-              let nx = (normXMap[i00] * w00 + normXMap[i10] * w10 + normXMap[i01] * w01 + normXMap[i11] * w11) * (1 / 42);
-              let nz = (normZMap[i00] * w00 + normZMap[i10] * w10 + normZMap[i01] * w01 + normZMap[i11] * w11) * (1 / 42);
-              const ny = 1.0;
-
-              // Real-time animated water wave normals & specular glints
-              const isWater = (flags & FLAG_WATER) !== 0;
-              if (isWater) {
-                const waveAnim1 = Math.sin(wx * 95 + wz * 55 + timeSec * 2.8);
-                const waveAnim2 = Math.cos(wx * 60 - wz * 85 - timeSec * 2.2);
-                nx += waveAnim1 * 0.32;
-                nz += waveAnim2 * 0.32;
-              }
-
-              const invN = 1.0 / Math.hypot(nx, ny, nz);
-              const nnx = nx * invN;
-              const nny = ny * invN;
-              const nnz = nz * invN;
-
-              const ndotl = Math.max(0, nnx * lx + nny * ly + nnz * lz);
-
-              // Sample drifting overhead cloud shadow
-              const cwx = wx + windDriftX + 0.06;
-              const cwz = wz + windDriftZ - 0.05;
-              const ctu = ((foldMirror(cwx) * 0.5 + 0.5) * texMax) | 0;
-              const ctv = ((foldMirror(cwz) * 0.5 + 0.5) * texMax) | 0;
-              const cShad = (cloudMap[ctv * TEX_RES + ctu] * (1 / 255)) * cloudShadowStrength;
-              const shadowAtten = 1.0 - cShad;
-
-              const diff = (0.30 + 0.78 * ndotl * shadowAtten) * nightDim;
-              r *= diff;
-              g *= diff;
-              b *= diff;
-
-              if (!isNight && (isWater || (flags & FLAG_ICE_SPEC) !== 0)) {
-                const halfX = lx - rdx;
-                const halfY = ly + 0.25;
-                const halfZ = lz - rdz;
-                const hInv = 1.0 / Math.hypot(halfX, halfY, halfZ);
-                const ndoth = Math.max(0, nnx * halfX * hInv + nny * halfY * hInv + nnz * halfZ * hInv);
-                const isTholinSpec =
-                  !isWater &&
-                  (surfaceModel.seaPalette.solventKey === 'NH3-H2O' ||
-                    surfaceModel.seaPalette.solventKey === 'CH4-C2H6' ||
-                    surfaceModel.compositionPalette.compositionLabel.includes('Tholin'));
-                const spec =
-                  (isWater
-                    ? Math.pow(ndoth, 22) * 0.65
-                    : Math.pow(ndoth, 14) * (isTholinSpec ? 0.18 : 0.32)) * shadowAtten;
-                r += (isTholinSpec ? 245 : 235) * spec;
-                g += (isTholinSpec ? 185 : 245) * spec;
-                b += (isTholinSpec ? 120 : 255) * spec;
-              }
-
-              // Distance aerial perspective haze
-              const fog = Math.min(1, Math.pow(zDist / 2.65, 1.35) * atmoHazeStrength);
-              r = r * (1 - fog) + skyHorizonRgb[0] * fog;
-              g = g * (1 - fog) + skyHorizonRgb[1] * fog;
-              b = b * (1 - fog) + skyHorizonRgb[2] * fog;
-            }
+            const cur = shadeWorldPoint(wx, wz, zDist, rdx, rdz);
+            const r = cur.r;
+            const g = cur.g;
+            const b = cur.b;
 
             const span = maxY - topY + 1;
+            const useSubSpanDetail = hasPrev && span > 2 && zDist < 0.55 && prevProjY > projY;
+
             for (let py = maxY; py >= topY; py--) {
               let pr = r;
               let pg = g;
               let pb = b;
-              if (hasPrev && span > 1 && prevProjY > projY) {
+              if (useSubSpanDetail) {
+                const tSpan = (py - projY) / Math.max(0.5, prevProjY - projY);
+                const tClamped = Math.max(0, Math.min(1, tSpan));
+                const subZ = zDist + (prevZDist - zDist) * tClamped;
+                const subShade = shadeWorldPoint(
+                  cam.x + rdx * subZ,
+                  cam.z + rdz * subZ,
+                  subZ,
+                  rdx,
+                  rdz
+                );
+                pr = subShade.r;
+                pg = subShade.g;
+                pb = subShade.b;
+              } else if (hasPrev && span > 1 && prevProjY > projY) {
                 const tSpan = (py - topY) / span;
                 pr = r + (prevR - r) * tSpan;
                 pg = g + (prevG - g) * tSpan;
@@ -1403,14 +1498,18 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
 
             maxY = topY - 1;
             prevProjY = projY;
+            prevZDist = zDist;
             prevR = r;
             prevG = g;
             prevB = b;
             hasPrev = true;
+          } else if (!hasPrev) {
+            prevProjY = projY;
+            prevZDist = zDist;
           }
 
           zDist += dz;
-          dz += 0.00011;
+          dz += 0.000052;
         }
       }
 
@@ -1544,7 +1643,6 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
   }, [
     terrainData,
     heightMode,
-    autoRoam,
     showClouds,
     timeOfDayDeg,
     surfaceModel,
@@ -1615,20 +1713,6 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
               Flight
             </button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => setAutoRoam((v) => !v)}
-            className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
-              autoRoam
-                ? 'bg-emerald-900/60 border-emerald-500/70 text-emerald-200'
-                : 'bg-slate-900 border-slate-700 text-slate-400'
-            }`}
-            title="Toggle automatic forward surface traversal"
-          >
-            {autoRoam ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-            Auto-Roam
-          </button>
 
           {hasAtmosphere && (
             <button
