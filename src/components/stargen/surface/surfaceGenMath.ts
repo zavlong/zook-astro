@@ -1880,7 +1880,7 @@ export function generatePlanetarySurfaceModel(
       vy: ty / tLen,
       vz: tz / tLen,
       isContinental: isCont,
-      baseBuoyancy: isCont ? 0.14 + prng() * 0.08 : -0.14 - prng() * 0.08,
+      baseBuoyancy: isCont ? 0.09 + prng() * 0.06 : -0.09 - prng() * 0.06,
     });
   }
 
@@ -1923,18 +1923,20 @@ export function generatePlanetarySurfaceModel(
       // 2. Tectonic plates & multi-scale spherical topography
       let tectonicOffset = 0;
       if (platesCount > 0) {
-        const boundaryWarpA = (sphericalFbm(lat * 1.35, lon * 1.35, seed + 211, 3) - 0.5) * 0.22;
-        const boundaryWarpB = (sphericalFbm(lat * 3.1, lon * 3.1, seed + 263, 2) - 0.5) * 0.08;
+        const boundaryWarpA = (sphericalFbm(lat * 1.15, lon * 1.15, seed + 211, 3) - 0.5) * 0.18;
+        const boundaryWarpB = (sphericalFbm(lat * 2.4, lon * 2.4, seed + 263, 2) - 0.5) * 0.05;
         let bestPlate = 0;
         let secondPlate = 0;
         let bestScore = -1e9;
         let secondScore = -1e9;
 
+        const plateScores = new Float64Array(platesCount);
         for (let p = 0; p < platesCount; p++) {
           const pc = plateCenters[p];
           const pJitter =
-            (sphericalFbm(lat * 1.2 + p * 19, lon * 1.2 - p * 23, seed + 101 + p * 37, 3) - 0.5) * 0.16;
+            (sphericalFbm(lat * 1.05 + p * 19, lon * 1.05 - p * 23, seed + 101 + p * 37, 3) - 0.5) * 0.13;
           const score = nx * pc.cx + ny * pc.cy + nz * pc.cz + pJitter + boundaryWarpA * 0.35 + boundaryWarpB * 0.2;
+          plateScores[p] = score;
           if (score > bestScore) {
             secondScore = bestScore;
             secondPlate = bestPlate;
@@ -1948,34 +1950,45 @@ export function generatePlanetarySurfaceModel(
         tectonicPlateGrid[idx] = bestPlate;
 
         if (!isDeepWaterOrIceShell) {
+          // Smooth C-infinity softmax blend across all plates so margins and triple junctions have zero abrupt steps
+          let weightSum = 0;
+          let blendedBuoyancy = 0;
+          for (let p = 0; p < platesCount; p++) {
+            const w = Math.exp((plateScores[p] - bestScore) * 5.2);
+            weightSum += w;
+            blendedBuoyancy += plateCenters[p].baseBuoyancy * w;
+          }
+          tectonicOffset = weightSum > 0 ? blendedBuoyancy / weightSum : plateCenters[bestPlate].baseBuoyancy;
+
+          // Gentle, continuous convergence/divergence profile across plate margins (zero step discontinuity at borderDist = 0)
           const p1 = plateCenters[bestPlate];
           const p2 = plateCenters[secondPlate];
-          // Smooth interior-to-margin plate buoyancy transition
           const borderDist = Math.max(0, bestScore - secondScore);
-          const marginBlend = Math.min(1.0, borderDist / 0.14);
-          tectonicOffset = p1.baseBuoyancy * (0.5 + 0.5 * marginBlend) + p2.baseBuoyancy * (0.5 * (1.0 - marginBlend));
-
-          // Relative convergence/divergence across the plate boundary
-          const boundaryProximity = Math.exp(-Math.pow(borderDist / 0.065, 2));
-          if (boundaryProximity > 0.02) {
+          const boundaryProximity = Math.exp(-Math.pow(borderDist / 0.12, 2));
+          if (boundaryProximity > 0.01) {
+            // Order-invariant vector difference so convergence magnitude never jumps when p1 and p2 swap at borderDist = 0
             const dx = p2.cx - p1.cx;
             const dy = p2.cy - p1.cy;
             const dz = p2.cz - p1.cz;
             const dvx = p1.vx - p2.vx;
             const dvy = p1.vy - p2.vy;
             const dvz = p1.vz - p2.vz;
-            const convergence = dx * dvx + dy * dvy + dz * dvz;
-            const orogenyFold = Math.max(0, 1.0 - Math.abs(sphericalFbm(lat * 2.2, lon * 2.2, seed + 499, 4) - 0.5) * 4.2);
+            const convergence = Math.max(-1, Math.min(1, dx * dvx + dy * dvy + dz * dvz));
+            const rawFold = Math.max(0, 1.0 - Math.abs(sphericalFbm(lat * 1.9, lon * 1.9, seed + 499, 4) - 0.5) * 3.2);
+            const orogenyFold = rawFold * rawFold * (3.0 - 2.0 * rawFold);
+            // Smooth signed cross-boundary factor that equals 0 at borderDist = 0 and peaks softly inside each plate
+            const signedSide = Math.tanh(borderDist / 0.075) * Math.tanh((p1.baseBuoyancy - p2.baseBuoyancy) * 8.0);
+            const meanCont = (p1.isContinental ? 0.5 : 0) + (p2.isContinental ? 0.5 : 0);
+
             if (convergence > 0) {
-              // Convergent boundary: Andean/Himalayan mountain cordillera on overriding plate, trench on subducting oceanic side
-              if (p1.isContinental || p1.baseBuoyancy >= p2.baseBuoyancy) {
-                tectonicOffset += boundaryProximity * (0.14 + 0.22 * orogenyFold);
-              } else {
-                tectonicOffset -= boundaryProximity * 0.16;
-              }
+              // Symmetric gentle fold belt + smooth C1 overriding-plate uplift / forearc depression
+              const symUplift = (0.04 + 0.07 * orogenyFold) * (0.45 + 0.55 * meanCont);
+              const asymDip = signedSide * (0.045 + 0.035 * orogenyFold);
+              tectonicOffset += boundaryProximity * convergence * (symUplift + asymDip);
             } else {
-              // Divergent rift / mid-ocean spreading ridge
-              tectonicOffset += boundaryProximity * (p1.isContinental ? -0.09 : 0.07 * orogenyFold);
+              // Gentle divergent rift / mid-ocean spreading swell (symmetric in p1, p2 so continuous at borderDist = 0)
+              const riftProfile = meanCont * -0.045 + (1.0 - meanCont) * (0.035 * orogenyFold);
+              tectonicOffset += boundaryProximity * Math.abs(convergence) * riftProfile;
             }
           }
         }
@@ -1990,8 +2003,9 @@ export function generatePlanetarySurfaceModel(
       } else {
         const macroContinents = sphericalFbm(lat * 0.85, lon * 0.85, seed, 5);
         const mesoHills = sphericalFbm(lat * 2.3, lon * 2.3, seed + 73, 4);
-        const ridgeChains = Math.max(0, 1.0 - Math.abs(sphericalFbm(lat * 1.75, lon * 1.75, seed + 499, 4) - 0.5) * 4.2);
-        baseElev = macroContinents * 0.58 + mesoHills * 0.24 + ridgeChains * 0.18 + tectonicOffset * 0.45;
+        const rawRidge = Math.max(0, 1.0 - Math.abs(sphericalFbm(lat * 1.65, lon * 1.65, seed + 499, 4) - 0.5) * 3.4);
+        const ridgeChains = rawRidge * rawRidge * (3.0 - 2.0 * rawRidge);
+        baseElev = macroContinents * 0.64 + mesoHills * 0.24 + ridgeChains * 0.12 + tectonicOffset * 0.30;
         if (craters.length > 0) {
           // On smaller airless worlds, dampen background tectonic ridge noise so circular impact craters dominate the relief
           const topoSmoothing = Math.max(0.45, Math.min(1.0, 1.02 / Math.pow(craterProminence, 0.48)));
@@ -3680,9 +3694,10 @@ export function evaluateSurfaceMapTexel(
     }
   } else if (activeLayer === 'plates') {
     const pId = surfaceModel.tectonicPlateGrid[idx];
+    const pLeft = surfaceModel.tectonicPlateGrid[gy * width + xLeft];
     const pRight = surfaceModel.tectonicPlateGrid[gy * width + xRight];
+    const pUp = surfaceModel.tectonicPlateGrid[yUp * width + gx];
     const pDown = surfaceModel.tectonicPlateGrid[yDown * width + gx];
-    const isBoundary = pId !== pRight || pId !== pDown;
     const colors = [
       [212, 72, 68],
       [64, 142, 218],
@@ -3695,15 +3710,28 @@ export function evaluateSurfaceMapTexel(
       [92, 178, 104],
       [196, 92, 148],
     ];
-    const col = colors[Math.abs(pId) % colors.length];
-    if (isBoundary && surfaceModel.platesCount > 0) {
-      r = Math.min(255, Math.round(col[0] * 0.45 + 255 * 0.55));
-      g = Math.min(255, Math.round(col[1] * 0.45 + 185 * 0.55));
-      b = Math.min(255, Math.round(col[2] * 0.45 + 75 * 0.55));
+    const cCenter = colors[Math.abs(pId) % colors.length];
+    const cLeft = colors[Math.abs(pLeft) % colors.length];
+    const cRight = colors[Math.abs(pRight) % colors.length];
+    const cUp = colors[Math.abs(pUp) % colors.length];
+    const cDown = colors[Math.abs(pDown) % colors.length];
+    const diffCount =
+      (pId !== pLeft ? 1 : 0) +
+      (pId !== pRight ? 1 : 0) +
+      (pId !== pUp ? 1 : 0) +
+      (pId !== pDown ? 1 : 0);
+    const avgR = cCenter[0] * 0.44 + (cLeft[0] + cRight[0] + cUp[0] + cDown[0]) * 0.14;
+    const avgG = cCenter[1] * 0.44 + (cLeft[1] + cRight[1] + cUp[1] + cDown[1]) * 0.14;
+    const avgB = cCenter[2] * 0.44 + (cLeft[2] + cRight[2] + cUp[2] + cDown[2]) * 0.14;
+    if (diffCount > 0 && surfaceModel.platesCount > 0) {
+      const glow = Math.min(0.32, diffCount * 0.11);
+      r = Math.min(255, Math.round(avgR * (1 - glow) + 245 * glow));
+      g = Math.min(255, Math.round(avgG * (1 - glow) + 195 * glow));
+      b = Math.min(255, Math.round(avgB * (1 - glow) + 110 * glow));
     } else {
-      r = col[0];
-      g = col[1];
-      b = col[2];
+      r = Math.round(avgR);
+      g = Math.round(avgG);
+      b = Math.round(avgB);
     }
   }
 
