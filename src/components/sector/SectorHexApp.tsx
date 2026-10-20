@@ -38,6 +38,9 @@ import {
   isNonMainSequenceSystem,
   isBlackHoleStar,
   isSupermassiveBlackHole,
+  hasWaterWorld,
+  hasAmmoniaWorld,
+  hasMulticellularLife,
 } from '../../core/generation/sectorHex';
 import {
   getProceduralStarSpriteDataUrl,
@@ -76,6 +79,9 @@ export type SectorFilterCategory =
   | 'all'
   | SpectralCategory
   | 'habitable'
+  | 'water-world'
+  | 'ammonia-world'
+  | 'multicellular'
   | 'non-ms'
   | 'mass';
 
@@ -161,16 +167,16 @@ const getBiosphereDisplay = (sys: SectorHexSystem): string => {
   if (!sys.candidateHabitable || !sys.habitableWorldCount || sys.habitableWorldCount === 0) {
     return '<none>';
   }
-  let ammoniaCount = 0;
-  let waterCount = 0;
-  if (sys.habitableTypes) {
-    for (const t of sys.habitableTypes) {
-      if (t.toLowerCase().includes('ammonia')) ammoniaCount++;
-      else waterCount++;
-    }
-  }
-  const dominant = ammoniaCount > waterCount ? 'ammonia' : 'water';
-  return `${sys.habitableWorldCount} ${dominant}`;
+  const hasWater = hasWaterWorld(sys);
+  const hasAmmonia = hasAmmoniaWorld(sys);
+  const hasMulti = hasMulticellularLife(sys);
+  const kindLabel =
+    hasWater && hasAmmonia
+      ? 'water & ammonia'
+      : hasAmmonia
+      ? 'ammonia'
+      : 'water';
+  return `${sys.habitableWorldCount} ${kindLabel}${hasMulti ? ' (multicellular)' : ''}`;
 };
 
 export const SectorHexApp: React.FC<SectorHexAppProps> = ({
@@ -377,6 +383,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     return gridData.systems.filter((system) => {
       if (filterCat === 'all') return true;
       if (filterCat === 'habitable') return system.candidateHabitable;
+      if (filterCat === 'water-world') return hasWaterWorld(system);
+      if (filterCat === 'ammonia-world') return hasAmmoniaWorld(system);
+      if (filterCat === 'multicellular') return hasMulticellularLife(system);
       if (filterCat === 'non-ms') return isNonMainSequenceSystem(system);
       if (filterCat === 'mass') {
         if (massBracket === 'low') return system.mass < 0.8;
@@ -2171,6 +2180,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 if (filterCat !== 'all') {
                   if (filterCat === 'habitable') {
                     matchesFilter = system.candidateHabitable;
+                  } else if (filterCat === 'water-world') {
+                    matchesFilter = hasWaterWorld(system);
+                  } else if (filterCat === 'ammonia-world') {
+                    matchesFilter = hasAmmoniaWorld(system);
+                  } else if (filterCat === 'multicellular') {
+                    matchesFilter = hasMulticellularLife(system);
                   } else if (filterCat === 'non-ms') {
                     matchesFilter = isNonMainSequenceSystem(system);
                   } else if (filterCat === 'mass') {
@@ -2500,7 +2515,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           {showUI && (
             <div className="absolute bottom-4 left-4 flex flex-col gap-2 z-10 pointer-events-auto">
               {/* Spectral Filter Chips Bar */}
-              <div className="flex items-center gap-1 bg-slate-950/90 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-slate-800 shadow-xl text-xs font-mono">
+              <div className="flex flex-wrap items-center gap-1 bg-slate-950/90 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-slate-800 shadow-xl text-xs font-mono">
               <span className="text-[10px] text-slate-500 uppercase mr-1 flex items-center gap-1">
                 <Filter className="w-3 h-3 text-cyan-400" /> Filter:
               </span>
@@ -2513,7 +2528,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   { id: 'km', label: 'K/M', color: 'text-red-400' },
                   { id: 'remnant', label: 'Remnants', color: 'text-purple-400' },
                   { id: 'non-ms', label: 'Non-MS (≠ V)', color: 'text-amber-400', title: 'Non-Main Sequence Stars (Luminosity Class NOT V: Giants, Supergiants, Subgiants, Remnants)' },
-                  { id: 'habitable', label: 'Habitable Worlds', color: 'text-emerald-400' },
+                  { id: 'water-world', label: 'Water Worlds', color: 'text-sky-400', title: 'Systems with liquid-water (H2O / aqueous brine) worlds or moons' },
+                  { id: 'ammonia-world', label: 'Ammonia Worlds', color: 'text-teal-300', title: 'Systems with Cryo-Ammonia (NH3-H2O) worlds or moons' },
+                  { id: 'multicellular', label: 'Multicellular Life', color: 'text-emerald-400', title: 'Systems harboring worlds or moons with active multicellular biospheres' },
                 ] as const
               ).map((f) => (
                 <button

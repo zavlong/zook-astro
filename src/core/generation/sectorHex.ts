@@ -5,6 +5,7 @@ import {
   RealisticStarSystemResult,
 } from './realisticStarGen';
 import {
+  RealisticHydrosphere,
   RealisticStarNode,
   SpectralCategory,
 } from '../../types/astrophysics';
@@ -525,7 +526,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       }
     }
 
-    // Check planets and habitable candidate worlds (Water Habitable Zone or Cryo-Ammonia Life)
+    // Check planets and habitable candidate worlds (Water Worlds, Cryo-Ammonia Worlds, and Multicellular Life)
     let planetCount = 0;
     let beltCount = 0;
     let candidateHabitable = false;
@@ -537,48 +538,43 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
         if (body.kind === 'planet') {
           planetCount++;
 
-          const isWaterHZ =
-            body.planetClass.includes('Habitable') ||
-            (body.surfaceTempK >= 255 &&
-              body.surfaceTempK <= 335 &&
-              body.hydrosphere &&
-              (body.hydrosphere.coveragePct || 0) > 5);
-
-          const isAmmoniaWorld =
-            body.planetClass.includes('Ammonia') ||
-            body.planetClass.includes('Cryo-Ammonia') ||
-            body.hydrosphere?.solvent === 'NH3-H2O' ||
-            (body.surfaceTempK >= 120 &&
-              body.surfaceTempK <= 245 &&
-              body.hydrosphere &&
-              (body.hydrosphere.coveragePct || 0) > 0);
-
+          const isWaterHZ = isWaterWorldBody(body.planetClass, body.surfaceTempK, body.hydrosphere);
+          const isAmmoniaWorld = isAmmoniaWorldBody(body.planetClass, body.surfaceTempK, body.hydrosphere);
           const hasBiosphere = Boolean(body.hydrosphere?.biosphere);
+          const isMulticellular = hasMulticellularBiosphere(body.hydrosphere);
 
           if (isWaterHZ || isAmmoniaWorld || hasBiosphere) {
             candidateHabitable = true;
             habitableWorldCount++;
             if (isAmmoniaWorld) {
               habitableTypesSet.add('Ammonia World');
-            } else {
+            } else if (isWaterHZ) {
               habitableTypesSet.add('Water HZ');
+            }
+            if (isMulticellular) {
+              habitableTypesSet.add('Multicellular Life');
             }
           }
 
-          // Also inspect moons for habitable / cryo-ammonia worlds
+          // Also inspect moons for habitable / cryo-ammonia / multicellular worlds
           if (body.moons && body.moons.length > 0) {
             for (const moon of body.moons) {
-              const isMoonWaterHZ = moon.moonClass.includes('Habitable');
-              const isMoonAmmonia =
-                moon.moonClass.includes('Ammonia') ||
-                moon.moonClass.includes('Cryo-Ammonia') ||
-                moon.hydrosphere?.solvent === 'NH3-H2O';
+              const isMoonWaterHZ = isWaterWorldBody(moon.moonClass, moon.surfaceTempK, moon.hydrosphere);
+              const isMoonAmmonia = isAmmoniaWorldBody(moon.moonClass, moon.surfaceTempK, moon.hydrosphere);
               const moonHasBio = Boolean(moon.hydrosphere?.biosphere);
+              const isMoonMulticellular = hasMulticellularBiosphere(moon.hydrosphere);
 
               if (isMoonWaterHZ || isMoonAmmonia || moonHasBio) {
                 candidateHabitable = true;
                 habitableWorldCount++;
-                habitableTypesSet.add(isMoonAmmonia ? 'Ammonia Moon' : 'Habitable Moon');
+                if (isMoonAmmonia) {
+                  habitableTypesSet.add('Ammonia Moon');
+                } else if (isMoonWaterHZ) {
+                  habitableTypesSet.add('Habitable Moon');
+                }
+                if (isMoonMulticellular) {
+                  habitableTypesSet.add('Multicellular Life');
+                }
               }
             }
           }
@@ -1002,6 +998,204 @@ export function isNonMainSequenceSystem(system: SectorHexSystem): boolean {
   if (sp.endsWith('V')) return false;
   // Any other ending: Ia, Ib, II, III, etc.
   return true;
+}
+
+/**
+ * Evaluates whether a planet or moon is a liquid-water world (surface H2O or aqueous brine,
+ * excluding supercritical steam worlds, subsurface-only ice-shell oceans, and ammonia worlds).
+ */
+export function isWaterWorldBody(
+  cls: string | undefined,
+  surfaceTempK: number | undefined,
+  hydro?: RealisticHydrosphere | null
+): boolean {
+  const c = (cls || '').toLowerCase();
+  const solv = (hydro?.solvent || '').toLowerCase();
+  const state = (hydro?.state || '').toLowerCase();
+
+  // Exclude supercritical water / steam / water giant envelopes
+  if (
+    c.includes('supercritical') ||
+    c.includes('steam') ||
+    c.includes('water giant') ||
+    solv.includes('supercritical') ||
+    state.includes('supercritical') ||
+    state.includes('no surface')
+  ) {
+    return false;
+  }
+
+  // Exclude ammonia worlds
+  if (c.includes('ammonia') || solv.includes('nh3') || solv.includes('ammonia')) {
+    return false;
+  }
+
+  // Exclude subsurface-only oceans beneath ice shells
+  if (solv.includes('subsurface') || (state.includes('subsurface') && !state.startsWith('surface'))) {
+    return false;
+  }
+
+  const cov = hydro?.coveragePct ?? 0;
+  const hasAqueousSolvent =
+    solv === 'h2o' ||
+    solv.includes('h2o') ||
+    solv.includes('water') ||
+    solv.includes('brine') ||
+    solv.includes('perchlorate') ||
+    solv.includes('aqueous');
+
+  if (hasAqueousSolvent && cov > 0) {
+    return true;
+  }
+
+  if (c.includes('aquatic') || c.includes('habitable') || c.includes('pelagic water')) {
+    return true;
+  }
+
+  if (
+    typeof surfaceTempK === 'number' &&
+    surfaceTempK >= 250 &&
+    surfaceTempK <= 350 &&
+    cov > 5 &&
+    !solv.includes('co2') &&
+    !solv.includes('so2') &&
+    !solv.includes('h2so4') &&
+    !solv.includes('ch4') &&
+    !solv.includes('magma')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Evaluates whether a planet or moon is a Cryo-Ammonia (NH3-H2O) world with surface ammonia seas/oceans.
+ */
+export function isAmmoniaWorldBody(
+  cls: string | undefined,
+  surfaceTempK: number | undefined,
+  hydro?: RealisticHydrosphere | null
+): boolean {
+  const c = (cls || '').toLowerCase();
+  const solv = (hydro?.solvent || '').toLowerCase();
+  const state = (hydro?.state || '').toLowerCase();
+
+  // Exclude subsurface-only oceans beneath ice shells
+  if (solv.includes('subsurface') || (state.includes('subsurface') && !state.startsWith('surface'))) {
+    return false;
+  }
+
+  if (c.includes('ammonia') || c.includes('cryo-ammonia')) {
+    return true;
+  }
+
+  const cov = hydro?.coveragePct ?? 0;
+  if ((solv === 'nh3-h2o' || solv.includes('nh3') || solv.includes('ammonia')) && cov > 0) {
+    return true;
+  }
+
+  if (
+    typeof surfaceTempK === 'number' &&
+    surfaceTempK >= 120 &&
+    surfaceTempK <= 245 &&
+    cov > 0 &&
+    (solv.includes('nh3') || solv.includes('ammonia'))
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Evaluates whether a planet or moon hydrosphere harbors active multicellular life.
+ */
+export function hasMulticellularBiosphere(hydro?: RealisticHydrosphere | null): boolean {
+  if (!hydro?.biosphere) return false;
+  return hydro.biosphere.toLowerCase().includes('multicellular');
+}
+
+/**
+ * Returns true if the system contains at least one liquid-water world or moon.
+ */
+export function hasWaterWorld(system: SectorHexSystem): boolean {
+  const zones = system.sysResult?.zones;
+  if (zones && zones.length > 0) {
+    for (const zone of zones) {
+      for (const body of zone.bodies) {
+        if (body.kind === 'planet') {
+          if (isWaterWorldBody(body.planetClass, body.surfaceTempK, body.hydrosphere)) {
+            return true;
+          }
+          if (body.moons) {
+            for (const moon of body.moons) {
+              if (isWaterWorldBody(moon.moonClass, moon.surfaceTempK, moon.hydrosphere)) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return Boolean(
+    system.habitableTypes?.some(
+      (t) => t === 'Water HZ' || t === 'Habitable Moon' || t.toLowerCase().includes('water')
+    )
+  );
+}
+
+/**
+ * Returns true if the system contains at least one Cryo-Ammonia (NH3-H2O) world or moon.
+ */
+export function hasAmmoniaWorld(system: SectorHexSystem): boolean {
+  const zones = system.sysResult?.zones;
+  if (zones && zones.length > 0) {
+    for (const zone of zones) {
+      for (const body of zone.bodies) {
+        if (body.kind === 'planet') {
+          if (isAmmoniaWorldBody(body.planetClass, body.surfaceTempK, body.hydrosphere)) {
+            return true;
+          }
+          if (body.moons) {
+            for (const moon of body.moons) {
+              if (isAmmoniaWorldBody(moon.moonClass, moon.surfaceTempK, moon.hydrosphere)) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return Boolean(system.habitableTypes?.some((t) => t.toLowerCase().includes('ammonia')));
+}
+
+/**
+ * Returns true if the system contains at least one world or moon with active multicellular life.
+ */
+export function hasMulticellularLife(system: SectorHexSystem): boolean {
+  const zones = system.sysResult?.zones;
+  if (zones && zones.length > 0) {
+    for (const zone of zones) {
+      for (const body of zone.bodies) {
+        if (body.kind === 'planet') {
+          if (hasMulticellularBiosphere(body.hydrosphere)) {
+            return true;
+          }
+          if (body.moons) {
+            for (const moon of body.moons) {
+              if (hasMulticellularBiosphere(moon.hydrosphere)) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return Boolean(system.habitableTypes?.some((t) => t.toLowerCase().includes('multicellular')));
 }
 
 /**
