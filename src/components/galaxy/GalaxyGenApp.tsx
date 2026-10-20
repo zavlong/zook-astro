@@ -21,6 +21,7 @@ import {
   FolderOpen,
   Save,
   Edit2,
+  Download,
 } from 'lucide-react';
 import {
   GalaxyConfig,
@@ -34,6 +35,10 @@ import { getHexGridOverlayUrl } from '../../core/generation/hexGridOverlay';
 import { getStarAssetPath } from '../../core/generation/starAssets';
 import { ImageQuantizerModal } from './ImageQuantizerModal';
 import { SavedGalaxiesModal } from './SavedGalaxiesModal';
+import { SectorExportImportModal } from '../sector/SectorExportImportModal';
+import { generateSectorHexGrid, SectorHexGridData } from '../../core/generation/sectorHex';
+import { loadEmpiresForSector, saveEmpiresForSector } from '../../core/generation/empireGen';
+import { ParsedSectorImportResult } from '../../core/export/sectorFormatExporters';
 import { universeCache, SavedGalaxy } from '../../core/storage/universeCache';
 import { GenerationLoadingOverlay, yieldToMainThread } from '../ui/GenerationLoadingOverlay';
 
@@ -87,6 +92,10 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   const [showSavedGalaxiesModal, setShowSavedGalaxiesModal] = useState<boolean>(false);
   const [saveBanner, setSaveBanner] = useState<string | null>(null);
   const [saveCatalogVersion, setSaveCatalogVersion] = useState<number>(0);
+
+  // Individual Sector Export / Import Modal state
+  const [showSectorExportModal, setShowSectorExportModal] = useState<boolean>(false);
+  const [exportSectorGridData, setExportSectorGridData] = useState<SectorHexGridData | null>(null);
 
   // Image Quantizer & Backdrop state
   const [showImageModal, setShowImageModal] = useState<boolean>(false);
@@ -1583,6 +1592,41 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                 </kbd>
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform ml-0.5" />
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const secKey = universeCache.getSectorCacheKey(selectedSector.seed, selectedSector.coord);
+                  let cachedGrid = universeCache.getCachedSector(secKey);
+                  if (!cachedGrid) {
+                    cachedGrid = generateSectorHexGrid({
+                      seed: selectedSector.seed,
+                      name: customSectorNames[selectedSector.coord] || selectedSector.name,
+                      coord: selectedSector.coord,
+                      columns: 50,
+                      rows: 50,
+                      density: selectedSector.density,
+                      meanAge: selectedSector.meanAge,
+                      ageRange: selectedSector.ageRange,
+                      ageDistribution: selectedSector.ageDistribution,
+                      ageSigma:
+                        selectedSector.ageDistribution === 'uniform'
+                          ? +(selectedSector.ageRange / Math.sqrt(12)).toFixed(2)
+                          : +(selectedSector.ageRange / 3.2).toFixed(2),
+                      metallicityMean: selectedSector.metallicityMean,
+                      metallicitySigma: 0.22,
+                      hasNebula: selectedSector.hasNebula,
+                    });
+                    universeCache.cacheLoadedSector(secKey, cachedGrid);
+                  }
+                  setExportSectorGridData(cachedGrid);
+                  setShowSectorExportModal(true);
+                }}
+                className="w-full py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-cyan-700/70 hover:border-cyan-500 text-cyan-300 font-mono text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow"
+                title="Export or Import this individual sector (Stellaris Static Galaxy .txt, Stargen Sector .json, or SpaceEngine .sc)"
+              >
+                <Download className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Export / Import Sector</span>
+              </button>
               <p className="text-[10px] text-slate-500 font-mono text-center -mt-2">
                 Hotkey: <strong className="text-slate-400">Page Down</strong> to zoom in &bull; Double-click hex opens directly
               </p>
@@ -1989,6 +2033,56 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
           onLoadGalaxy={handleLoadSavedGalaxy}
         />
       )}
+
+      {/* Individual Sector Export / Import Modal */}
+      {showSectorExportModal && exportSectorGridData && (() => {
+        const loadedEmp = loadEmpiresForSector(
+          exportSectorGridData.config.seed,
+          exportSectorGridData.config.columns,
+          exportSectorGridData.config.rows
+        );
+        return (
+          <SectorExportImportModal
+            isOpen={showSectorExportModal}
+            onClose={() => setShowSectorExportModal(false)}
+            gridData={exportSectorGridData}
+            empires={loadedEmp.empires}
+            activeEmpireId={loadedEmp.activeEmpireId}
+            onImportSector={(imported: ParsedSectorImportResult) => {
+              const targetCoord = selectedSector?.coord || imported.config.coord;
+              const targetSeed = selectedSector?.seed || imported.config.seed;
+              const finalConfig = {
+                ...imported.config,
+                coord: targetCoord,
+                seed: targetSeed,
+              };
+              const finalGrid: SectorHexGridData = {
+                ...imported.gridData,
+                config: finalConfig,
+              };
+              const secKey = universeCache.getSectorCacheKey(targetSeed, targetCoord);
+              universeCache.cacheLoadedSector(secKey, finalGrid);
+              finalGrid.systems.forEach((s) => {
+                if (s.sysResult) universeCache.cacheLoadedSystem(s.id, s.sysResult);
+              });
+              if (imported.empires) {
+                saveEmpiresForSector(
+                  targetSeed,
+                  imported.empires,
+                  imported.activeEmpireId ?? null,
+                  finalConfig.columns,
+                  finalConfig.rows
+                );
+              }
+              setExportSectorGridData(finalGrid);
+              setSaveBanner(
+                `Imported Sector "${finalConfig.name}" (${finalGrid.systems.length} systems, ${finalGrid.hyperlanes.length} hyperlanes) into Sector ${targetCoord || targetSeed}!`
+              );
+              setTimeout(() => setSaveBanner(null), 4000);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 };

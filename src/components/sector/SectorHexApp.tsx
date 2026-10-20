@@ -53,6 +53,8 @@ import {
   parsePlanetKey,
 } from '../../core/generation/empireGen';
 import { SpawnEmpireModal } from './SpawnEmpireModal';
+import { SectorExportImportModal } from './SectorExportImportModal';
+import { ParsedSectorImportResult } from '../../core/export/sectorFormatExporters';
 import { StarGenParams } from '../../core/generation/realisticStarGen';
 import { SpectralCategory } from '../../types/astrophysics';
 import { universeCache } from '../../core/storage/universeCache';
@@ -548,6 +550,43 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       setBannerNotice('All empires in this sector disbanded.');
     }
   }, [empires.length, config.seed, config.columns, config.rows]);
+
+  // Sector Export / Import Modal state & handler
+  const [showSectorExportModal, setShowSectorExportModal] = useState<boolean>(false);
+
+  const handleImportSector = useCallback((imported: ParsedSectorImportResult) => {
+    const newKey = universeCache.getSectorCacheKey(imported.config.seed, imported.config.coord);
+    universeCache.cacheLoadedSector(newKey, imported.gridData);
+    imported.gridData.systems.forEach((s) => {
+      if (s.sysResult) {
+        universeCache.cacheLoadedSystem(s.id, s.sysResult);
+      }
+    });
+    setConfig(imported.config);
+    setGridData(imported.gridData);
+    setIsFromCache(true);
+    setIsGeneratingSector(false);
+    if (imported.empires) {
+      setEmpires(imported.empires);
+      setActiveEmpireId(imported.activeEmpireId ?? (imported.empires[0]?.id || null));
+      saveEmpiresForSector(
+        imported.config.seed,
+        imported.empires,
+        imported.activeEmpireId ?? (imported.empires[0]?.id || null),
+        imported.config.columns,
+        imported.config.rows
+      );
+    }
+    const firstSys = imported.gridData.systems[0] || null;
+    setSelectedSystem(firstSys);
+    setSelectedCoord(firstSys?.coord || null);
+    setCachedSystemCount(universeCache.getLoadedSystemCount());
+    setBannerNotice(
+      `✅ Imported Sector "${imported.config.name}" (${imported.gridData.systems.length} systems, ${imported.gridData.hyperlanes.length} hyperlanes) [${
+        imported.sourceFormat === 'stellaris-static-galaxy' ? 'Stellaris Static Galaxy' : 'Stargen Sector JSON'
+      }]`
+    );
+  }, []);
 
   // Active empire lookup
   const activeEmpire = useMemo(() => {
@@ -1476,6 +1515,15 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Roll New Sector</span>
+          </button>
+
+          <button
+            onClick={() => setShowSectorExportModal(true)}
+            className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-700/80 hover:border-cyan-500 text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg transition cursor-pointer"
+            title="Export or Import Individual Sector (Stargen Sector JSON, Stellaris Static Galaxy .txt, or SpaceEngine .sc)"
+          >
+            <Download className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Export / Import Sector</span>
           </button>
 
           <button
@@ -3542,6 +3590,15 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     </span>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSectorExportModal(true)}
+                  className="w-full mt-1 py-2 px-3 rounded-lg bg-slate-950/90 hover:bg-slate-800 border border-cyan-700/70 hover:border-cyan-500 text-cyan-300 font-mono font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow"
+                  title="Export or Import this Sector in Stellaris Static Galaxy (.txt), Stargen Sector (.json), or SpaceEngine (.sc) format"
+                >
+                  <Download className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Export / Import Sector</span>
+                </button>
               </div>
 
               {/* Instructions Tip */}
@@ -3572,6 +3629,16 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
         homeworldSystem={empireTargetSystem}
         existingEmpires={empires}
         onFoundEmpire={handleFoundEmpire}
+      />
+
+      {/* Sector Export / Import Manager Modal */}
+      <SectorExportImportModal
+        isOpen={showSectorExportModal}
+        onClose={() => setShowSectorExportModal(false)}
+        gridData={gridData}
+        empires={empires}
+        activeEmpireId={activeEmpireId}
+        onImportSector={handleImportSector}
       />
     </div>
   );
