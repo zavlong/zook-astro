@@ -55,6 +55,12 @@ interface CloudPuff3D {
   ry: number;
   density: number; // [0..1]
   isStormAnvil: boolean;
+  r?: number;
+  g?: number;
+  b?: number;
+  baseR?: number;
+  baseG?: number;
+  baseB?: number;
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -1248,9 +1254,138 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       }
     }
 
-    // Build 3D Volumetric Cloud Canopy Puffs floating above the tile
+    // Build 3D Volumetric Cloud Canopy Puffs floating above the tile (or multi-deck colored gas giant clouds)
     const cloudPuffs: CloudPuff3D[] = [];
-    if (!surfaceModel.isNoSurface && surfaceModel.cloudOpacity > 0.015 && effCloudCover > 0.04) {
+    if (surfaceModel.isNoSurface) {
+      const pal = surfaceModel.atmospherePalette;
+      const tileRgb = hexToRgb(activeTile.biomeColor || surfaceModel.skyHorizonHex);
+      const nbColors = neighborEntries.map((ne) => ({
+        dirX: ne.dirX,
+        dirZ: ne.dirZ,
+        rgb: hexToRgb(ne.tile.biomeColor || activeTile.biomeColor),
+      }));
+
+      // 3 distinct vertical cloud decks suspended in the bottomless colored atmosphere
+      const decks = [
+        { yBase: -0.30, gridN: 11, span: 1.55, deckType: 0 }, // Deep tropospheric belt cloud deck
+        { yBase: -0.02, gridN: 14, span: 1.45, deckType: 1 }, // Mid-troposphere banded zonal cloud deck
+        { yBase: 0.24, gridN: 12, span: 1.35, deckType: 2 },  // Upper ammonia/methane/alkali bright cloud deck
+      ];
+
+      // Optional anticyclonic storm vortex oval center
+      const hasGreatOval = hash2(activeTile.tileId, 17, tileSeed) > 0.42;
+      const ovalX = (hash2(activeTile.tileId, 31, tileSeed) - 0.5) * 0.65;
+      const ovalZ = (hash2(activeTile.tileId, 47, tileSeed) - 0.5) * 0.55;
+
+      for (let dIdx = 0; dIdx < decks.length; dIdx++) {
+        const deck = decks[dIdx];
+        const gN = deck.gridN;
+        for (let gx = -gN; gx <= gN; gx++) {
+          for (let gz = -gN; gz <= gN; gz++) {
+            const jx = (hash2(gx + 50, gz + 50, tileSeed + 901 + dIdx * 131) - 0.5) * 0.13;
+            const jz = (hash2(gx + 80, gz + 80, tileSeed + 947 + dIdx * 173) - 0.5) * 0.11;
+            const cx = (gx / gN) * deck.span + jx;
+            const cz = (gz / gN) * deck.span + jz;
+            if (Math.hypot(cx * 0.82, cz) > deck.span * 1.05) continue;
+
+            // Zonal jet stream wave & turbulent eddies
+            const warpX = fbm2D(cx * 2.1 + dIdx * 1.7, cz * 2.1 - dIdx * 1.3, tileSeed + 307 + dIdx * 59, 3) - 0.5;
+            const warpZ = fbm2D(cx * 2.1 - 3.4, cz * 2.1 + 2.8, tileSeed + 409 + dIdx * 83, 3) - 0.5;
+            const bandPhase = (cz + warpZ * 0.28) * 7.5 + Math.sin(cx * 2.6 + warpX * 2.4) * 0.85;
+            const bandWave = Math.sin(bandPhase) * 0.5 + 0.5;
+            const eddy = fbm2D((cx + warpX * 0.35) * 3.4, (cz + warpZ * 0.35) * 3.4, tileSeed + 523 + dIdx * 97, 4);
+
+            // Distance to anticyclonic storm vortex
+            const dOval = hasGreatOval ? Math.hypot((cx - ovalX) * 0.78, (cz - ovalZ) * 1.25) : 99;
+            const inOval = dOval < 0.38;
+            const ovalWeight = inOval ? Math.pow(1.0 - dOval / 0.38, 1.4) : 0;
+
+            const densRaw = eddy * 0.62 + bandWave * 0.38 + ovalWeight * 0.45;
+            const threshold = deck.deckType === 2 ? 0.46 : deck.deckType === 1 ? 0.34 : 0.30;
+            if (densRaw <= threshold) continue;
+
+            const dens = Math.min(1, (densRaw - threshold) / (1 - threshold));
+
+            // Blend local cloud hue with bordering tile band colors near edges
+            let locR = tileRgb[0];
+            let locG = tileRgb[1];
+            let locB = tileRgb[2];
+            for (let n = 0; n < nbColors.length; n++) {
+              const nb = nbColors[n];
+              const proj = cx * nb.dirX + cz * nb.dirZ;
+              if (proj > 0.25) {
+                const nw = Math.min(0.45, ((proj - 0.25) / 1.1) * 0.42);
+                locR = locR * (1 - nw) + nb.rgb[0] * nw;
+                locG = locG * (1 - nw) + nb.rgb[1] * nw;
+                locB = locB * (1 - nw) + nb.rgb[2] * nw;
+              }
+            }
+
+            // Compute distinct colored cloud palette per deck and zonal band
+            let pR = pal.cloudRgb[0];
+            let pG = pal.cloudRgb[1];
+            let pB = pal.cloudRgb[2];
+
+            if (deck.deckType === 0) {
+              // Deep atmospheric belt clouds: rich dark belt + deep atmosphere hue
+              const tMix = 0.35 + 0.45 * bandWave;
+              pR = pal.bandDarkRgb[0] * (1 - tMix) + pal.atmoRgb[0] * tMix;
+              pG = pal.bandDarkRgb[1] * (1 - tMix) + pal.atmoRgb[1] * tMix;
+              pB = pal.bandDarkRgb[2] * (1 - tMix) + pal.atmoRgb[2] * tMix;
+            } else if (deck.deckType === 1) {
+              // Mid-troposphere zonal bands: swirls between bandDarkRgb, tileRgb, and bandLightRgb
+              if (bandWave < 0.5) {
+                const u = bandWave * 2.0;
+                pR = pal.bandDarkRgb[0] * (1 - u) + locR * u;
+                pG = pal.bandDarkRgb[1] * (1 - u) + locG * u;
+                pB = pal.bandDarkRgb[2] * (1 - u) + locB * u;
+              } else {
+                const u = (bandWave - 0.5) * 2.0;
+                pR = locR * (1 - u) + pal.bandLightRgb[0] * u;
+                pG = locG * (1 - u) + pal.bandLightRgb[1] * u;
+                pB = locB * (1 - u) + pal.bandLightRgb[2] * u;
+              }
+            } else {
+              // Upper bright cloud deck: luminous cloudRgb + bandLightRgb + storm vortex tint
+              const u = 0.4 + 0.6 * bandWave;
+              pR = pal.bandLightRgb[0] * (1 - u) + pal.cloudRgb[0] * u;
+              pG = pal.bandLightRgb[1] * (1 - u) + pal.cloudRgb[1] * u;
+              pB = pal.bandLightRgb[2] * (1 - u) + pal.cloudRgb[2] * u;
+            }
+
+            // Anticyclonic storm vortex chromophore tint (e.g. Great Red/Amber/Cobalt Spot swirl)
+            if (ovalWeight > 0.05) {
+              const stormR = Math.min(255, pal.bandDarkRgb[0] * 0.55 + pal.bandLightRgb[0] * 0.45 + 38);
+              const stormG = Math.max(0, pal.bandDarkRgb[1] * 0.65 + pal.bandLightRgb[1] * 0.25 - 12);
+              const stormB = Math.max(0, pal.bandDarkRgb[2] * 0.70 + pal.atmoRgb[2] * 0.30);
+              pR = pR * (1 - ovalWeight * 0.75) + stormR * (ovalWeight * 0.75);
+              pG = pG * (1 - ovalWeight * 0.75) + stormG * (ovalWeight * 0.75);
+              pB = pB * (1 - ovalWeight * 0.75) + stormB * (ovalWeight * 0.75);
+            }
+
+            const yJitter = (hash2(gx, gz, tileSeed + 991 + dIdx * 43) - 0.5) * 0.07;
+            const alt = deck.yBase + yJitter + bandWave * 0.04 + ovalWeight * 0.06;
+
+            cloudPuffs.push({
+              x: cx,
+              y: alt,
+              z: cz,
+              // Elongate horizontally along zonal wind bands
+              rx: (0.11 + dens * 0.11) * (deck.deckType === 1 ? 1.35 : 1.15),
+              ry: 0.032 + dens * (deck.deckType === 2 ? 0.048 : 0.038),
+              density: Math.min(0.95, 0.38 + dens * 0.56),
+              isStormAnvil: ovalWeight > 0.25 || dens > 0.72,
+              r: Math.max(0, Math.min(255, Math.round(pR))),
+              g: Math.max(0, Math.min(255, Math.round(pG))),
+              b: Math.max(0, Math.min(255, Math.round(pB))),
+              baseR: Math.max(0, Math.min(255, Math.round(pR * 0.58 + pal.bandDarkRgb[0] * 0.22))),
+              baseG: Math.max(0, Math.min(255, Math.round(pG * 0.58 + pal.bandDarkRgb[1] * 0.22))),
+              baseB: Math.max(0, Math.min(255, Math.round(pB * 0.62 + pal.bandDarkRgb[2] * 0.22))),
+            });
+          }
+        }
+      }
+    } else if (surfaceModel.cloudOpacity > 0.015 && effCloudCover > 0.04) {
       const gridN = 13;
       for (let gx = -gridN; gx <= gridN; gx++) {
         for (let gz = -gridN; gz <= gridN; gz++) {
@@ -1319,7 +1454,57 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const isSunset = Math.abs(sunAlt) < 0.25;
 
     const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
-    if (!hasAtmosphere) {
+    if (surfaceModel.isNoSurface) {
+      // Gas Giant / Ice Giant / Supercritical World: Continuous Deep Colored Atmosphere with NO solid ground
+      const pal = surfaceModel.atmospherePalette;
+      const tileRgb = hexToRgb(activeTile.biomeColor || surfaceModel.skyHorizonHex);
+      const topRgb = hexToRgb(surfaceModel.skyColorHex);
+      const horizRgb = hexToRgb(surfaceModel.skyHorizonHex);
+      const sunMult = isNight ? 0.32 : isSunset ? 0.82 : 1.0;
+      const sunsetWarmR = isSunset ? 34 : 0;
+      const sunsetWarmB = isSunset ? -24 : 0;
+
+      const fmtRgb = (r: number, g: number, b: number) =>
+        `rgb(${Math.max(0, Math.min(255, Math.round(r * sunMult + sunsetWarmR)))}, ${Math.max(
+          0,
+          Math.min(255, Math.round(g * sunMult))
+        )}, ${Math.max(0, Math.min(255, Math.round(b * sunMult + sunsetWarmB)))})`;
+
+      // Upper stratosphere -> mid-troposphere colored gas envelope -> deep high-pressure atmospheric abyss
+      skyGrad.addColorStop(0, fmtRgb(topRgb[0] * 0.78, topRgb[1] * 0.78, topRgb[2] * 0.85));
+      skyGrad.addColorStop(
+        0.28,
+        fmtRgb(
+          horizRgb[0] * 0.55 + pal.atmoRgb[0] * 0.45,
+          horizRgb[1] * 0.55 + pal.atmoRgb[1] * 0.45,
+          horizRgb[2] * 0.55 + pal.atmoRgb[2] * 0.45
+        )
+      );
+      skyGrad.addColorStop(
+        0.56,
+        fmtRgb(
+          pal.atmoRgb[0] * 0.42 + tileRgb[0] * 0.38 + pal.bandLightRgb[0] * 0.20,
+          pal.atmoRgb[1] * 0.42 + tileRgb[1] * 0.38 + pal.bandLightRgb[1] * 0.20,
+          pal.atmoRgb[2] * 0.42 + tileRgb[2] * 0.38 + pal.bandLightRgb[2] * 0.20
+        )
+      );
+      skyGrad.addColorStop(
+        0.82,
+        fmtRgb(
+          pal.bandDarkRgb[0] * 0.55 + pal.atmoRgb[0] * 0.30 + tileRgb[0] * 0.15,
+          pal.bandDarkRgb[1] * 0.55 + pal.atmoRgb[1] * 0.30 + tileRgb[1] * 0.15,
+          pal.bandDarkRgb[2] * 0.55 + pal.atmoRgb[2] * 0.30 + tileRgb[2] * 0.15
+        )
+      );
+      skyGrad.addColorStop(
+        1,
+        fmtRgb(
+          pal.bandDarkRgb[0] * 0.42 + pal.atmoRgb[0] * 0.22,
+          pal.bandDarkRgb[1] * 0.42 + pal.atmoRgb[1] * 0.22,
+          pal.bandDarkRgb[2] * 0.42 + pal.atmoRgb[2] * 0.22
+        )
+      );
+    } else if (!hasAtmosphere) {
       skyGrad.addColorStop(0, '#03050a');
       skyGrad.addColorStop(0.65, '#070b14');
       skyGrad.addColorStop(1, '#090e1a');
@@ -1443,7 +1628,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       ? Math.min(0.52, 0.10 + surfaceModel.cloudOpacity * 0.36 + Math.min(0.15, pBarAtmo * 0.03))
       : 0;
 
-    // Draw soft atmospheric scattering dome behind/around the 3D terrain block
+    // Draw soft atmospheric scattering dome behind/around the 3D tile
     if (hasAtmosphere) {
       const centerProj = project3D(0, 0.08, 0);
       const domeRadius = scale * 1.38;
@@ -1464,443 +1649,573 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       ctx.fill();
     }
 
-    // ============================================================================
-    // 3. PER-PIXEL TEXTURED & BUMP-MAPPED Z-BUFFER RASTERIZER + PERSPECTIVE PLANE
-    // ============================================================================
-    if (!offscreenCanvasRef.current) {
-      offscreenCanvasRef.current = document.createElement('canvas');
-    }
-    const offCanvas = offscreenCanvasRef.current;
-    if (offCanvas.width !== W || offCanvas.height !== H) {
-      offCanvas.width = W;
-      offCanvas.height = H;
-      zBufferRef.current = new Float32Array(W * H);
-      imageDataRef.current = new ImageData(W, H);
-      colorBufferRef.current = new Uint32Array(imageDataRef.current.data.buffer);
-    }
-
-    const zBuffer = zBufferRef.current!;
-    const colorBuffer = colorBufferRef.current!;
-    const imgData = imageDataRef.current!;
-    zBuffer.fill(1e9);
-    colorBuffer.fill(0);
-
-    const projVerts = vertices.map((v) => project3D(v.x, v.y, v.z));
-    const nightDim = isNight ? 0.36 : 1.0;
-    const cloudShadowStrength = showClouds3D ? Math.min(0.42, surfaceModel.cloudOpacity * 0.48) : 0;
-    const texMax = TEX_RES - 1;
-    const isTholinWorldSpec =
-      surfaceModel.seaPalette.solventKey === 'NH3-H2O' ||
-      surfaceModel.seaPalette.solventKey === 'CH4-C2H6' ||
-      surfaceModel.compositionPalette.compositionLabel.includes('Tholin');
-
-    // Step 3A: Rasterize 3D terrain triangles strictly inside the active Goldberg tile
-    for (let i = 0; i < triangles.length; i++) {
-      const tri = triangles[i];
-      const v0 = vertices[tri.v0];
-      const v1 = vertices[tri.v1];
-      const v2 = vertices[tri.v2];
-
-      const p0 = projVerts[tri.v0];
-      const p1 = projVerts[tri.v1];
-      const p2 = projVerts[tri.v2];
-
-      const x0 = p0.sx;
-      const y0 = p0.sy;
-      const x1 = p1.sx;
-      const y1 = p1.sy;
-      const x2 = p2.sx;
-      const y2 = p2.sy;
-
-      const minX = Math.max(0, Math.floor(Math.min(x0, x1, x2)));
-      const maxX = Math.min(W - 1, Math.ceil(Math.max(x0, x1, x2)));
-      const minY = Math.max(0, Math.floor(Math.min(y0, y1, y2)));
-      const maxY = Math.min(H - 1, Math.ceil(Math.max(y0, y1, y2)));
-      if (minX > maxX || minY > maxY) continue;
-
-      const area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
-      // Strictly cull back-facing / underside triangles so underground faces are never rendered
-      if (area <= 0.05) continue;
-      const invArea = 1.0 / area;
-
-      // Convert vertex coordinates [-1, +1] into texture coordinates [0, TEX_RES - 1]
-      const u0 = (v0.x * 0.5 + 0.5) * texMax;
-      const tv0 = (v0.z * 0.5 + 0.5) * texMax;
-      const u1 = (v1.x * 0.5 + 0.5) * texMax;
-      const tv1 = (v1.z * 0.5 + 0.5) * texMax;
-      const u2 = (v2.x * 0.5 + 0.5) * texMax;
-      const tv2 = (v2.z * 0.5 + 0.5) * texMax;
-
-      const d0 = p0.depth;
-      const d1 = p1.depth;
-      const d2 = p2.depth;
-
-      // Step increments per screen X pixel
-      const dw1dx = (y2 - y0) * invArea;
-      const dw2dx = (y0 - y1) * invArea;
-
-      for (let py = minY; py <= maxY; py++) {
-        const sy = py + 0.5;
-        const dx0 = minX + 0.5 - x0;
-        const dy0 = sy - y0;
-
-        let w1 = (dx0 * (y2 - y0) - (x2 - x0) * dy0) * invArea;
-        let w2 = ((x1 - x0) * dy0 - dx0 * (y1 - y0)) * invArea;
-        const rowOffset = py * W;
-
-        for (let px = minX; px <= maxX; px++) {
-          const w0 = 1.0 - w1 - w2;
-          if (w0 >= -0.002 && w1 >= -0.002 && w2 >= -0.002) {
-            const depth = w0 * d0 + w1 * d1 + w2 * d2;
-            const pIdx = rowOffset + px;
-
-            if (depth < zBuffer[pIdx]) {
-              zBuffer[pIdx] = depth;
-
-              // Interpolate texture coordinates (u, v) and sample with Hermite smoothstep filtering
-              const tu = Math.max(0, Math.min(texMax - 0.001, w0 * u0 + w1 * u1 + w2 * u2));
-              const tv = Math.max(0, Math.min(texMax - 0.001, w0 * tv0 + w1 * tv1 + w2 * tv2));
-              const iu = tu | 0;
-              const iv = tv | 0;
-              const fu = tu - iu;
-              const fv = tv - iv;
-              const sfu = fu * fu * (3 - 2 * fu);
-              const sfv = fv * fv * (3 - 2 * fv);
-
-              const ti00 = iv * TEX_RES + iu;
-              const ti10 = ti00 + 1;
-              const ti01 = ti00 + TEX_RES;
-              const ti11 = ti01 + 1;
-
-              const tw00 = (1 - sfu) * (1 - sfv);
-              const tw10 = sfu * (1 - sfv);
-              const tw01 = (1 - sfu) * sfv;
-              const tw11 = sfu * sfv;
-
-              let r = texR[ti00] * tw00 + texR[ti10] * tw10 + texR[ti01] * tw01 + texR[ti11] * tw11;
-              let g = texG[ti00] * tw00 + texG[ti10] * tw10 + texG[ti01] * tw01 + texG[ti11] * tw11;
-              let b = texB[ti00] * tw00 + texB[ti10] * tw10 + texB[ti01] * tw01 + texB[ti11] * tw11;
-
-              const bx =
-                (texBumpX[ti00] * tw00 + texBumpX[ti10] * tw10 + texBumpX[ti01] * tw01 + texBumpX[ti11] * tw11) *
-                (1 / 64);
-              const bz =
-                (texBumpZ[ti00] * tw00 + texBumpZ[ti10] * tw10 + texBumpZ[ti01] * tw01 + texBumpZ[ti11] * tw11) *
-                (1 / 64);
-
-              const f00 = texFlags[ti00];
-              const f10 = texFlags[ti10];
-              const f01 = texFlags[ti01];
-              const f11 = texFlags[ti11];
-              const lavaW =
-                ((f00 & FLAG_LAVA) ? tw00 : 0) +
-                ((f10 & FLAG_LAVA) ? tw10 : 0) +
-                ((f01 & FLAG_LAVA) ? tw01 : 0) +
-                ((f11 & FLAG_LAVA) ? tw11 : 0);
-
-              if (lavaW < 0.99) {
-                const rawR = r;
-                const rawG = g;
-                const rawB = b;
-
-                // Combine Gouraud-interpolated macro terrain normal with per-pixel texture bump normal
-                const mnx = (w0 * v0.nx + w1 * v1.nx + w2 * v2.nx) * verticalExag + bx * 0.42;
-                const mny = w0 * v0.ny + w1 * v1.ny + w2 * v2.ny;
-                const mnz = (w0 * v0.nz + w1 * v1.nz + w2 * v2.nz) * verticalExag + bz * 0.42;
-                const invN = 1.0 / (Math.hypot(mnx, mny, mnz) || 1);
-                const nx = mnx * invN;
-                const ny = mny * invN;
-                const nz = mnz * invN;
-
-                const ndotl = Math.max(0, nx * lx + ny * ly + nz * lz);
-                const cShad =
-                  (texCloudShadow[ti00] * tw00 +
-                    texCloudShadow[ti10] * tw10 +
-                    texCloudShadow[ti01] * tw01 +
-                    texCloudShadow[ti11] * tw11) *
-                  (1 / 255) *
-                  cloudShadowStrength;
-                const shadowAtten = 1.0 - cShad;
-                const diff = (0.30 + 0.78 * ndotl * shadowAtten) * nightDim;
-
-                r *= diff;
-                g *= diff;
-                b *= diff;
-
-                // Smoothly interpolated specular highlights on water wave facets & crystalline glacial ice facets
-                if (!isNight) {
-                  const waterW =
-                    ((f00 & FLAG_WATER) ? tw00 : 0) +
-                    ((f10 & FLAG_WATER) ? tw10 : 0) +
-                    ((f01 & FLAG_WATER) ? tw01 : 0) +
-                    ((f11 & FLAG_WATER) ? tw11 : 0);
-                  const iceW =
-                    ((f00 & FLAG_ICE_SPEC) ? tw00 : 0) +
-                    ((f10 & FLAG_ICE_SPEC) ? tw10 : 0) +
-                    ((f01 & FLAG_ICE_SPEC) ? tw01 : 0) +
-                    ((f11 & FLAG_ICE_SPEC) ? tw11 : 0);
-                  if (waterW + iceW > 0.01) {
-                    const ndoth = Math.max(0, nx * halfX + ny * halfY + nz * halfZ);
-                    const isTholinSpec = waterW < 0.5 && isTholinWorldSpec;
-                    const specPow =
-                      waterW * (Math.pow(ndoth, 24) * 0.58) +
-                      iceW * (Math.pow(ndoth, 16) * (isTholinSpec ? 0.18 : 0.30));
-                    const spec = specPow * shadowAtten;
-                    r += (isTholinSpec ? 245 : 230) * spec;
-                    g += (isTholinSpec ? 185 : 244) * spec;
-                    b += (isTholinSpec ? 120 : 255) * spec;
-                  }
-                }
-
-                // Distance-based atmospheric aerial perspective haze
-                if (atmoDensityFactor > 0) {
-                  const distNorm = Math.max(0, Math.min(1, (depth - 2.9) / 1.75));
-                  const fog = distNorm * atmoDensityFactor;
-                  r = r * (1 - fog) + hazeRgb[0] * fog;
-                  g = g * (1 - fog) + hazeRgb[1] * fog;
-                  b = b * (1 - fog) + hazeRgb[2] * fog;
-                }
-
-                if (lavaW > 0.01) {
-                  r = r * (1 - lavaW) + rawR * lavaW;
-                  g = g * (1 - lavaW) + rawG * lavaW;
-                  b = b * (1 - lavaW) + rawB * lavaW;
-                }
-              }
-
-              const ir = r < 0 ? 0 : r > 255 ? 255 : r | 0;
-              const ig = g < 0 ? 0 : g > 255 ? 255 : g | 0;
-              const ib = b < 0 ? 0 : b > 255 ? 255 : b | 0;
-              colorBuffer[pIdx] = (255 << 24) | (ib << 16) | (ig << 8) | ir;
-            }
-          }
-          w1 += dw1dx;
-          w2 += dw2dx;
-        }
-      }
-    }
-
-    // Step 3B: Extend the unstretched texture on a flat horizontal perspective plane (y = 0) out to infinity at the horizon
-    const invScaleDist = 1.0 / (scale * camDist);
-    for (let py = 0; py < H; py++) {
-      const vs = (cy - (py + 0.5)) * invScaleDist;
-      const denom = sinP - vs * cosP;
-      // Pixels with denom <= 0.0015 are above the perspective plane's horizon line
-      if (denom <= 0.0015) continue;
-
-      const z1 = (-vs * camDist) / denom;
-      const camDepth = camDist - z1 * cosP;
-      if (camDepth <= 1.15) continue;
-
-      const rowOffset = py * W;
-      const wxBase = z1 * sinY;
-      const wzBase = z1 * cosY;
-      const dwx = camDepth * invScaleDist * cosY;
-      const dwz = -camDepth * invScaleDist * sinY;
-
-      // Horizon aerial perspective fog factor as plane extends toward infinity
-      const baseFog = atmoDensityFactor > 0 ? Math.max(0, Math.min(1, (camDepth - 2.9) / 8.5)) * atmoDensityFactor : 0;
-      const horizonFade = Math.max(0, Math.min(1, (camDepth - 5.5) / 18.0));
-      const totalFog = Math.min(0.96, baseFog + horizonFade * (1 - baseFog) * (hasAtmosphere ? 0.92 : 0.75));
-
-      let wx = wxBase + (0.5 - cx) * dwx;
-      let wz = wzBase + (0.5 - cx) * dwz;
-
-      for (let px = 0; px < W; px++) {
-        const pIdx = rowOffset + px;
-        if (zBuffer[pIdx] === 1e9) {
-          // Fold world coordinates into [-1, 1] without stretching so texture continues at 1:1 scale to infinity
-          const twx = (((wx + 1) * 0.5) % 2 + 2) % 2;
-          const signX = twx <= 1 ? 1 : -1;
-          const fxMir = (twx <= 1 ? twx : 2 - twx) * 2 - 1;
-          const twz = (((wz + 1) * 0.5) % 2 + 2) % 2;
-          const signZ = twz <= 1 ? 1 : -1;
-          const fzMir = (twz <= 1 ? twz : 2 - twz) * 2 - 1;
-
-          const tu = Math.max(0, Math.min(texMax - 0.001, (fxMir * 0.5 + 0.5) * texMax));
-          const tv = Math.max(0, Math.min(texMax - 0.001, (fzMir * 0.5 + 0.5) * texMax));
-          const iu = tu | 0;
-          const iv = tv | 0;
-          const fu = tu - iu;
-          const fv = tv - iv;
-          const sfu = fu * fu * (3 - 2 * fu);
-          const sfv = fv * fv * (3 - 2 * fv);
-
-          const ti00 = iv * TEX_RES + iu;
-          const ti10 = ti00 + 1;
-          const ti01 = ti00 + TEX_RES;
-          const ti11 = ti01 + 1;
-
-          const tw00 = (1 - sfu) * (1 - sfv);
-          const tw10 = sfu * (1 - sfv);
-          const tw01 = (1 - sfu) * sfv;
-          const tw11 = sfu * sfv;
-
-          let r = texR[ti00] * tw00 + texR[ti10] * tw10 + texR[ti01] * tw01 + texR[ti11] * tw11;
-          let g = texG[ti00] * tw00 + texG[ti10] * tw10 + texG[ti01] * tw01 + texG[ti11] * tw11;
-          let b = texB[ti00] * tw00 + texB[ti10] * tw10 + texB[ti01] * tw01 + texB[ti11] * tw11;
-
-          const bx =
-            (texBumpX[ti00] * tw00 + texBumpX[ti10] * tw10 + texBumpX[ti01] * tw01 + texBumpX[ti11] * tw11) *
-            (1 / 64) *
-            signX;
-          const bz =
-            (texBumpZ[ti00] * tw00 + texBumpZ[ti10] * tw10 + texBumpZ[ti01] * tw01 + texBumpZ[ti11] * tw11) *
-            (1 / 64) *
-            signZ;
-
-          const f00 = texFlags[ti00];
-          const f10 = texFlags[ti10];
-          const f01 = texFlags[ti01];
-          const f11 = texFlags[ti11];
-          const lavaW =
-            ((f00 & FLAG_LAVA) ? tw00 : 0) +
-            ((f10 & FLAG_LAVA) ? tw10 : 0) +
-            ((f01 & FLAG_LAVA) ? tw01 : 0) +
-            ((f11 & FLAG_LAVA) ? tw11 : 0);
-
-          if (lavaW < 0.99) {
-            const rawR = r;
-            const rawG = g;
-            const rawB = b;
-
-            const mnx = bx * 0.42;
-            const mny = 1.0;
-            const mnz = bz * 0.42;
-            const invN = 1.0 / (Math.hypot(mnx, mny, mnz) || 1);
-            const nx = mnx * invN;
-            const ny = mny * invN;
-            const nz = mnz * invN;
-
-            const ndotl = Math.max(0, nx * lx + ny * ly + nz * lz);
-            const cShad =
-              (texCloudShadow[ti00] * tw00 +
-                texCloudShadow[ti10] * tw10 +
-                texCloudShadow[ti01] * tw01 +
-                texCloudShadow[ti11] * tw11) *
-              (1 / 255) *
-              cloudShadowStrength;
-            const shadowAtten = 1.0 - cShad;
-            const diff = (0.30 + 0.78 * ndotl * shadowAtten) * nightDim;
-
-            r *= diff;
-            g *= diff;
-            b *= diff;
-
-            if (!isNight) {
-              const waterW =
-                ((f00 & FLAG_WATER) ? tw00 : 0) +
-                ((f10 & FLAG_WATER) ? tw10 : 0) +
-                ((f01 & FLAG_WATER) ? tw01 : 0) +
-                ((f11 & FLAG_WATER) ? tw11 : 0);
-              const iceW =
-                ((f00 & FLAG_ICE_SPEC) ? tw00 : 0) +
-                ((f10 & FLAG_ICE_SPEC) ? tw10 : 0) +
-                ((f01 & FLAG_ICE_SPEC) ? tw01 : 0) +
-                ((f11 & FLAG_ICE_SPEC) ? tw11 : 0);
-              if (waterW + iceW > 0.01) {
-                const ndoth = Math.max(0, nx * halfX + ny * halfY + nz * halfZ);
-                const isTholinSpec = waterW < 0.5 && isTholinWorldSpec;
-                const specPow =
-                  waterW * (Math.pow(ndoth, 24) * 0.58) +
-                  iceW * (Math.pow(ndoth, 16) * (isTholinSpec ? 0.18 : 0.30));
-                const spec = specPow * shadowAtten;
-                r += (isTholinSpec ? 245 : 230) * spec;
-                g += (isTholinSpec ? 185 : 244) * spec;
-                b += (isTholinSpec ? 120 : 255) * spec;
-              }
-            }
-
-            if (totalFog > 0) {
-              r = r * (1 - totalFog) + hazeRgb[0] * totalFog;
-              g = g * (1 - totalFog) + hazeRgb[1] * totalFog;
-              b = b * (1 - totalFog) + hazeRgb[2] * totalFog;
-            }
-
-            if (lavaW > 0.01) {
-              r = r * (1 - lavaW) + rawR * lavaW;
-              g = g * (1 - lavaW) + rawG * lavaW;
-              b = b * (1 - lavaW) + rawB * lavaW;
-            }
-          }
-
-          const ir = r < 0 ? 0 : r > 255 ? 255 : r | 0;
-          const ig = g < 0 ? 0 : g > 255 ? 255 : g | 0;
-          const ib = b < 0 ? 0 : b > 255 ? 255 : b | 0;
-          colorBuffer[pIdx] = (255 << 24) | (ib << 16) | (ig << 8) | ir;
-        }
-        wx += dwx;
-        wz += dwz;
-      }
-    }
-
     const pLen = perimeterIndices.length;
 
-    // Composite the Z-buffered textured 3D terrain onto the main canvas
-    const offCtx = offCanvas.getContext('2d');
-    if (offCtx) {
-      offCtx.putImageData(imgData, 0, 0);
-      ctx.drawImage(offCanvas, 0, 0);
-    }
+    if (surfaceModel.isNoSurface) {
+      // ============================================================================
+      // 3. GAS GIANT / ICE GIANT / SUPERCRITICAL: COLORED ATMOSPHERE & CLOUD BANDS
+      //    (NO SOLID SURFACE OR GROUND PLANE)
+      // ============================================================================
+      const pal = surfaceModel.atmospherePalette;
+      const tileRgb = hexToRgb(activeTile.biomeColor || surfaceModel.skyHorizonHex);
+      const nightCloudMult = isNight ? 0.36 : isSunset ? 0.86 : 1.0;
 
-    // 4. Draw Goldberg Hex/Pentagon tile boundary contour on the continuous surface
-    ctx.save();
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    for (let i = 0; i < pLen; i++) {
-      const v = vertices[perimeterIndices[i].vIdx];
-      const p = project3D(v.x, v.y, v.z);
-      if (i === 0) ctx.moveTo(p.sx, p.sy);
-      else ctx.lineTo(p.sx, p.sy);
-    }
-    ctx.closePath();
-    ctx.stroke();
-    ctx.restore();
-
-    // 5. Render 3D Elevated Cloud Layer & Atmospheric Veil over the Terrain Block
-    if (showClouds3D && cloudPuffs.length > 0) {
+      // Paint sweeping perspective-projected zonal atmospheric bands in the deep gas envelope
       ctx.save();
-      const cloudRgb = surfaceModel.atmospherePalette.cloudRgb;
-      const nightCloudMult = isNight ? 0.42 : isSunset ? 0.88 : 1.0;
-      const topR = Math.min(255, Math.round(cloudRgb[0] * nightCloudMult + (isSunset ? 28 : 12)));
-      const topG = Math.min(255, Math.round(cloudRgb[1] * nightCloudMult - (isSunset ? 12 : 0)));
-      const topB = Math.min(255, Math.round(cloudRgb[2] * nightCloudMult - (isSunset ? 28 : 0)));
-      const baseR = Math.max(0, Math.round(topR * 0.66));
-      const baseG = Math.max(0, Math.round(topG * 0.68));
-      const baseB = Math.max(0, Math.round(topB * 0.74));
+      const bandCount = 9;
+      for (let bIdx = -bandCount; bIdx <= bandCount; bIdx++) {
+        const zBand = (bIdx / bandCount) * 1.85;
+        const pLeft = project3D(-2.2, -0.18, zBand);
+        const pRight = project3D(2.2, -0.18, zBand);
+        const bandPhase = Math.sin(bIdx * 1.25 + meshData.tileSeed * 0.01) * 0.5 + 0.5;
+        const bR = Math.round(
+          (pal.bandDarkRgb[0] * (1 - bandPhase) + (pal.bandLightRgb[0] * 0.6 + tileRgb[0] * 0.4) * bandPhase) *
+            nightCloudMult
+        );
+        const bG = Math.round(
+          (pal.bandDarkRgb[1] * (1 - bandPhase) + (pal.bandLightRgb[1] * 0.6 + tileRgb[1] * 0.4) * bandPhase) *
+            nightCloudMult
+        );
+        const bB = Math.round(
+          (pal.bandDarkRgb[2] * (1 - bandPhase) + (pal.bandLightRgb[2] * 0.6 + tileRgb[2] * 0.4) * bandPhase) *
+            nightCloudMult
+        );
 
-      const projectedPuffs = cloudPuffs
+        const midX = (pLeft.sx + pRight.sx) * 0.5;
+        const midY = (pLeft.sy + pRight.sy) * 0.5;
+        const bandLen = Math.hypot(pRight.sx - pLeft.sx, pRight.sy - pLeft.sy) * 0.75;
+        const bandThick = (34 + (bIdx % 2 === 0 ? 18 : 8)) * zoom * ((pLeft.persp + pRight.persp) * 0.5);
+        const ang = Math.atan2(pRight.sy - pLeft.sy, pRight.sx - pLeft.sx);
+
+        ctx.save();
+        ctx.translate(midX, midY);
+        ctx.rotate(ang);
+        const bGrad = ctx.createRadialGradient(0, 0, bandThick * 0.1, 0, 0, Math.max(bandLen, bandThick));
+        bGrad.addColorStop(0, `rgba(${bR}, ${bG}, ${bB}, 0.34)`);
+        bGrad.addColorStop(0.65, `rgba(${bR}, ${bG}, ${bB}, 0.16)`);
+        bGrad.addColorStop(1, `rgba(${bR}, ${bG}, ${bB}, 0)`);
+        ctx.fillStyle = bGrad;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, bandLen, bandThick, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.restore();
+
+      // Project & depth-sort all 3D colored cloud puffs
+      const projectedPuffs = (showClouds3D ? cloudPuffs : [])
         .map((puff) => {
           const p = project3D(puff.x, puff.y, puff.z);
           return { puff, p };
         })
         .sort((a, b) => b.p.depth - a.p.depth);
 
-      for (let i = 0; i < projectedPuffs.length; i++) {
-        const { puff, p } = projectedPuffs[i];
+      const drawCloudPuffItem = (puff: CloudPuff3D, p: ReturnType<typeof project3D>) => {
         const rxPx = puff.rx * scale * p.persp;
-        const ryPx = puff.ry * scale * p.persp * (0.58 + 0.42 * Math.sin(rotPitch));
-        const alpha = Math.min(0.84, puff.density * 0.72);
+        const ryPx = puff.ry * scale * p.persp * (0.54 + 0.46 * Math.sin(rotPitch));
+        const alpha = Math.min(0.90, puff.density * 0.82);
+
+        const cR = puff.r ?? pal.cloudRgb[0];
+        const cG = puff.g ?? pal.cloudRgb[1];
+        const cB = puff.b ?? pal.cloudRgb[2];
+        const uR = puff.baseR ?? pal.bandDarkRgb[0];
+        const uG = puff.baseG ?? pal.bandDarkRgb[1];
+        const uB = puff.baseB ?? pal.bandDarkRgb[2];
+
+        const topR = Math.min(255, Math.round(cR * nightCloudMult + (isSunset ? 26 : 10)));
+        const topG = Math.min(255, Math.round(cG * nightCloudMult - (isSunset ? 8 : 0)));
+        const topB = Math.min(255, Math.round(cB * nightCloudMult - (isSunset ? 22 : 0)));
+        const baseR = Math.max(0, Math.round(uR * nightCloudMult));
+        const baseG = Math.max(0, Math.round(uG * nightCloudMult));
+        const baseB = Math.max(0, Math.round(uB * nightCloudMult));
 
         const grad = ctx.createRadialGradient(
-          p.sx - rxPx * 0.18 * lx,
-          p.sy - ryPx * 0.28,
-          ryPx * 0.15,
+          p.sx - rxPx * 0.22 * lx,
+          p.sy - ryPx * 0.30,
+          ryPx * 0.12,
           p.sx,
           p.sy,
           Math.max(rxPx, ryPx)
         );
         grad.addColorStop(0, `rgba(${topR}, ${topG}, ${topB}, ${alpha.toFixed(2)})`);
-        grad.addColorStop(0.62, `rgba(${baseR}, ${baseG}, ${baseB}, ${(alpha * 0.68).toFixed(2)})`);
+        grad.addColorStop(0.58, `rgba(${baseR}, ${baseG}, ${baseB}, ${(alpha * 0.72).toFixed(2)})`);
         grad.addColorStop(1, `rgba(${baseR}, ${baseG}, ${baseB}, 0)`);
 
         ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.ellipse(p.sx, p.sy, rxPx, ryPx, 0, 0, Math.PI * 2);
         ctx.fill();
+      };
+
+      // Render lower & mid-troposphere colored cloud decks first
+      ctx.save();
+      for (let i = 0; i < projectedPuffs.length; i++) {
+        if (projectedPuffs[i].puff.y <= 0.06) {
+          drawCloudPuffItem(projectedPuffs[i].puff, projectedPuffs[i].p);
+        }
       }
       ctx.restore();
+
+      // Draw floating Goldberg Hex/Pentagon tile boundary contour suspended in the cloud deck
+      ctx.save();
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = 0; i < pLen; i++) {
+        const v = vertices[perimeterIndices[i].vIdx];
+        const p = project3D(v.x, 0, v.z);
+        if (i === 0) ctx.moveTo(p.sx, p.sy);
+        else ctx.lineTo(p.sx, p.sy);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+
+      // Render upper bright colored cloud canopy & storm vortex plumes above the tile frame
+      ctx.save();
+      for (let i = 0; i < projectedPuffs.length; i++) {
+        if (projectedPuffs[i].puff.y > 0.06) {
+          drawCloudPuffItem(projectedPuffs[i].puff, projectedPuffs[i].p);
+        }
+      }
+      ctx.restore();
+    } else {
+      // ============================================================================
+      // 3. PER-PIXEL TEXTURED & BUMP-MAPPED Z-BUFFER RASTERIZER + PERSPECTIVE PLANE
+      // ============================================================================
+      if (!offscreenCanvasRef.current) {
+        offscreenCanvasRef.current = document.createElement('canvas');
+      }
+      const offCanvas = offscreenCanvasRef.current;
+      if (offCanvas.width !== W || offCanvas.height !== H) {
+        offCanvas.width = W;
+        offCanvas.height = H;
+        zBufferRef.current = new Float32Array(W * H);
+        imageDataRef.current = new ImageData(W, H);
+        colorBufferRef.current = new Uint32Array(imageDataRef.current.data.buffer);
+      }
+
+      const zBuffer = zBufferRef.current!;
+      const colorBuffer = colorBufferRef.current!;
+      const imgData = imageDataRef.current!;
+      zBuffer.fill(1e9);
+      colorBuffer.fill(0);
+
+      const projVerts = vertices.map((v) => project3D(v.x, v.y, v.z));
+      const nightDim = isNight ? 0.36 : 1.0;
+      const cloudShadowStrength = showClouds3D ? Math.min(0.42, surfaceModel.cloudOpacity * 0.48) : 0;
+      const texMax = TEX_RES - 1;
+      const isTholinWorldSpec =
+        surfaceModel.seaPalette.solventKey === 'NH3-H2O' ||
+        surfaceModel.seaPalette.solventKey === 'CH4-C2H6' ||
+        surfaceModel.compositionPalette.compositionLabel.includes('Tholin');
+
+      // Step 3A: Rasterize 3D terrain triangles strictly inside the active Goldberg tile
+      for (let i = 0; i < triangles.length; i++) {
+        const tri = triangles[i];
+        const v0 = vertices[tri.v0];
+        const v1 = vertices[tri.v1];
+        const v2 = vertices[tri.v2];
+
+        const p0 = projVerts[tri.v0];
+        const p1 = projVerts[tri.v1];
+        const p2 = projVerts[tri.v2];
+
+        const x0 = p0.sx;
+        const y0 = p0.sy;
+        const x1 = p1.sx;
+        const y1 = p1.sy;
+        const x2 = p2.sx;
+        const y2 = p2.sy;
+
+        const minX = Math.max(0, Math.floor(Math.min(x0, x1, x2)));
+        const maxX = Math.min(W - 1, Math.ceil(Math.max(x0, x1, x2)));
+        const minY = Math.max(0, Math.floor(Math.min(y0, y1, y2)));
+        const maxY = Math.min(H - 1, Math.ceil(Math.max(y0, y1, y2)));
+        if (minX > maxX || minY > maxY) continue;
+
+        const area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+        // Strictly cull back-facing / underside triangles so underground faces are never rendered
+        if (area <= 0.05) continue;
+        const invArea = 1.0 / area;
+
+        // Convert vertex coordinates [-1, +1] into texture coordinates [0, TEX_RES - 1]
+        const u0 = (v0.x * 0.5 + 0.5) * texMax;
+        const tv0 = (v0.z * 0.5 + 0.5) * texMax;
+        const u1 = (v1.x * 0.5 + 0.5) * texMax;
+        const tv1 = (v1.z * 0.5 + 0.5) * texMax;
+        const u2 = (v2.x * 0.5 + 0.5) * texMax;
+        const tv2 = (v2.z * 0.5 + 0.5) * texMax;
+
+        const d0 = p0.depth;
+        const d1 = p1.depth;
+        const d2 = p2.depth;
+
+        // Step increments per screen X pixel
+        const dw1dx = (y2 - y0) * invArea;
+        const dw2dx = (y0 - y1) * invArea;
+
+        for (let py = minY; py <= maxY; py++) {
+          const sy = py + 0.5;
+          const dx0 = minX + 0.5 - x0;
+          const dy0 = sy - y0;
+
+          let w1 = (dx0 * (y2 - y0) - (x2 - x0) * dy0) * invArea;
+          let w2 = ((x1 - x0) * dy0 - dx0 * (y1 - y0)) * invArea;
+          const rowOffset = py * W;
+
+          for (let px = minX; px <= maxX; px++) {
+            const w0 = 1.0 - w1 - w2;
+            if (w0 >= -0.002 && w1 >= -0.002 && w2 >= -0.002) {
+              const depth = w0 * d0 + w1 * d1 + w2 * d2;
+              const pIdx = rowOffset + px;
+
+              if (depth < zBuffer[pIdx]) {
+                zBuffer[pIdx] = depth;
+
+                // Interpolate texture coordinates (u, v) and sample with Hermite smoothstep filtering
+                const tu = Math.max(0, Math.min(texMax - 0.001, w0 * u0 + w1 * u1 + w2 * u2));
+                const tv = Math.max(0, Math.min(texMax - 0.001, w0 * tv0 + w1 * tv1 + w2 * tv2));
+                const iu = tu | 0;
+                const iv = tv | 0;
+                const fu = tu - iu;
+                const fv = tv - iv;
+                const sfu = fu * fu * (3 - 2 * fu);
+                const sfv = fv * fv * (3 - 2 * fv);
+
+                const ti00 = iv * TEX_RES + iu;
+                const ti10 = ti00 + 1;
+                const ti01 = ti00 + TEX_RES;
+                const ti11 = ti01 + 1;
+
+                const tw00 = (1 - sfu) * (1 - sfv);
+                const tw10 = sfu * (1 - sfv);
+                const tw01 = (1 - sfu) * sfv;
+                const tw11 = sfu * sfv;
+
+                let r = texR[ti00] * tw00 + texR[ti10] * tw10 + texR[ti01] * tw01 + texR[ti11] * tw11;
+                let g = texG[ti00] * tw00 + texG[ti10] * tw10 + texG[ti01] * tw01 + texG[ti11] * tw11;
+                let b = texB[ti00] * tw00 + texB[ti10] * tw10 + texB[ti01] * tw01 + texB[ti11] * tw11;
+
+                const bx =
+                  (texBumpX[ti00] * tw00 + texBumpX[ti10] * tw10 + texBumpX[ti01] * tw01 + texBumpX[ti11] * tw11) *
+                  (1 / 64);
+                const bz =
+                  (texBumpZ[ti00] * tw00 + texBumpZ[ti10] * tw10 + texBumpZ[ti01] * tw01 + texBumpZ[ti11] * tw11) *
+                  (1 / 64);
+
+                const f00 = texFlags[ti00];
+                const f10 = texFlags[ti10];
+                const f01 = texFlags[ti01];
+                const f11 = texFlags[ti11];
+                const lavaW =
+                  ((f00 & FLAG_LAVA) ? tw00 : 0) +
+                  ((f10 & FLAG_LAVA) ? tw10 : 0) +
+                  ((f01 & FLAG_LAVA) ? tw01 : 0) +
+                  ((f11 & FLAG_LAVA) ? tw11 : 0);
+
+                if (lavaW < 0.99) {
+                  const rawR = r;
+                  const rawG = g;
+                  const rawB = b;
+
+                  // Combine Gouraud-interpolated macro terrain normal with per-pixel texture bump normal
+                  const mnx = (w0 * v0.nx + w1 * v1.nx + w2 * v2.nx) * verticalExag + bx * 0.42;
+                  const mny = w0 * v0.ny + w1 * v1.ny + w2 * v2.ny;
+                  const mnz = (w0 * v0.nz + w1 * v1.nz + w2 * v2.nz) * verticalExag + bz * 0.42;
+                  const invN = 1.0 / (Math.hypot(mnx, mny, mnz) || 1);
+                  const nx = mnx * invN;
+                  const ny = mny * invN;
+                  const nz = mnz * invN;
+
+                  const ndotl = Math.max(0, nx * lx + ny * ly + nz * lz);
+                  const cShad =
+                    (texCloudShadow[ti00] * tw00 +
+                      texCloudShadow[ti10] * tw10 +
+                      texCloudShadow[ti01] * tw01 +
+                      texCloudShadow[ti11] * tw11) *
+                    (1 / 255) *
+                    cloudShadowStrength;
+                  const shadowAtten = 1.0 - cShad;
+                  const diff = (0.30 + 0.78 * ndotl * shadowAtten) * nightDim;
+
+                  r *= diff;
+                  g *= diff;
+                  b *= diff;
+
+                  // Smoothly interpolated specular highlights on water wave facets & crystalline glacial ice facets
+                  if (!isNight) {
+                    const waterW =
+                      ((f00 & FLAG_WATER) ? tw00 : 0) +
+                      ((f10 & FLAG_WATER) ? tw10 : 0) +
+                      ((f01 & FLAG_WATER) ? tw01 : 0) +
+                      ((f11 & FLAG_WATER) ? tw11 : 0);
+                    const iceW =
+                      ((f00 & FLAG_ICE_SPEC) ? tw00 : 0) +
+                      ((f10 & FLAG_ICE_SPEC) ? tw10 : 0) +
+                      ((f01 & FLAG_ICE_SPEC) ? tw01 : 0) +
+                      ((f11 & FLAG_ICE_SPEC) ? tw11 : 0);
+                    if (waterW + iceW > 0.01) {
+                      const ndoth = Math.max(0, nx * halfX + ny * halfY + nz * halfZ);
+                      const isTholinSpec = waterW < 0.5 && isTholinWorldSpec;
+                      const specPow =
+                        waterW * (Math.pow(ndoth, 24) * 0.58) +
+                        iceW * (Math.pow(ndoth, 16) * (isTholinSpec ? 0.18 : 0.30));
+                      const spec = specPow * shadowAtten;
+                      r += (isTholinSpec ? 245 : 230) * spec;
+                      g += (isTholinSpec ? 185 : 244) * spec;
+                      b += (isTholinSpec ? 120 : 255) * spec;
+                    }
+                  }
+
+                  // Distance-based atmospheric aerial perspective haze
+                  if (atmoDensityFactor > 0) {
+                    const distNorm = Math.max(0, Math.min(1, (depth - 2.9) / 1.75));
+                    const fog = distNorm * atmoDensityFactor;
+                    r = r * (1 - fog) + hazeRgb[0] * fog;
+                    g = g * (1 - fog) + hazeRgb[1] * fog;
+                    b = b * (1 - fog) + hazeRgb[2] * fog;
+                  }
+
+                  if (lavaW > 0.01) {
+                    r = r * (1 - lavaW) + rawR * lavaW;
+                    g = g * (1 - lavaW) + rawG * lavaW;
+                    b = b * (1 - lavaW) + rawB * lavaW;
+                  }
+                }
+
+                const ir = r < 0 ? 0 : r > 255 ? 255 : r | 0;
+                const ig = g < 0 ? 0 : g > 255 ? 255 : g | 0;
+                const ib = b < 0 ? 0 : b > 255 ? 255 : b | 0;
+                colorBuffer[pIdx] = (255 << 24) | (ib << 16) | (ig << 8) | ir;
+              }
+            }
+            w1 += dw1dx;
+            w2 += dw2dx;
+          }
+        }
+      }
+
+      // Step 3B: Extend the unstretched texture on a flat horizontal perspective plane (y = 0) out to infinity at the horizon
+      const invScaleDist = 1.0 / (scale * camDist);
+      for (let py = 0; py < H; py++) {
+        const vs = (cy - (py + 0.5)) * invScaleDist;
+        const denom = sinP - vs * cosP;
+        // Pixels with denom <= 0.0015 are above the perspective plane's horizon line
+        if (denom <= 0.0015) continue;
+
+        const z1 = (-vs * camDist) / denom;
+        const camDepth = camDist - z1 * cosP;
+        if (camDepth <= 1.15) continue;
+
+        const rowOffset = py * W;
+        const wxBase = z1 * sinY;
+        const wzBase = z1 * cosY;
+        const dwx = camDepth * invScaleDist * cosY;
+        const dwz = -camDepth * invScaleDist * sinY;
+
+        // Horizon aerial perspective fog factor as plane extends toward infinity
+        const baseFog = atmoDensityFactor > 0 ? Math.max(0, Math.min(1, (camDepth - 2.9) / 8.5)) * atmoDensityFactor : 0;
+        const horizonFade = Math.max(0, Math.min(1, (camDepth - 5.5) / 18.0));
+        const totalFog = Math.min(0.96, baseFog + horizonFade * (1 - baseFog) * (hasAtmosphere ? 0.92 : 0.75));
+
+        let wx = wxBase + (0.5 - cx) * dwx;
+        let wz = wzBase + (0.5 - cx) * dwz;
+
+        for (let px = 0; px < W; px++) {
+          const pIdx = rowOffset + px;
+          if (zBuffer[pIdx] === 1e9) {
+            // Fold world coordinates into [-1, 1] without stretching so texture continues at 1:1 scale to infinity
+            const twx = (((wx + 1) * 0.5) % 2 + 2) % 2;
+            const signX = twx <= 1 ? 1 : -1;
+            const fxMir = (twx <= 1 ? twx : 2 - twx) * 2 - 1;
+            const twz = (((wz + 1) * 0.5) % 2 + 2) % 2;
+            const signZ = twz <= 1 ? 1 : -1;
+            const fzMir = (twz <= 1 ? twz : 2 - twz) * 2 - 1;
+
+            const tu = Math.max(0, Math.min(texMax - 0.001, (fxMir * 0.5 + 0.5) * texMax));
+            const tv = Math.max(0, Math.min(texMax - 0.001, (fzMir * 0.5 + 0.5) * texMax));
+            const iu = tu | 0;
+            const iv = tv | 0;
+            const fu = tu - iu;
+            const fv = tv - iv;
+            const sfu = fu * fu * (3 - 2 * fu);
+            const sfv = fv * fv * (3 - 2 * fv);
+
+            const ti00 = iv * TEX_RES + iu;
+            const ti10 = ti00 + 1;
+            const ti01 = ti00 + TEX_RES;
+            const ti11 = ti01 + 1;
+
+            const tw00 = (1 - sfu) * (1 - sfv);
+            const tw10 = sfu * (1 - sfv);
+            const tw01 = (1 - sfu) * sfv;
+            const tw11 = sfu * sfv;
+
+            let r = texR[ti00] * tw00 + texR[ti10] * tw10 + texR[ti01] * tw01 + texR[ti11] * tw11;
+            let g = texG[ti00] * tw00 + texG[ti10] * tw10 + texG[ti01] * tw01 + texG[ti11] * tw11;
+            let b = texB[ti00] * tw00 + texB[ti10] * tw10 + texB[ti01] * tw01 + texB[ti11] * tw11;
+
+            const bx =
+              (texBumpX[ti00] * tw00 + texBumpX[ti10] * tw10 + texBumpX[ti01] * tw01 + texBumpX[ti11] * tw11) *
+              (1 / 64) *
+              signX;
+            const bz =
+              (texBumpZ[ti00] * tw00 + texBumpZ[ti10] * tw10 + texBumpZ[ti01] * tw01 + texBumpZ[ti11] * tw11) *
+              (1 / 64) *
+              signZ;
+
+            const f00 = texFlags[ti00];
+            const f10 = texFlags[ti10];
+            const f01 = texFlags[ti01];
+            const f11 = texFlags[ti11];
+            const lavaW =
+              ((f00 & FLAG_LAVA) ? tw00 : 0) +
+              ((f10 & FLAG_LAVA) ? tw10 : 0) +
+              ((f01 & FLAG_LAVA) ? tw01 : 0) +
+              ((f11 & FLAG_LAVA) ? tw11 : 0);
+
+            if (lavaW < 0.99) {
+              const rawR = r;
+              const rawG = g;
+              const rawB = b;
+
+              const mnx = bx * 0.42;
+              const mny = 1.0;
+              const mnz = bz * 0.42;
+              const invN = 1.0 / (Math.hypot(mnx, mny, mnz) || 1);
+              const nx = mnx * invN;
+              const ny = mny * invN;
+              const nz = mnz * invN;
+
+              const ndotl = Math.max(0, nx * lx + ny * ly + nz * lz);
+              const cShad =
+                (texCloudShadow[ti00] * tw00 +
+                  texCloudShadow[ti10] * tw10 +
+                  texCloudShadow[ti01] * tw01 +
+                  texCloudShadow[ti11] * tw11) *
+                (1 / 255) *
+                cloudShadowStrength;
+              const shadowAtten = 1.0 - cShad;
+              const diff = (0.30 + 0.78 * ndotl * shadowAtten) * nightDim;
+
+              r *= diff;
+              g *= diff;
+              b *= diff;
+
+              if (!isNight) {
+                const waterW =
+                  ((f00 & FLAG_WATER) ? tw00 : 0) +
+                  ((f10 & FLAG_WATER) ? tw10 : 0) +
+                  ((f01 & FLAG_WATER) ? tw01 : 0) +
+                  ((f11 & FLAG_WATER) ? tw11 : 0);
+                const iceW =
+                  ((f00 & FLAG_ICE_SPEC) ? tw00 : 0) +
+                  ((f10 & FLAG_ICE_SPEC) ? tw10 : 0) +
+                  ((f01 & FLAG_ICE_SPEC) ? tw01 : 0) +
+                  ((f11 & FLAG_ICE_SPEC) ? tw11 : 0);
+                if (waterW + iceW > 0.01) {
+                  const ndoth = Math.max(0, nx * halfX + ny * halfY + nz * halfZ);
+                  const isTholinSpec = waterW < 0.5 && isTholinWorldSpec;
+                  const specPow =
+                    waterW * (Math.pow(ndoth, 24) * 0.58) +
+                    iceW * (Math.pow(ndoth, 16) * (isTholinSpec ? 0.18 : 0.30));
+                  const spec = specPow * shadowAtten;
+                  r += (isTholinSpec ? 245 : 230) * spec;
+                  g += (isTholinSpec ? 185 : 244) * spec;
+                  b += (isTholinSpec ? 120 : 255) * spec;
+                }
+              }
+
+              if (totalFog > 0) {
+                r = r * (1 - totalFog) + hazeRgb[0] * totalFog;
+                g = g * (1 - totalFog) + hazeRgb[1] * totalFog;
+                b = b * (1 - totalFog) + hazeRgb[2] * totalFog;
+              }
+
+              if (lavaW > 0.01) {
+                r = r * (1 - lavaW) + rawR * lavaW;
+                g = g * (1 - lavaW) + rawG * lavaW;
+                b = b * (1 - lavaW) + rawB * lavaW;
+              }
+            }
+
+            const ir = r < 0 ? 0 : r > 255 ? 255 : r | 0;
+            const ig = g < 0 ? 0 : g > 255 ? 255 : g | 0;
+            const ib = b < 0 ? 0 : b > 255 ? 255 : b | 0;
+            colorBuffer[pIdx] = (255 << 24) | (ib << 16) | (ig << 8) | ir;
+          }
+          wx += dwx;
+          wz += dwz;
+        }
+      }
+
+      // Composite the Z-buffered textured 3D terrain onto the main canvas
+      const offCtx = offCanvas.getContext('2d');
+      if (offCtx) {
+        offCtx.putImageData(imgData, 0, 0);
+        ctx.drawImage(offCanvas, 0, 0);
+      }
+
+      // 4. Draw Goldberg Hex/Pentagon tile boundary contour on the continuous surface
+      ctx.save();
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = 0; i < pLen; i++) {
+        const v = vertices[perimeterIndices[i].vIdx];
+        const p = project3D(v.x, v.y, v.z);
+        if (i === 0) ctx.moveTo(p.sx, p.sy);
+        else ctx.lineTo(p.sx, p.sy);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+
+      // 5. Render 3D Elevated Cloud Layer & Atmospheric Veil over the Terrain Block
+      if (showClouds3D && cloudPuffs.length > 0) {
+        ctx.save();
+        const cloudRgb = surfaceModel.atmospherePalette.cloudRgb;
+        const nightCloudMult = isNight ? 0.42 : isSunset ? 0.88 : 1.0;
+        const topR = Math.min(255, Math.round(cloudRgb[0] * nightCloudMult + (isSunset ? 28 : 12)));
+        const topG = Math.min(255, Math.round(cloudRgb[1] * nightCloudMult - (isSunset ? 12 : 0)));
+        const topB = Math.min(255, Math.round(cloudRgb[2] * nightCloudMult - (isSunset ? 28 : 0)));
+        const baseR = Math.max(0, Math.round(topR * 0.66));
+        const baseG = Math.max(0, Math.round(topG * 0.68));
+        const baseB = Math.max(0, Math.round(topB * 0.74));
+
+        const projectedPuffs = cloudPuffs
+          .map((puff) => {
+            const p = project3D(puff.x, puff.y, puff.z);
+            return { puff, p };
+          })
+          .sort((a, b) => b.p.depth - a.p.depth);
+
+        for (let i = 0; i < projectedPuffs.length; i++) {
+          const { puff, p } = projectedPuffs[i];
+          const rxPx = puff.rx * scale * p.persp;
+          const ryPx = puff.ry * scale * p.persp * (0.58 + 0.42 * Math.sin(rotPitch));
+          const alpha = Math.min(0.84, puff.density * 0.72);
+
+          const grad = ctx.createRadialGradient(
+            p.sx - rxPx * 0.18 * lx,
+            p.sy - ryPx * 0.28,
+            ryPx * 0.15,
+            p.sx,
+            p.sy,
+            Math.max(rxPx, ryPx)
+          );
+          grad.addColorStop(0, `rgba(${topR}, ${topG}, ${topB}, ${alpha.toFixed(2)})`);
+          grad.addColorStop(0.62, `rgba(${baseR}, ${baseG}, ${baseB}, ${(alpha * 0.68).toFixed(2)})`);
+          grad.addColorStop(1, `rgba(${baseR}, ${baseG}, ${baseB}, 0)`);
+
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.ellipse(p.sx, p.sy, rxPx, ryPx, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
     }
 
     // 6. Neighbor direction badges floating around the perimeter of the 3D biome block

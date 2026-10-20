@@ -1349,16 +1349,102 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       }
 
       const skyEndRow = Math.min(H, Math.max(0, clampedHorizon + 2));
+      const pal = surfaceModel.atmospherePalette;
+      const tileAtmoRgb = hexToRgb(activeTile.biomeColor || surfaceModel.skyHorizonHex);
+
       for (let py = 0; py < H; py++) {
+        const rowOff = py * W;
+        const dyHorizon = clampedHorizon - py;
+
+        if (surfaceModel.isNoSurface && py >= clampedHorizon) {
+          // Deep Colored Atmosphere Abyss below the horizon (NO solid surface)
+          const tAbyss = Math.max(0, Math.min(1, (py - clampedHorizon) / Math.max(1, H - clampedHorizon)));
+          const tAbyssCurve = Math.pow(tAbyss, 0.78);
+          const midAtmoR = (skyHorizonRgb[0] * 0.45 + pal.atmoRgb[0] * 0.35 + tileAtmoRgb[0] * 0.20) * nightCloudMult;
+          const midAtmoG = (skyHorizonRgb[1] * 0.45 + pal.atmoRgb[1] * 0.35 + tileAtmoRgb[1] * 0.20) * nightCloudMult;
+          const midAtmoB = (skyHorizonRgb[2] * 0.45 + pal.atmoRgb[2] * 0.35 + tileAtmoRgb[2] * 0.20) * nightCloudMult;
+          const deepR = (pal.bandDarkRgb[0] * 0.58 + pal.atmoRgb[0] * 0.28) * nightCloudMult;
+          const deepG = (pal.bandDarkRgb[1] * 0.58 + pal.atmoRgb[1] * 0.28) * nightCloudMult;
+          const deepB = (pal.bandDarkRgb[2] * 0.58 + pal.atmoRgb[2] * 0.28) * nightCloudMult;
+
+          const ar = Math.max(0, Math.min(255, (midAtmoR + (deepR - midAtmoR) * tAbyssCurve) | 0));
+          const ag = Math.max(0, Math.min(255, (midAtmoG + (deepG - midAtmoG) * tAbyssCurve) | 0));
+          const ab = Math.max(0, Math.min(255, (midAtmoB + (deepB - midAtmoB) * tAbyssCurve) | 0));
+          const baseAbyssPixel = (255 << 24) | (ab << 16) | (ag << 8) | ar;
+
+          const dyDown = py - clampedHorizon;
+          if (showClouds && dyDown > 2) {
+            // Raycast 2 layered colored cloud decks suspended below the camera in the colored atmosphere
+            const subDist1 = (0.16 * focalLen) / dyDown;
+            const subDist2 = (0.42 * focalLen) / dyDown;
+            if (subDist1 > 0.04 && subDist1 < 4.2) {
+              const fade1 = Math.max(0, Math.min(1, 1.0 - (subDist1 - 0.3) / 3.9));
+              const fade2 = subDist2 < 4.8 ? Math.max(0, Math.min(1, 1.0 - (subDist2 - 0.5) / 4.3)) : 0;
+
+              for (let sx = 0; sx < W; sx++) {
+                let pr = ar;
+                let pg = ag;
+                let pb = ab;
+
+                // Deep belt colored cloud layer
+                if (fade2 > 0.02) {
+                  const wx2 = cam.x + rayDirX[sx] * subDist2 - windDriftX * 0.7;
+                  const wz2 = cam.z + rayDirZ[sx] * subDist2 + windDriftZ * 0.5;
+                  const u2 = ((foldMirror(wx2) * 0.5 + 0.5) * texMax) | 0;
+                  const v2 = ((foldMirror(wz2) * 0.5 + 0.5) * texMax) | 0;
+                  const idx2 = v2 * TEX_RES + u2;
+                  const cVal2 = cloudMap[idx2];
+                  if (cVal2 > 18) {
+                    const cNorm2 = cVal2 * (1 / 255);
+                    const a2 = Math.min(0.78, cNorm2 * 0.72 * fade2);
+                    const cr2 = (texR[idx2] * 0.68 + pal.bandDarkRgb[0] * 0.32) * nightCloudMult;
+                    const cg2 = (texG[idx2] * 0.68 + pal.bandDarkRgb[1] * 0.32) * nightCloudMult;
+                    const cb2 = (texB[idx2] * 0.68 + pal.bandDarkRgb[2] * 0.32) * nightCloudMult;
+                    pr = (pr * (1 - a2) + cr2 * a2) | 0;
+                    pg = (pg * (1 - a2) + cg2 * a2) | 0;
+                    pb = (pb * (1 - a2) + cb2 * a2) | 0;
+                  }
+                }
+
+                // Mid-troposphere colored zonal cloud layer
+                const wx1 = cam.x + rayDirX[sx] * subDist1 + windDriftX * 1.1;
+                const wz1 = cam.z + rayDirZ[sx] * subDist1 + windDriftZ * 0.8;
+                const u1 = ((foldMirror(wx1) * 0.5 + 0.5) * texMax) | 0;
+                const v1 = ((foldMirror(wz1) * 0.5 + 0.5) * texMax) | 0;
+                const idx1 = v1 * TEX_RES + u1;
+                const cVal1 = cloudMap[idx1];
+                if (cVal1 > 10) {
+                  const cNorm1 = cVal1 * (1 / 255);
+                  const a1 = Math.min(0.88, cNorm1 * 0.84 * fade1);
+                  const shade1 = 0.55 + 0.45 * cNorm1;
+                  const cr1 = (texR[idx1] * 0.75 + cTopR * 0.25) * shade1;
+                  const cg1 = (texG[idx1] * 0.75 + cTopG * 0.25) * shade1;
+                  const cb1 = (texB[idx1] * 0.75 + cTopB * 0.25) * shade1;
+                  pr = (pr * (1 - a1) + cr1 * a1) | 0;
+                  pg = (pg * (1 - a1) + cg1 * a1) | 0;
+                  pb = (pb * (1 - a1) + cb1 * a1) | 0;
+                }
+
+                colorBuffer[rowOff + sx] =
+                  (255 << 24) |
+                  (Math.max(0, Math.min(255, pb)) << 16) |
+                  (Math.max(0, Math.min(255, pg)) << 8) |
+                  Math.max(0, Math.min(255, pr));
+              }
+              continue;
+            }
+          }
+
+          colorBuffer.fill(baseAbyssPixel, rowOff, rowOff + W);
+          continue;
+        }
+
         const tSky = clampedHorizon > 0 ? Math.max(0, Math.min(1, py / clampedHorizon)) : 1.0;
         const tCurve = Math.pow(tSky, 1.35);
         const sr = (skyTopRgb[0] + (skyHorizonRgb[0] - skyTopRgb[0]) * tCurve) | 0;
         const sg = (skyTopRgb[1] + (skyHorizonRgb[1] - skyTopRgb[1]) * tCurve) | 0;
         const sb = (skyTopRgb[2] + (skyHorizonRgb[2] - skyTopRgb[2]) * tCurve) | 0;
         const baseSkyPixel = (255 << 24) | (sb << 16) | (sg << 8) | sr;
-
-        const rowOff = py * W;
-        const dyHorizon = clampedHorizon - py;
 
         // Raycast 3D overhead cloud plane when looking above the horizon
         if (
@@ -1377,14 +1463,21 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
               const cwz = cam.z + rayDirZ[sx] * cloudDist + windDriftZ;
               const ctu = ((foldMirror(cwx) * 0.5 + 0.5) * texMax) | 0;
               const ctv = ((foldMirror(cwz) * 0.5 + 0.5) * texMax) | 0;
-              const cVal = cloudMap[ctv * TEX_RES + ctu];
+              const cIdx = ctv * TEX_RES + ctu;
+              const cVal = cloudMap[cIdx];
               if (cVal > 12) {
                 const cNorm = cVal * (1 / 255);
                 const alpha = Math.min(0.86, cNorm * cloudAlphaScale);
                 const shade = 0.45 + 0.55 * cNorm;
-                const cr = (cBaseR + (cTopR - cBaseR) * shade) | 0;
-                const cg = (cBaseG + (cTopG - cBaseG) * shade) | 0;
-                const cb = (cBaseB + (cTopB - cBaseB) * shade) | 0;
+                const cr = surfaceModel.isNoSurface
+                  ? ((texR[cIdx] * 0.55 + cTopR * 0.45) * shade) | 0
+                  : (cBaseR + (cTopR - cBaseR) * shade) | 0;
+                const cg = surfaceModel.isNoSurface
+                  ? ((texG[cIdx] * 0.55 + cTopG * 0.45) * shade) | 0
+                  : (cBaseG + (cTopG - cBaseG) * shade) | 0;
+                const cb = surfaceModel.isNoSurface
+                  ? ((texB[cIdx] * 0.55 + cTopB * 0.45) * shade) | 0
+                  : (cBaseB + (cTopB - cBaseB) * shade) | 0;
                 const pr = (sr * (1 - alpha) + cr * alpha) | 0;
                 const pg = (sg * (1 - alpha) + cg * alpha) | 0;
                 const pb = (sb * (1 - alpha) + cb * alpha) | 0;
@@ -1400,276 +1493,271 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         colorBuffer.fill(baseSkyPixel, rowOff, rowOff + W);
       }
 
-      // 2. Front-to-Back First-Person 3D Terrain Raycasting (Locked 0.6x Relief + Sub-Texel Detail Synthesis)
-      const verticalScale = 0.6;
-      const nightDim = isNight ? 0.36 : 1.0;
-      const cloudShadowStrength = showClouds ? Math.min(0.45, surfaceModel.cloudOpacity * 0.52) : 0;
-      const atmoHazeStrength = hasAtmosphere
-        ? Math.min(0.85, 0.22 + surfaceModel.cloudOpacity * 0.45 + Math.min(0.25, pBarAtmo * 0.04))
-        : 0.08;
-      const isTholinWorldSpec =
-        surfaceModel.seaPalette.solventKey === 'NH3-H2O' ||
-        surfaceModel.seaPalette.solventKey === 'CH4-C2H6' ||
-        surfaceModel.compositionPalette.compositionLabel.includes('Tholin');
-      const camYScaled = cam.y * verticalScale;
+      // 2. Front-to-Back First-Person 3D Terrain Raycasting (Skipped for Gas/Ice Giants with No Solid Surface)
+      if (!surfaceModel.isNoSurface) {
+        const verticalScale = 0.6;
+        const nightDim = isNight ? 0.36 : 1.0;
+        const cloudShadowStrength = showClouds ? Math.min(0.45, surfaceModel.cloudOpacity * 0.52) : 0;
+        const atmoHazeStrength = hasAtmosphere
+          ? Math.min(0.85, 0.22 + surfaceModel.cloudOpacity * 0.45 + Math.min(0.25, pBarAtmo * 0.04))
+          : 0.08;
+        const isTholinWorldSpec =
+          surfaceModel.seaPalette.solventKey === 'NH3-H2O' ||
+          surfaceModel.seaPalette.solventKey === 'CH4-C2H6' ||
+          surfaceModel.compositionPalette.compositionLabel.includes('Tholin');
+        const camYScaled = cam.y * verticalScale;
 
-      // Evaluates shaded & micro-textured RGB at world coordinate (wx, wz) and distance zDist
-      const shadeWorldPoint = (
-        wx: number,
-        wz: number,
-        zDist: number,
-        rdx: number,
-        rdz: number
-      ): { r: number; g: number; b: number } => {
-        const fxFold = foldMirrorWithSign(wx);
-        const fzFold = foldMirrorWithSign(wz);
-        const tu = (fxFold.val * 0.5 + 0.5) * texMax;
-        const tv = (fzFold.val * 0.5 + 0.5) * texMax;
-        const iu = tu | 0;
-        const iv = tv | 0;
-        const fu = tu - iu;
-        const fv = tv - iv;
-
-        // Smoothstep Hermite weights for ultra-smooth sub-texel interpolation without linear Mach bands
-        const sfu = fu * fu * (3 - 2 * fu);
-        const sfv = fv * fv * (3 - 2 * fv);
-
-        const i00 = iv * TEX_RES + iu;
-        const i10 = iu < texMax ? i00 + 1 : i00;
-        const i01 = iv < texMax ? i00 + TEX_RES : i00;
-        const i11 = iu < texMax && iv < texMax ? i01 + 1 : i01;
-
-        const w00 = (1 - sfu) * (1 - sfv);
-        const w10 = sfu * (1 - sfv);
-        const w01 = (1 - sfu) * sfv;
-        const w11 = sfu * sfv;
-
-        let r = texR[i00] * w00 + texR[i10] * w10 + texR[i01] * w01 + texR[i11] * w11;
-        let g = texG[i00] * w00 + texG[i10] * w10 + texG[i01] * w01 + texG[i11] * w11;
-        let b = texB[i00] * w00 + texB[i10] * w10 + texB[i01] * w01 + texB[i11] * w11;
-
-        const f00 = flagsMap[i00];
-        const f10 = flagsMap[i10];
-        const f01 = flagsMap[i01];
-        const f11 = flagsMap[i11];
-        const lavaBlend =
-          ((f00 & FLAG_LAVA) !== 0 ? w00 : 0) +
-          ((f10 & FLAG_LAVA) !== 0 ? w10 : 0) +
-          ((f01 & FLAG_LAVA) !== 0 ? w01 : 0) +
-          ((f11 & FLAG_LAVA) !== 0 ? w11 : 0);
-        const waterBlend =
-          ((f00 & FLAG_WATER) !== 0 ? w00 : 0) +
-          ((f10 & FLAG_WATER) !== 0 ? w10 : 0) +
-          ((f01 & FLAG_WATER) !== 0 ? w01 : 0) +
-          ((f11 & FLAG_WATER) !== 0 ? w11 : 0);
-        const flags = f00;
-        const isLava = lavaBlend > 0.5;
-
-        if (isLava) {
-          const pulse = Math.sin(wx * 45 + wz * 45 + timeSec * 3.5) * 18;
-          r = Math.min(255, r + pulse);
-          g = Math.min(255, Math.max(0, g + pulse * 0.8));
-          return { r, g, b };
-        }
-
-        let nx =
-          (normXMap[i00] * w00 + normXMap[i10] * w10 + normXMap[i01] * w01 + normXMap[i11] * w11) *
-          (1 / 42) *
-          fxFold.sign;
-        let nz =
-          (normZMap[i00] * w00 + normZMap[i10] * w10 + normZMap[i01] * w01 + normZMap[i11] * w11) *
-          (1 / 42) *
-          fzFold.sign;
-        const ny = 1.0;
-
-        const isWater = waterBlend > 0.5;
-        if (isWater) {
-          const waveAnim1 = Math.sin(wx * 95 + wz * 55 + timeSec * 2.8);
-          const waveAnim2 = Math.cos(wx * 60 - wz * 85 - timeSec * 2.2);
-          nx += waveAnim1 * 0.32;
-          nz += waveAnim2 * 0.32;
-        } else if (zDist < 1.1) {
-          // Real-time close-range procedural micro-texture & bump normal synthesis:
-          // Adds crisp sub-texel mineral striations, pebbles, sand ripples, and surface grain right under the camera
-          const fade = 1.0 - zDist * (1 / 1.1);
-          const detailWeight = fade * fade;
-
-          // Multi-frequency continuous harmonic micro-relief at 220x and 520x world frequency
-          const p1 = wx * 215.0 + wz * 135.0 + Math.sin(wz * 85.0 - wx * 62.0) * 1.4;
-          const p2 = wx * 480.0 - wz * 390.0 + Math.cos(wx * 195.0 + wz * 170.0) * 1.1;
-          const p3 = (wx + wz) * 890.0 + Math.sin(wx * 510.0 - wz * 460.0) * 0.9;
-
-          const s1 = Math.sin(p1);
-          const c1 = Math.cos(p1);
-          const s2 = Math.sin(p2);
-          const c2 = Math.cos(p2);
-          const s3 = Math.sin(p3);
-
-          // Micro-normal perturbation for crisp close-up surface relief
-          nx += (c1 * 0.22 + c2 * 0.15 + s3 * 0.08) * detailWeight;
-          nz += (s1 * 0.18 - s2 * 0.15 + s3 * 0.08) * detailWeight;
-
-          // Albedo micro-modulation (warm/cool mineral & organic micro-variation)
-          const microDelta = (s1 * 6.5 + s2 * 4.8 + s3 * 3.2) * detailWeight;
-          r += microDelta * 1.06;
-          g += microDelta * 0.98;
-          b += microDelta * 0.88;
-        }
-
-        const invN = 1.0 / Math.hypot(nx, ny, nz);
-        const nnx = nx * invN;
-        const nny = ny * invN;
-        const nnz = nz * invN;
-
-        const ndotl = Math.max(0, nnx * lx + nny * ly + nnz * lz);
-
-        // Sample drifting overhead cloud shadow with smooth bilinear interpolation
-        const cwx = wx + windDriftX + 0.06;
-        const cwz = wz + windDriftZ - 0.05;
-        const ctu = (foldMirror(cwx) * 0.5 + 0.5) * texMax;
-        const ctv = (foldMirror(cwz) * 0.5 + 0.5) * texMax;
-        const ciu = ctu | 0;
-        const civ = ctv | 0;
-        const cfu = ctu - ciu;
-        const cfv = ctv - civ;
-        const ci00 = civ * TEX_RES + ciu;
-        const ci10 = ciu < texMax ? ci00 + 1 : ci00;
-        const ci01 = civ < texMax ? ci00 + TEX_RES : ci00;
-        const ci11 = ciu < texMax && civ < texMax ? ci01 + 1 : ci01;
-        const cVal =
-          cloudMap[ci00] * (1 - cfu) * (1 - cfv) +
-          cloudMap[ci10] * cfu * (1 - cfv) +
-          cloudMap[ci01] * (1 - cfu) * cfv +
-          cloudMap[ci11] * cfu * cfv;
-        const cShad = (cVal * (1 / 255)) * cloudShadowStrength;
-        const shadowAtten = 1.0 - cShad;
-
-        const diff = (0.30 + 0.78 * ndotl * shadowAtten) * nightDim;
-        r *= diff;
-        g *= diff;
-        b *= diff;
-
-        if (!isNight && (isWater || (flags & FLAG_ICE_SPEC) !== 0)) {
-          const halfX = lx - rdx;
-          const halfY = ly + 0.25;
-          const halfZ = lz - rdz;
-          const hInv = 1.0 / Math.hypot(halfX, halfY, halfZ);
-          const ndoth = Math.max(0, nnx * halfX * hInv + nny * halfY * hInv + nnz * halfZ * hInv);
-          const isTholinSpec = !isWater && isTholinWorldSpec;
-          const spec =
-            (isWater
-              ? Math.pow(ndoth, 22) * 0.65
-              : Math.pow(ndoth, 14) * (isTholinSpec ? 0.18 : 0.32)) * shadowAtten;
-          r += (isTholinSpec ? 245 : 235) * spec;
-          g += (isTholinSpec ? 185 : 245) * spec;
-          b += (isTholinSpec ? 120 : 255) * spec;
-        }
-
-        // Distance aerial perspective haze
-        const fog = Math.min(1, Math.pow(zDist / 2.65, 1.35) * atmoHazeStrength);
-        r = r * (1 - fog) + skyHorizonRgb[0] * fog;
-        g = g * (1 - fog) + skyHorizonRgb[1] * fog;
-        b = b * (1 - fog) + skyHorizonRgb[2] * fog;
-
-        return { r, g, b };
-      };
-
-      for (let sx = 0; sx < W; sx++) {
-        const rdx = rayDirX[sx];
-        const rdz = rayDirZ[sx];
-
-        let maxY = H - 1;
-        let zDist = 0.011;
-        let dz = 0.0011;
-
-        let prevProjY = H;
-        let prevZDist = zDist;
-        let prevR = skyHorizonRgb[0];
-        let prevG = skyHorizonRgb[1];
-        let prevB = skyHorizonRgb[2];
-        let hasPrev = false;
-
-        while (zDist < 2.65 && maxY >= 0) {
-          const wx = cam.x + rdx * zDist;
-          const wz = cam.z + rdz * zDist;
-
-          const tu = (foldMirror(wx) * 0.5 + 0.5) * texMax;
-          const tv = (foldMirror(wz) * 0.5 + 0.5) * texMax;
+        // Evaluates shaded & micro-textured RGB at world coordinate (wx, wz) and distance zDist
+        const shadeWorldPoint = (
+          wx: number,
+          wz: number,
+          zDist: number,
+          rdx: number,
+          rdz: number
+        ): { r: number; g: number; b: number } => {
+          const fxFold = foldMirrorWithSign(wx);
+          const fzFold = foldMirrorWithSign(wz);
+          const tu = (fxFold.val * 0.5 + 0.5) * texMax;
+          const tv = (fzFold.val * 0.5 + 0.5) * texMax;
           const iu = tu | 0;
           const iv = tv | 0;
           const fu = tu - iu;
           const fv = tv - iv;
+
+          // Smoothstep Hermite weights for ultra-smooth sub-texel interpolation without linear Mach bands
+          const sfu = fu * fu * (3 - 2 * fu);
+          const sfv = fv * fv * (3 - 2 * fv);
 
           const i00 = iv * TEX_RES + iu;
           const i10 = iu < texMax ? i00 + 1 : i00;
           const i01 = iv < texMax ? i00 + TEX_RES : i00;
           const i11 = iu < texMax && iv < texMax ? i01 + 1 : i01;
 
-          const w00 = (1 - fu) * (1 - fv);
-          const w10 = fu * (1 - fv);
-          const w01 = (1 - fu) * fv;
-          const w11 = fu * fv;
+          const w00 = (1 - sfu) * (1 - sfv);
+          const w10 = sfu * (1 - sfv);
+          const w01 = (1 - sfu) * sfv;
+          const w11 = sfu * sfv;
 
-          const hSample =
-            (heightMap[i00] * w00 + heightMap[i10] * w10 + heightMap[i01] * w01 + heightMap[i11] * w11) *
-            verticalScale;
+          let r = texR[i00] * w00 + texR[i10] * w10 + texR[i01] * w01 + texR[i11] * w11;
+          let g = texG[i00] * w00 + texG[i10] * w10 + texG[i01] * w01 + texG[i11] * w11;
+          let b = texB[i00] * w00 + texB[i10] * w10 + texB[i01] * w01 + texB[i11] * w11;
 
-          const projY = clampedHorizon - ((hSample - camYScaled) * focalLen) / zDist;
-          const topY = Math.max(0, projY | 0);
+          const f00 = flagsMap[i00];
+          const f10 = flagsMap[i10];
+          const f01 = flagsMap[i01];
+          const f11 = flagsMap[i11];
+          const lavaBlend =
+            ((f00 & FLAG_LAVA) !== 0 ? w00 : 0) +
+            ((f10 & FLAG_LAVA) !== 0 ? w10 : 0) +
+            ((f01 & FLAG_LAVA) !== 0 ? w01 : 0) +
+            ((f11 & FLAG_LAVA) !== 0 ? w11 : 0);
+          const waterBlend =
+            ((f00 & FLAG_WATER) !== 0 ? w00 : 0) +
+            ((f10 & FLAG_WATER) !== 0 ? w10 : 0) +
+            ((f01 & FLAG_WATER) !== 0 ? w01 : 0) +
+            ((f11 & FLAG_WATER) !== 0 ? w11 : 0);
+          const flags = f00;
+          const isLava = lavaBlend > 0.5;
 
-          if (topY <= maxY) {
-            const cur = shadeWorldPoint(wx, wz, zDist, rdx, rdz);
-            const r = cur.r;
-            const g = cur.g;
-            const b = cur.b;
-
-            const span = maxY - topY + 1;
-            const useSubSpanDetail = hasPrev && span > 2 && zDist < 0.55 && prevProjY > projY;
-
-            for (let py = maxY; py >= topY; py--) {
-              let pr = r;
-              let pg = g;
-              let pb = b;
-              if (useSubSpanDetail) {
-                const tSpan = (py - projY) / Math.max(0.5, prevProjY - projY);
-                const tClamped = Math.max(0, Math.min(1, tSpan));
-                const subZ = zDist + (prevZDist - zDist) * tClamped;
-                const subShade = shadeWorldPoint(
-                  cam.x + rdx * subZ,
-                  cam.z + rdz * subZ,
-                  subZ,
-                  rdx,
-                  rdz
-                );
-                pr = subShade.r;
-                pg = subShade.g;
-                pb = subShade.b;
-              } else if (hasPrev && span > 1 && prevProjY > projY) {
-                const tSpan = (py - topY) / span;
-                pr = r + (prevR - r) * tSpan;
-                pg = g + (prevG - g) * tSpan;
-                pb = b + (prevB - b) * tSpan;
-              }
-              const ir = pr < 0 ? 0 : pr > 255 ? 255 : pr | 0;
-              const ig = pg < 0 ? 0 : pg > 255 ? 255 : pg | 0;
-              const ib = pb < 0 ? 0 : pb > 255 ? 255 : pb | 0;
-              colorBuffer[py * W + sx] = (255 << 24) | (ib << 16) | (ig << 8) | ir;
-            }
-
-            maxY = topY - 1;
-            prevProjY = projY;
-            prevZDist = zDist;
-            prevR = r;
-            prevG = g;
-            prevB = b;
-            hasPrev = true;
-          } else if (!hasPrev) {
-            prevProjY = projY;
-            prevZDist = zDist;
+          if (isLava) {
+            const pulse = Math.sin(wx * 45 + wz * 45 + timeSec * 3.5) * 18;
+            r = Math.min(255, r + pulse);
+            g = Math.min(255, Math.max(0, g + pulse * 0.8));
+            return { r, g, b };
           }
 
-          zDist += dz;
-          dz += 0.000052;
+          let nx =
+            (normXMap[i00] * w00 + normXMap[i10] * w10 + normXMap[i01] * w01 + normXMap[i11] * w11) *
+            (1 / 42) *
+            fxFold.sign;
+          let nz =
+            (normZMap[i00] * w00 + normZMap[i10] * w10 + normZMap[i01] * w01 + normZMap[i11] * w11) *
+            (1 / 42) *
+            fzFold.sign;
+          const ny = 1.0;
+
+          const isWater = waterBlend > 0.5;
+          if (isWater) {
+            const waveAnim1 = Math.sin(wx * 95 + wz * 55 + timeSec * 2.8);
+            const waveAnim2 = Math.cos(wx * 60 - wz * 85 - timeSec * 2.2);
+            nx += waveAnim1 * 0.32;
+            nz += waveAnim2 * 0.32;
+          } else if (zDist < 1.1) {
+            const fade = 1.0 - zDist * (1 / 1.1);
+            const detailWeight = fade * fade;
+
+            const p1 = wx * 215.0 + wz * 135.0 + Math.sin(wz * 85.0 - wx * 62.0) * 1.4;
+            const p2 = wx * 480.0 - wz * 390.0 + Math.cos(wx * 195.0 + wz * 170.0) * 1.1;
+            const p3 = (wx + wz) * 890.0 + Math.sin(wx * 510.0 - wz * 460.0) * 0.9;
+
+            const s1 = Math.sin(p1);
+            const c1 = Math.cos(p1);
+            const s2 = Math.sin(p2);
+            const c2 = Math.cos(p2);
+            const s3 = Math.sin(p3);
+
+            nx += (c1 * 0.22 + c2 * 0.15 + s3 * 0.08) * detailWeight;
+            nz += (s1 * 0.18 - s2 * 0.15 + s3 * 0.08) * detailWeight;
+
+            const microDelta = (s1 * 6.5 + s2 * 4.8 + s3 * 3.2) * detailWeight;
+            r += microDelta * 1.06;
+            g += microDelta * 0.98;
+            b += microDelta * 0.88;
+          }
+
+          const invN = 1.0 / Math.hypot(nx, ny, nz);
+          const nnx = nx * invN;
+          const nny = ny * invN;
+          const nnz = nz * invN;
+
+          const ndotl = Math.max(0, nnx * lx + nny * ly + nnz * lz);
+
+          const cwx = wx + windDriftX + 0.06;
+          const cwz = wz + windDriftZ - 0.05;
+          const ctu = (foldMirror(cwx) * 0.5 + 0.5) * texMax;
+          const ctv = (foldMirror(cwz) * 0.5 + 0.5) * texMax;
+          const ciu = ctu | 0;
+          const civ = ctv | 0;
+          const cfu = ctu - ciu;
+          const cfv = ctv - civ;
+          const ci00 = civ * TEX_RES + ciu;
+          const ci10 = ciu < texMax ? ci00 + 1 : ci00;
+          const ci01 = civ < texMax ? ci00 + TEX_RES : ci00;
+          const ci11 = ciu < texMax && civ < texMax ? ci01 + 1 : ci01;
+          const cVal =
+            cloudMap[ci00] * (1 - cfu) * (1 - cfv) +
+            cloudMap[ci10] * cfu * (1 - cfv) +
+            cloudMap[ci01] * (1 - cfu) * cfv +
+            cloudMap[ci11] * cfu * cfv;
+          const cShad = (cVal * (1 / 255)) * cloudShadowStrength;
+          const shadowAtten = 1.0 - cShad;
+
+          const diff = (0.30 + 0.78 * ndotl * shadowAtten) * nightDim;
+          r *= diff;
+          g *= diff;
+          b *= diff;
+
+          if (!isNight && (isWater || (flags & FLAG_ICE_SPEC) !== 0)) {
+            const halfX = lx - rdx;
+            const halfY = ly + 0.25;
+            const halfZ = lz - rdz;
+            const hInv = 1.0 / Math.hypot(halfX, halfY, halfZ);
+            const ndoth = Math.max(0, nnx * halfX * hInv + nny * halfY * hInv + nnz * halfZ * hInv);
+            const isTholinSpec = !isWater && isTholinWorldSpec;
+            const spec =
+              (isWater
+                ? Math.pow(ndoth, 22) * 0.65
+                : Math.pow(ndoth, 14) * (isTholinSpec ? 0.18 : 0.32)) * shadowAtten;
+            r += (isTholinSpec ? 245 : 235) * spec;
+            g += (isTholinSpec ? 185 : 245) * spec;
+            b += (isTholinSpec ? 120 : 255) * spec;
+          }
+
+          const fog = Math.min(1, Math.pow(zDist / 2.65, 1.35) * atmoHazeStrength);
+          r = r * (1 - fog) + skyHorizonRgb[0] * fog;
+          g = g * (1 - fog) + skyHorizonRgb[1] * fog;
+          b = b * (1 - fog) + skyHorizonRgb[2] * fog;
+
+          return { r, g, b };
+        };
+
+        for (let sx = 0; sx < W; sx++) {
+          const rdx = rayDirX[sx];
+          const rdz = rayDirZ[sx];
+
+          let maxY = H - 1;
+          let zDist = 0.011;
+          let dz = 0.0011;
+
+          let prevProjY = H;
+          let prevZDist = zDist;
+          let prevR = skyHorizonRgb[0];
+          let prevG = skyHorizonRgb[1];
+          let prevB = skyHorizonRgb[2];
+          let hasPrev = false;
+
+          while (zDist < 2.65 && maxY >= 0) {
+            const wx = cam.x + rdx * zDist;
+            const wz = cam.z + rdz * zDist;
+
+            const tu = (foldMirror(wx) * 0.5 + 0.5) * texMax;
+            const tv = (foldMirror(wz) * 0.5 + 0.5) * texMax;
+            const iu = tu | 0;
+            const iv = tv | 0;
+            const fu = tu - iu;
+            const fv = tv - iv;
+
+            const i00 = iv * TEX_RES + iu;
+            const i10 = iu < texMax ? i00 + 1 : i00;
+            const i01 = iv < texMax ? i00 + TEX_RES : i00;
+            const i11 = iu < texMax && iv < texMax ? i01 + 1 : i01;
+
+            const w00 = (1 - fu) * (1 - fv);
+            const w10 = fu * (1 - fv);
+            const w01 = (1 - fu) * fv;
+            const w11 = fu * fv;
+
+            const hSample =
+              (heightMap[i00] * w00 + heightMap[i10] * w10 + heightMap[i01] * w01 + heightMap[i11] * w11) *
+              verticalScale;
+
+            const projY = clampedHorizon - ((hSample - camYScaled) * focalLen) / zDist;
+            const topY = Math.max(0, projY | 0);
+
+            if (topY <= maxY) {
+              const cur = shadeWorldPoint(wx, wz, zDist, rdx, rdz);
+              const r = cur.r;
+              const g = cur.g;
+              const b = cur.b;
+
+              const span = maxY - topY + 1;
+              const useSubSpanDetail = hasPrev && span > 2 && zDist < 0.55 && prevProjY > projY;
+
+              for (let py = maxY; py >= topY; py--) {
+                let pr = r;
+                let pg = g;
+                let pb = b;
+                if (useSubSpanDetail) {
+                  const tSpan = (py - projY) / Math.max(0.5, prevProjY - projY);
+                  const tClamped = Math.max(0, Math.min(1, tSpan));
+                  const subZ = zDist + (prevZDist - zDist) * tClamped;
+                  const subShade = shadeWorldPoint(
+                    cam.x + rdx * subZ,
+                    cam.z + rdz * subZ,
+                    subZ,
+                    rdx,
+                    rdz
+                  );
+                  pr = subShade.r;
+                  pg = subShade.g;
+                  pb = subShade.b;
+                } else if (hasPrev && span > 1 && prevProjY > projY) {
+                  const tSpan = (py - topY) / span;
+                  pr = r + (prevR - r) * tSpan;
+                  pg = g + (prevG - g) * tSpan;
+                  pb = b + (prevB - b) * tSpan;
+                }
+                const ir = pr < 0 ? 0 : pr > 255 ? 255 : pr | 0;
+                const ig = pg < 0 ? 0 : pg > 255 ? 255 : pg | 0;
+                const ib = pb < 0 ? 0 : pb > 255 ? 255 : pb | 0;
+                colorBuffer[py * W + sx] = (255 << 24) | (ib << 16) | (ig << 8) | ir;
+              }
+
+              maxY = topY - 1;
+              prevProjY = projY;
+              prevZDist = zDist;
+              prevR = r;
+              prevG = g;
+              prevB = b;
+              hasPrev = true;
+            } else if (!hasPrev) {
+              prevProjY = projY;
+              prevZDist = zDist;
+            }
+
+            zDist += dz;
+            dz += 0.000052;
+          }
         }
       }
 
