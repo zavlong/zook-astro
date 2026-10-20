@@ -7,13 +7,18 @@
       <stop offset="70%" stop-color="#6b21a8" stop-opacity="0.18" />
       <stop offset="100%" stop-color="#3b0764" stop-opacity="0" />
     </radialGradient>
-    <radialGradient id="dwarf-core" cx="0" cy="0" r="11" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#e9d5ff" />
-      <stop offset="50%" stop-color="#9333ea" />
-      <stop offset="100%" stop-color="#581c87" />
+    <radialGradient id="dwarf-core" cx="-2.8" cy="-2.8" r="14" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#f5d0fe" />
+      <stop offset="48%" stop-color="#a855f7" />
+      <stop offset="82%" stop-color="#6b21a8" />
+      <stop offset="100%" stop-color="#3b0764" />
     </radialGradient>
   </defs>
   <circle cx="0" cy="0" r="38" fill="url(#dwarf-glow)" />
-  <circle cx="0" cy="0" r="11" fill="url(#dwarf-core)" stroke="#d8b4fe" stroke-width="0.7" />
-  <circle cx="0" cy="0" r="3.5" fill="#f3e8ff" />
+  <circle cx="0" cy="0" r="11" fill="url(#dwarf-core)" stroke="#d8b4fe" stroke-width="0.65" />
+  <!-- Brown Dwarf Cloud/Vortex & Magnetic Spot complexes -->
+  <ellipse cx="-2.8" cy="-2.2" rx="2.3" ry="1.5" transform="rotate(-14 -2.8 -2.2)" fill="#4c1d95" opacity="0.88" />
+  <ellipse cx="-2.8" cy="-2.2" rx="1.2" ry="0.8" transform="rotate(-14 -2.8 -2.2)" fill="#1e0538" opacity="0.95" />
+  <ellipse cx="3.4" cy="2.4" rx="2.0" ry="1.35" transform="rotate(18 3.4 2.4)" fill="#4c1d95" opacity="0.85" />
+  <ellipse cx="3.4" cy="2.4" rx="1.05" ry="0.7" transform="rotate(18 3.4 2.4)" fill="#1e0538" opacity="0.94" />
 </svg>

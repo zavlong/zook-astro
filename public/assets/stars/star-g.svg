@@ -2,22 +2,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100" width="100" height="100">
   <defs>
     <radialGradient id="g-glow" cx="0" cy="0" r="48" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#fffbeb" stop-opacity="1" />
-      <stop offset="26%" stop-color="#fde047" stop-opacity="0.88" />
-      <stop offset="55%" stop-color="#f59e0b" stop-opacity="0.48" />
-      <stop offset="84%" stop-color="#d97706" stop-opacity="0.15" />
-      <stop offset="100%" stop-color="#b45309" stop-opacity="0" />
+      <stop offset="0%" stop-color="#fef08a" stop-opacity="0.95" />
+      <stop offset="28%" stop-color="#facc15" stop-opacity="0.82" />
+      <stop offset="56%" stop-color="#f59e0b" stop-opacity="0.46" />
+      <stop offset="82%" stop-color="#d97706" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="#92400e" stop-opacity="0" />
     </radialGradient>
-    <radialGradient id="g-core" cx="0" cy="0" r="14" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#ffffff" />
-      <stop offset="45%" stop-color="#fef08a" />
-      <stop offset="100%" stop-color="#facc15" />
+    <radialGradient id="g-core" cx="-3.5" cy="-3.5" r="17" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fef9c3" />
+      <stop offset="52%" stop-color="#fbbf24" />
+      <stop offset="84%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#b45309" />
     </radialGradient>
   </defs>
   <circle cx="0" cy="0" r="46" fill="url(#g-glow)" />
-  <!-- Solar flare spikes -->
-  <path d="M -24 0 Q 0 -0.7 24 0 Q 0 0.7 -24 0 Z" fill="#fef08a" opacity="0.55" />
-  <path d="M 0 -24 Q -0.7 0 0 24 Q 0.7 0 0 -24 Z" fill="#fef08a" opacity="0.55" />
-  <circle cx="0" cy="0" r="14" fill="url(#g-core)" stroke="#fef9c3" stroke-width="0.8" />
-  <circle cx="0" cy="0" r="6" fill="#ffffff" />
+  <circle cx="0" cy="0" r="14" fill="url(#g-core)" stroke="#fde047" stroke-width="0.65" />
+  <!-- Bright magnetic faculae & granulation network -->
+  <ellipse cx="-5.2" cy="-2.8" rx="3.4" ry="2.2" transform="rotate(-18 -5.2 -2.8)" fill="#fef9c3" opacity="0.45" />
+  <ellipse cx="5.8" cy="3.4" rx="2.9" ry="1.9" transform="rotate(22 5.8 3.4)" fill="#fef9c3" opacity="0.4" />
+  <!-- Bipolar Sunspot Group 1 (North-West Active Belt: Penumbra + Umbra) -->
+  <ellipse cx="-4.6" cy="-2.6" rx="2.4" ry="1.65" transform="rotate(-18 -4.6 -2.6)" fill="#853b11" opacity="0.88" />
+  <ellipse cx="-4.6" cy="-2.6" rx="1.25" ry="0.88" transform="rotate(-18 -4.6 -2.6)" fill="#260e04" opacity="0.95" />
+  <ellipse cx="-1.6" cy="-3.5" rx="1.45" ry="1.05" transform="rotate(-12 -1.6 -3.5)" fill="#853b11" opacity="0.82" />
+  <ellipse cx="-1.6" cy="-3.5" rx="0.72" ry="0.52" transform="rotate(-12 -1.6 -3.5)" fill="#260e04" opacity="0.92" />
+  <!-- Bipolar Sunspot Group 2 (South-East Active Belt: Penumbra + Umbra) -->
+  <ellipse cx="5.2" cy="3.2" rx="2.1" ry="1.45" transform="rotate(22 5.2 3.2)" fill="#853b11" opacity="0.86" />
+  <ellipse cx="5.2" cy="3.2" rx="1.08" ry="0.75" transform="rotate(22 5.2 3.2)" fill="#260e04" opacity="0.95" />
+  <ellipse cx="7.6" cy="2.3" rx="1.2" ry="0.85" transform="rotate(26 7.6 2.3)" fill="#853b11" opacity="0.8" />
+  <ellipse cx="7.6" cy="2.3" rx="0.6" ry="0.42" transform="rotate(26 7.6 2.3)" fill="#260e04" opacity="0.9" />
 </svg>

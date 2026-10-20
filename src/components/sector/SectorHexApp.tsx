@@ -39,7 +39,11 @@ import {
   isBlackHoleStar,
   isSupermassiveBlackHole,
 } from '../../core/generation/sectorHex';
-import { getStarAssetPath, type StarAssetDescriptor } from '../../core/generation/starAssets';
+import {
+  getProceduralStarSpriteDataUrl,
+  getStarAssetPath,
+  type StarAssetDescriptor,
+} from '../../core/generation/starAssets';
 import { BlackHoleIcon } from '../ui/BlackHoleIcon';
 import { GenerationLoadingOverlay, yieldToMainThread } from '../ui/GenerationLoadingOverlay';
 import {
@@ -2979,9 +2983,18 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             <div
               className="absolute top-4 left-4 bg-slate-950/90 backdrop-blur-md border border-slate-700/80 px-3 py-2 rounded-xl text-xs font-mono shadow-2xl pointer-events-none z-10 flex items-center gap-3 animate-fade-in"
             >
-              <div
-                className="w-3.5 h-3.5 rounded-full border border-white/60 shadow"
-                style={{ backgroundColor: hoveredSystem.colorHex }}
+              <img
+                src={getProceduralStarSpriteDataUrl(
+                  hoveredSystem.sysResult?.hierarchy?.stars?.[0] || {
+                    spectralType: hoveredSystem.primaryClass,
+                    mass: hoveredSystem.primaryMass,
+                    Teff: hoveredSystem.teff,
+                    colorHex: hoveredSystem.colorHex,
+                  },
+                  48
+                )}
+                alt=""
+                className="w-5 h-5 shrink-0"
               />
               <div>
                 <div className="text-white font-bold flex items-center gap-2">
@@ -3057,12 +3070,18 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                         size={32}
                       />
                     ) : (
-                      <div
-                        className="w-6 h-6 rounded-full shadow-inner"
-                        style={{
-                          backgroundColor: selectedSystem.colorHex,
-                          boxShadow: `0 0 16px ${selectedSystem.glowColor}`,
-                        }}
+                      <img
+                        src={getProceduralStarSpriteDataUrl(
+                          selectedSystem.sysResult?.hierarchy?.stars?.[0] || {
+                            spectralType: selectedSystem.primaryClass,
+                            mass: selectedSystem.primaryMass,
+                            Teff: selectedSystem.teff,
+                            colorHex: selectedSystem.colorHex,
+                          },
+                          96
+                        )}
+                        alt={selectedSystem.name}
+                        className="w-9 h-9 select-none"
                       />
                     )}
                     {selectedSystem.candidateHabitable && (
@@ -3428,9 +3447,10 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                                   {isBH ? (
                                     <BlackHoleIcon isSupermassive={cs.mass > 999999} size={15} />
                                   ) : (
-                                    <span
-                                      className="w-2 h-2 rounded-full shrink-0 shadow-sm"
-                                      style={{ backgroundColor: cs.colorHex }}
+                                    <img
+                                      src={getProceduralStarSpriteDataUrl(cs, 40)}
+                                      alt=""
+                                      className="w-4 h-4 shrink-0"
                                     />
                                   )}
                                   <span>

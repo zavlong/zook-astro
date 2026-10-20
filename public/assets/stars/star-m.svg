@@ -2,19 +2,31 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100" width="100" height="100">
   <defs>
     <radialGradient id="m-glow" cx="0" cy="0" r="48" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#fef2f2" stop-opacity="1" />
-      <stop offset="25%" stop-color="#fca5a5" stop-opacity="0.88" />
-      <stop offset="56%" stop-color="#ef4444" stop-opacity="0.52" />
+      <stop offset="0%" stop-color="#fecaca" stop-opacity="0.95" />
+      <stop offset="26%" stop-color="#f87171" stop-opacity="0.85" />
+      <stop offset="56%" stop-color="#ef4444" stop-opacity="0.50" />
       <stop offset="82%" stop-color="#b91c1c" stop-opacity="0.18" />
       <stop offset="100%" stop-color="#7f1d1d" stop-opacity="0" />
     </radialGradient>
-    <radialGradient id="m-core" cx="0" cy="0" r="14" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#fff1f2" />
-      <stop offset="50%" stop-color="#f87171" />
-      <stop offset="100%" stop-color="#dc2626" />
+    <radialGradient id="m-core" cx="-3.5" cy="-3.5" r="17" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffd4b8" />
+      <stop offset="45%" stop-color="#f97316" />
+      <stop offset="78%" stop-color="#dc2626" />
+      <stop offset="100%" stop-color="#7f1d1d" />
     </radialGradient>
   </defs>
   <circle cx="0" cy="0" r="46" fill="url(#m-glow)" />
-  <circle cx="0" cy="0" r="14" fill="url(#m-core)" stroke="#fca5a5" stroke-width="0.75" />
-  <circle cx="0" cy="0" r="5" fill="#ffffff" />
+  <circle cx="0" cy="0" r="14" fill="url(#m-core)" stroke="#fca5a5" stroke-width="0.7" />
+  <!-- Convective supergranule faculae -->
+  <ellipse cx="-3.8" cy="-3.6" rx="4.2" ry="2.8" transform="rotate(-16 -3.8 -3.6)" fill="#ffedd5" opacity="0.38" />
+  <ellipse cx="4.6" cy="2.8" rx="3.8" ry="2.5" transform="rotate(18 4.6 2.8)" fill="#ffedd5" opacity="0.34" />
+  <!-- Heavy M-Dwarf Magnetic Starspot Complexes (Penumbra + Umbra) -->
+  <ellipse cx="-3.6" cy="-3.4" rx="3.2" ry="2.2" transform="rotate(-16 -3.6 -3.4)" fill="#6b0f18" opacity="0.92" />
+  <ellipse cx="-3.6" cy="-3.4" rx="1.8" ry="1.25" transform="rotate(-16 -3.6 -3.4)" fill="#1f0406" opacity="0.96" />
+  <ellipse cx="0.4" cy="-4.6" rx="1.9" ry="1.3" transform="rotate(-8 0.4 -4.6)" fill="#6b0f18" opacity="0.88" />
+  <ellipse cx="0.4" cy="-4.6" rx="1.02" ry="0.7" transform="rotate(-8 0.4 -4.6)" fill="#1f0406" opacity="0.95" />
+  <ellipse cx="4.5" cy="3.0" rx="2.9" ry="2.0" transform="rotate(18 4.5 3.0)" fill="#6b0f18" opacity="0.9" />
+  <ellipse cx="4.5" cy="3.0" rx="1.6" ry="1.1" transform="rotate(18 4.5 3.0)" fill="#1f0406" opacity="0.96" />
+  <ellipse cx="-4.8" cy="4.5" rx="2.1" ry="1.45" transform="rotate(-22 -4.8 4.5)" fill="#6b0f18" opacity="0.86" />
+  <ellipse cx="-4.8" cy="4.5" rx="1.1" ry="0.76" transform="rotate(-22 -4.8 4.5)" fill="#1f0406" opacity="0.94" />
 </svg>

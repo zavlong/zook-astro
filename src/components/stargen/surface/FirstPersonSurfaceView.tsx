@@ -22,6 +22,7 @@ import {
   PlanetaryGoldbergGrid,
   createNeighborAwareTileEvaluator,
 } from './goldbergTileGrid';
+import { getStarSpectralPalette } from '../../../core/generation/starAssets';
 
 interface FirstPersonSurfaceViewProps {
   surfaceModel: PlanetarySurfaceModel;
@@ -2076,48 +2077,110 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         return { sx, sy };
       };
 
-      // Stars at night or in vacuum
+      // Stars at night or in vacuum (with Harvard spectral color distribution)
       if (!hasAtmosphere || isNight || pBarAtmo < 0.08) {
-        ctx.fillStyle = '#ffffff';
+        const bgStarColors = ['#93c5fd', '#e0f2fe', '#fef9c3', '#fde047', '#fdba74', '#fca5a5'];
         const starCount = isNight || !hasAtmosphere ? 150 : 60;
         for (let i = 0; i < starCount; i++) {
           const sAz = (i * 2.39996) % (Math.PI * 2);
           const sAlt = 0.05 + ((i * 0.713) % 0.85);
           const sp = projectSkyAzAlt(sAz, sAlt);
           if (sp && sp.sy > 0 && sp.sy < clampedHorizon - 4) {
-            ctx.globalAlpha = 0.3 + ((i * 19) % 65) / 100;
-            const sz = i % 3 === 0 ? 1.5 : 0.9;
+            ctx.fillStyle = bgStarColors[i % bgStarColors.length];
+            ctx.globalAlpha = 0.35 + ((i * 19) % 65) / 100;
+            const sz = i % 3 === 0 ? 1.6 : 1.0;
             ctx.fillRect(sp.sx, sp.sy, sz, sz);
           }
         }
         ctx.globalAlpha = 1.0;
       }
 
-      // Host Star (Sun) in the sky
+      // Host Star (Sun) in the sky: colored limb-darkened photosphere with sunspots (umbra + penumbra + faculae)
       if (!isNight) {
         const sunPos = projectSkyAzAlt(sunAzimuth + Math.cos(radTOD) * 0.8, Math.max(0.05, sunAlt * 0.75));
         if (sunPos && sunPos.sy < clampedHorizon + 20) {
-          const starRad = Math.max(6, surfaceModel.starAngularDiameterDeg * 16);
+          const starRad = Math.max(6.5, surfaceModel.starAngularDiameterDeg * 16);
+          const starPal = getStarSpectralPalette({
+            Teff: surfaceModel.starTeff,
+            colorHex: surfaceModel.starColorHex,
+          });
+
           const glare = ctx.createRadialGradient(
             sunPos.sx,
             sunPos.sy,
-            starRad * 0.4,
+            starRad * 0.45,
             sunPos.sx,
             sunPos.sy,
             starRad * 5.5
           );
-          glare.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
-          glare.addColorStop(0.25, surfaceModel.starColorHex);
+          glare.addColorStop(0, starPal.coreHex);
+          glare.addColorStop(0.22, surfaceModel.starColorHex);
+          glare.addColorStop(0.55, `${starPal.limbHex}55`);
           glare.addColorStop(1, 'rgba(255, 255, 255, 0)');
           ctx.fillStyle = glare;
           ctx.beginPath();
           ctx.arc(sunPos.sx, sunPos.sy, starRad * 5.5, 0, Math.PI * 2);
           ctx.fill();
 
-          ctx.fillStyle = '#ffffff';
+          // Limb-darkened colored solar photosphere disc
+          const discGrad = ctx.createRadialGradient(
+            sunPos.sx - starRad * 0.2,
+            sunPos.sy - starRad * 0.2,
+            starRad * 0.08,
+            sunPos.sx,
+            sunPos.sy,
+            starRad
+          );
+          discGrad.addColorStop(0, starPal.coreHex);
+          discGrad.addColorStop(0.62, starPal.baseHex);
+          discGrad.addColorStop(1, starPal.limbHex);
+
+          ctx.save();
           ctx.beginPath();
           ctx.arc(sunPos.sx, sunPos.sy, starRad, 0, Math.PI * 2);
+          ctx.fillStyle = discGrad;
           ctx.fill();
+          ctx.clip();
+
+          // Render bipolar sunspot groups (faculae + penumbra + umbra) across the solar disc
+          if (starPal.spotCoverage > 0.1) {
+            const spotRot = radTOD * 0.18;
+            const spotDefs = [
+              { dx: -0.28, dy: -0.18, r: 0.15, tilt: 0.25 },
+              { dx: -0.11, dy: -0.22, r: 0.095, tilt: 0.2 },
+              { dx: 0.32, dy: 0.22, r: 0.13, tilt: -0.3 },
+              { dx: 0.45, dy: 0.18, r: 0.08, tilt: -0.25 },
+            ];
+            for (let s = 0; s < spotDefs.length; s++) {
+              const sd = spotDefs[s];
+              const sx = sunPos.sx + (sd.dx * Math.cos(spotRot) - sd.dy * 0.25 * Math.sin(spotRot)) * starRad;
+              const sy = sunPos.sy + sd.dy * starRad;
+              const sr = Math.max(1.1, sd.r * starRad * Math.min(1.25, 0.75 + starPal.spotCoverage * 0.3));
+
+              // Bright magnetic faculae ring
+              ctx.fillStyle = starPal.faculaeHex;
+              ctx.globalAlpha = 0.35;
+              ctx.beginPath();
+              ctx.ellipse(sx, sy, sr * 1.45, sr * 1.1, sd.tilt, 0, Math.PI * 2);
+              ctx.fill();
+
+              // Penumbra
+              ctx.fillStyle = starPal.penumbraHex;
+              ctx.globalAlpha = 0.82;
+              ctx.beginPath();
+              ctx.ellipse(sx, sy, sr, sr * 0.76, sd.tilt, 0, Math.PI * 2);
+              ctx.fill();
+
+              // Umbra core
+              ctx.fillStyle = starPal.umbraHex;
+              ctx.globalAlpha = 0.94;
+              ctx.beginPath();
+              ctx.ellipse(sx, sy, sr * 0.52, sr * 0.4, sd.tilt, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            ctx.globalAlpha = 1.0;
+          }
+          ctx.restore();
         }
       }
 

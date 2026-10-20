@@ -20,6 +20,7 @@ import {
   PlanetaryGoldbergGrid,
   createNeighborAwareTileEvaluator,
 } from './goldbergTileGrid';
+import { getStarSpectralPalette } from '../../../core/generation/starAssets';
 
 interface LocalTileTerrainViewProps {
   surfaceModel: PlanetarySurfaceModel;
@@ -1674,33 +1675,95 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, W, H);
 
-    // Stars in vacuum or night sky
+    // Stars in vacuum or night sky (with Harvard spectral color distribution)
     if (!hasAtmosphere || isNight || pBarAtmo < 0.08) {
-      ctx.fillStyle = '#ffffff';
+      const bgStarColors = ['#93c5fd', '#e0f2fe', '#fef9c3', '#fde047', '#fdba74', '#fca5a5'];
       const starCount = isNight || !hasAtmosphere ? 140 : 55;
       for (let i = 0; i < starCount; i++) {
         const sx = ((i * 137.5 + rotYaw * 120) % W + W) % W;
         const sy = (i * 89.3) % (H * 0.62);
-        const sSize = i % 3 === 0 ? 1.4 : 0.8;
-        ctx.globalAlpha = 0.25 + ((i * 19) % 65) / 100;
+        const sSize = i % 3 === 0 ? 1.5 : 0.95;
+        ctx.fillStyle = bgStarColors[i % bgStarColors.length];
+        ctx.globalAlpha = 0.3 + ((i * 19) % 65) / 100;
         ctx.fillRect(sx, sy, sSize, sSize);
       }
       ctx.globalAlpha = 1.0;
     }
 
-    // Host Star & Atmospheric Scattering Halo in the upper sky
+    // Host Star & Atmospheric Scattering Halo in the upper sky (colored limb-darkened photosphere with sunspots)
     if (!isNight) {
       const sunX = W * 0.5 + Math.cos(radTOD) * (W * 0.34);
       const sunY = H * 0.22 - sunAlt * (H * 0.14);
-      const starRad = Math.max(5, surfaceModel.starAngularDiameterDeg * 14);
-      const glare = ctx.createRadialGradient(sunX, sunY, starRad * 0.4, sunX, sunY, starRad * 5.5);
-      glare.addColorStop(0, 'rgba(255, 255, 255, 0.92)');
-      glare.addColorStop(0.25, surfaceModel.starColorHex);
+      const starRad = Math.max(6, surfaceModel.starAngularDiameterDeg * 14);
+      const starPal = getStarSpectralPalette({
+        Teff: surfaceModel.starTeff,
+        colorHex: surfaceModel.starColorHex,
+      });
+
+      const glare = ctx.createRadialGradient(sunX, sunY, starRad * 0.45, sunX, sunY, starRad * 5.5);
+      glare.addColorStop(0, starPal.coreHex);
+      glare.addColorStop(0.22, surfaceModel.starColorHex);
+      glare.addColorStop(0.55, `${starPal.limbHex}55`);
       glare.addColorStop(1, 'rgba(255, 255, 255, 0)');
       ctx.fillStyle = glare;
       ctx.beginPath();
       ctx.arc(sunX, sunY, starRad * 5.5, 0, Math.PI * 2);
       ctx.fill();
+
+      const discGrad = ctx.createRadialGradient(
+        sunX - starRad * 0.2,
+        sunY - starRad * 0.2,
+        starRad * 0.08,
+        sunX,
+        sunY,
+        starRad
+      );
+      discGrad.addColorStop(0, starPal.coreHex);
+      discGrad.addColorStop(0.62, starPal.baseHex);
+      discGrad.addColorStop(1, starPal.limbHex);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, starRad, 0, Math.PI * 2);
+      ctx.fillStyle = discGrad;
+      ctx.fill();
+      ctx.clip();
+
+      if (starPal.spotCoverage > 0.1) {
+        const spotRot = radTOD * 0.18;
+        const spotDefs = [
+          { dx: -0.28, dy: -0.18, r: 0.15, tilt: 0.25 },
+          { dx: -0.11, dy: -0.22, r: 0.095, tilt: 0.2 },
+          { dx: 0.32, dy: 0.22, r: 0.13, tilt: -0.3 },
+          { dx: 0.45, dy: 0.18, r: 0.08, tilt: -0.25 },
+        ];
+        for (let s = 0; s < spotDefs.length; s++) {
+          const sd = spotDefs[s];
+          const sx = sunX + (sd.dx * Math.cos(spotRot) - sd.dy * 0.25 * Math.sin(spotRot)) * starRad;
+          const sy = sunY + sd.dy * starRad;
+          const sr = Math.max(1.0, sd.r * starRad * Math.min(1.25, 0.75 + starPal.spotCoverage * 0.3));
+
+          ctx.fillStyle = starPal.faculaeHex;
+          ctx.globalAlpha = 0.35;
+          ctx.beginPath();
+          ctx.ellipse(sx, sy, sr * 1.45, sr * 1.1, sd.tilt, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = starPal.penumbraHex;
+          ctx.globalAlpha = 0.82;
+          ctx.beginPath();
+          ctx.ellipse(sx, sy, sr, sr * 0.76, sd.tilt, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = starPal.umbraHex;
+          ctx.globalAlpha = 0.94;
+          ctx.beginPath();
+          ctx.ellipse(sx, sy, sr * 0.52, sr * 0.4, sd.tilt, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1.0;
+      }
+      ctx.restore();
     }
 
     // 2. Camera & Light setup

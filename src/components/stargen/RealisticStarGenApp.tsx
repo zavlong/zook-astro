@@ -44,6 +44,7 @@ import {
 import {
   getProceduralPlanetIconDataUrl,
 } from './ProceduralPlanetPortrait';
+import { getProceduralStarSpriteDataUrl } from '../../core/generation/starAssets';
 import { isBlackHoleStar } from '../../core/generation/sectorHex';
 import { BlackHoleIcon } from '../ui/BlackHoleIcon';
 import { GenerationLoadingOverlay, yieldToMainThread } from '../ui/GenerationLoadingOverlay';
@@ -1359,6 +1360,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             </g>
                           );
                         }
+                        const starSpriteSize = (sRad / 0.42) * 2;
+                        const starSpriteUrl = getProceduralStarSpriteDataUrl(st, 96);
                         return (
                           <g>
                             <circle
@@ -1368,13 +1371,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                               fill={st.colorHex}
                               fillOpacity={0.22}
                             />
-                            <circle
-                              cx={74}
-                              cy={midY}
-                              r={sRad}
-                              fill={st.colorHex}
-                              stroke="#ffffff"
-                              strokeWidth={1}
+                            <image
+                              href={starSpriteUrl}
+                              x={74 - starSpriteSize / 2}
+                              y={midY - starSpriteSize / 2}
+                              width={starSpriteSize}
+                              height={starSpriteSize}
+                              preserveAspectRatio="xMidYMid meet"
                             />
                           </g>
                         );
@@ -2221,9 +2224,10 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                   }}
                   className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-mono flex items-center gap-1.5 cursor-pointer transition"
                 >
-                  <span
-                    className="w-2 h-2 rounded-full"
-                    style={{ backgroundColor: st.colorHex }}
+                  <img
+                    src={getProceduralStarSpriteDataUrl(st, 40)}
+                    alt=""
+                    className="w-3.5 h-3.5 shrink-0"
                   />
                   Star {st.label}
                 </button>
@@ -2634,9 +2638,10 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                           {isBH ? (
                             <BlackHoleIcon isSupermassive={cs.mass > 999999} size={16} />
                           ) : (
-                            <span
-                              className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
-                              style={{ backgroundColor: cs.colorHex }}
+                            <img
+                              src={getProceduralStarSpriteDataUrl(cs, 40)}
+                              alt=""
+                              className="w-4 h-4 shrink-0"
                             />
                           )}
                           <span>
@@ -2776,12 +2781,10 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                         title={`Star ${st.label} (${st.spectralType})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Double-Click: Open Detailed Stats`}
                       >
                         <div className="flex items-center gap-2 truncate">
-                          <span
-                            className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
-                            style={{
-                              backgroundColor: st.colorHex,
-                              boxShadow: `0 0 8px ${st.colorHex}88`,
-                            }}
+                          <img
+                            src={getProceduralStarSpriteDataUrl(st, 40)}
+                            alt=""
+                            className="w-4 h-4 shrink-0"
                           />
                           <span className="font-bold text-slate-200 group-hover:text-white truncate">
                             Star {st.label}
@@ -4942,6 +4945,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             </g>
                           );
                         }
+                        const starImgSize = (sRad / 0.42) * 2;
+                        const starSpriteUrl = getProceduralStarSpriteDataUrl(st, 168);
                         return (
                           <g>
                             {/* Corona halo glow */}
@@ -4955,17 +4960,17 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             <circle
                               cx={sProj.x}
                               cy={sProj.y}
-                              r={sRad * 1.4}
+                              r={sRad * 1.38}
                               fill={st.colorHex}
-                              fillOpacity={0.3}
+                              fillOpacity={0.28}
                             />
-                            <circle
-                              cx={sProj.x}
-                              cy={sProj.y}
-                              r={sRad}
-                              fill={`url(#${starGradId})`}
-                              stroke="#ffffff"
-                              strokeWidth={clamp(sRad * 0.08, 0.7, 2.2)}
+                            <image
+                              href={starSpriteUrl}
+                              x={sProj.x - starImgSize / 2}
+                              y={sProj.y - starImgSize / 2}
+                              width={starImgSize}
+                              height={starImgSize}
+                              preserveAspectRatio="xMidYMid meet"
                             />
                           </g>
                         );
