@@ -34,6 +34,31 @@ const R_JUP_EARTH = 11.209;
 const AU_R_EARTH = 23454.8;
 const DEUT_MIN = 13.0 / 1047.56;
 
+export interface CustomStarInput {
+  label?: string;
+  mass: number;
+  overrideMode?: 'auto' | 'custom';
+  category?: string;
+  spectralType?: string;
+  lumNum?: number;
+  radius?: number;
+  Teff?: number;
+  colorHex?: string;
+}
+
+export interface CustomBinarySplitInput {
+  a_AU: number;
+  e: number;
+}
+
+export interface CustomStellarConfig {
+  enabled: boolean;
+  nStars: 1 | 2 | 3 | 4;
+  trinaryTopology?: 'AB_C' | 'A_BC';
+  stars: CustomStarInput[];
+  splits: CustomBinarySplitInput[];
+}
+
 export interface StarGenParams {
   sysMass: number;
   age: number;
@@ -46,6 +71,7 @@ export interface StarGenParams {
   sectorColumns?: number;
   sectorRows?: number;
   empireId?: string;
+  customStellarConfig?: CustomStellarConfig;
 }
 
 export interface RealisticZoneInput {
@@ -695,6 +721,267 @@ export function buildHierarchy(
     if (iCD.pZone) zones.push(iCD.pZone);
     addLeaf(stars[3], iCD.sB);
     archName = 'Quadruple (2+2 Hierarchy)';
+  }
+
+  return { archName, stars, splits, zones };
+}
+
+/**
+ * Builds a RealisticHierarchyResult from user pre-programmed star data and binary splits,
+ * calculating Holman & Wiegert (1999) circumstellar/circumbinary planetary stability zones
+ * so the planetary generator only generates planets based on the given star data.
+ */
+export function buildCustomHierarchy(
+  config: CustomStellarConfig,
+  age: number,
+  feh: number
+): RealisticHierarchyResult {
+  const lbls = ['A', 'B', 'C', 'D'];
+  const nStars = clamp(config.nStars || 1, 1, 4);
+  const stars: RealisticStarNode[] = [];
+
+  for (let s = 0; s < nStars; s++) {
+    const lbl = lbls[s];
+    const inp = config.stars[s] || { mass: 1.0, overrideMode: 'auto' };
+    const safeMass = Math.max(0.005, Number(inp.mass) || 1.0);
+    const base = getStarStats(safeMass, age, feh, lbl);
+
+    if (inp.overrideMode === 'custom') {
+      const lumNum =
+        inp.lumNum !== undefined && Number(inp.lumNum) > 0
+          ? Number(inp.lumNum)
+          : base.lumNum;
+      const Teff =
+        inp.Teff !== undefined && Number(inp.Teff) > 0
+          ? Math.round(Number(inp.Teff))
+          : base.Teff;
+      const radius =
+        inp.radius !== undefined && Number(inp.radius) > 0
+          ? +Number(inp.radius).toFixed(4)
+          : +Math.max(
+              0.0001,
+              Math.sqrt(lumNum) * Math.pow(5778.0 / Math.max(300, Teff), 2)
+            ).toFixed(4);
+      const lg = +(4.438 + log10(safeMass) - 2.0 * log10(Math.max(1e-5, radius))).toFixed(2);
+      const spectralType = inp.spectralType?.trim() || base.spectralType;
+      const category = inp.category?.trim() || base.category;
+      const bdClass = category.includes('Brown Dwarf')
+        ? spectralType.charAt(0)
+        : undefined;
+      const colorHex =
+        inp.colorHex ||
+        (category.includes('Black Hole')
+          ? '#c084fc'
+          : category.includes('Neutron')
+          ? '#a5f3fc'
+          : starColorHex(Teff, bdClass));
+
+      stars.push({
+        label: lbl,
+        category,
+        mass: +safeMass.toFixed(4),
+        lum: lumNum >= 0.01 ? +lumNum.toFixed(3) : lumNum.toExponential(2),
+        lumNum,
+        radius,
+        Teff,
+        logg: lg,
+        tau: base.tau,
+        spectralType,
+        colorHex,
+      });
+    } else {
+      stars.push(base);
+    }
+  }
+
+  if (nStars === 1) {
+    const sA = stars[0];
+    return {
+      archName: 'Single Star (Pre-Programmed)',
+      stars: [sA],
+      splits: [],
+      zones: [
+        {
+          title: `Star A (${sA.spectralType})`,
+          mass: sA.mass,
+          lum: sA.lumNum,
+          age,
+          feh,
+          a_in: +Math.max(0.015, 0.055 * Math.sqrt(sA.lumNum)).toFixed(4),
+          a_out: +(50.0 * Math.pow(sA.mass, 0.55)).toFixed(2),
+        },
+      ],
+    };
+  }
+
+  const splits: RealisticBinarySplit[] = [];
+  const zones: RealisticZoneInput[] = [];
+
+  function evalCustomNode(
+    name: string,
+    bA: { mass: number; lumNum: number },
+    bB: { mass: number; lumNum: number },
+    splitCfg?: CustomBinarySplitInput,
+    defaultSep = 25.0,
+    capAU?: number
+  ) {
+    const aBin = Math.max(0.01, Number(splitCfg?.a_AU) || defaultSep);
+    const eBin = clamp(
+      splitCfg?.e !== undefined ? Number(splitCfg.e) : 0.15,
+      0.0,
+      0.95
+    );
+    const mTot = bA.mass + bB.mass;
+    const lTot = bA.lumNum + bB.lumNum;
+    const muA = bB.mass / mTot;
+    const muB = bA.mass / mTot;
+    const muM = Math.min(muA, muB);
+    const sA =
+      aBin *
+      (0.464 -
+        0.38 * muA -
+        0.631 * eBin +
+        0.586 * muA * eBin +
+        0.15 * eBin * eBin -
+        0.198 * muA * eBin * eBin);
+    const sB =
+      aBin *
+      (0.464 -
+        0.38 * muB -
+        0.631 * eBin +
+        0.586 * muB * eBin +
+        0.15 * eBin * eBin -
+        0.198 * muB * eBin * eBin);
+    const pM =
+      aBin *
+      (1.6 +
+        5.1 * eBin -
+        2.22 * eBin * eBin +
+        4.12 * muM -
+        4.27 * eBin * muM -
+        5.09 * muM * muM +
+        4.61 * eBin * eBin * muM * muM);
+    const sc = Math.pow(Math.max(0.1, mTot), 0.75);
+    const reg =
+      aBin < 0.5 * sc
+        ? 'P-Type (Circumbinary)'
+        : aBin <= 50 * sc
+        ? 'Mixed (Truncated S + P)'
+        : 'S-Type (Wide)';
+    splits.push({
+      pair: name,
+      a_AU: +aBin.toFixed(3),
+      e: +eBin.toFixed(3),
+      regime: reg,
+      sMaxA: +Math.max(0, sA).toFixed(2),
+      sMaxB: +Math.max(0, sB).toFixed(2),
+      pMin: +pM.toFixed(2),
+    });
+
+    const pIn = Math.max(0.02, 0.055 * Math.sqrt(lTot), pM);
+    const pOut = Math.min(capAU || 1e9, 50.0 * Math.pow(mTot, 0.55));
+    const pZone: RealisticZoneInput | null =
+      pOut / pIn >= 2.2
+        ? {
+            title: `Circumbinary ${name}`,
+            mass: +mTot.toFixed(3),
+            lum: lTot,
+            age,
+            feh,
+            a_in: +pIn.toFixed(4),
+            a_out: +pOut.toFixed(2),
+          }
+        : null;
+    return { sA: Math.max(0, sA), sB: Math.max(0, sB), pZone };
+  }
+
+  function addLeaf(st: RealisticStarNode, cap: number) {
+    const aIn = Math.max(0.015, 0.055 * Math.sqrt(st.lumNum));
+    const nat = 50.0 * Math.pow(st.mass, 0.55);
+    const aOut = Math.min(nat, cap);
+    if (aOut / aIn >= 2.2) {
+      zones.push({
+        title: `Star ${st.label} (${st.spectralType})`,
+        mass: st.mass,
+        lum: st.lumNum,
+        age,
+        feh,
+        a_in: +aIn.toFixed(4),
+        a_out: +aOut.toFixed(2),
+      });
+    }
+  }
+
+  let archName = 'Multi-Star Hierarchy (Pre-Programmed)';
+  if (nStars === 2) {
+    const b2 = evalCustomNode('AB', stars[0], stars[1], config.splits[0], 28.0);
+    addLeaf(stars[0], b2.sA);
+    if (b2.pZone) zones.push(b2.pZone);
+    addLeaf(stars[1], b2.sB);
+    archName = `Binary — ${splits[0].regime} (Pre-Programmed)`;
+  } else if (nStars === 3) {
+    const topo = config.trinaryTopology || 'AB_C';
+    if (topo === 'AB_C') {
+      const nAB = {
+        mass: stars[0].mass + stars[1].mass,
+        lumNum: stars[0].lumNum + stars[1].lumNum,
+      };
+      const r3 = evalCustomNode('AB + C', nAB, stars[2], config.splits[0], 120.0);
+      const i3 = evalCustomNode('AB', stars[0], stars[1], config.splits[1], 8.0, r3.sA);
+      addLeaf(stars[0], i3.sA);
+      if (i3.pZone) zones.push(i3.pZone);
+      addLeaf(stars[1], i3.sB);
+      if (r3.pZone) zones.push(r3.pZone);
+      addLeaf(stars[2], r3.sB);
+      archName = 'Trinary ((A+B) + C) (Pre-Programmed)';
+    } else {
+      const nBC = {
+        mass: stars[1].mass + stars[2].mass,
+        lumNum: stars[1].lumNum + stars[2].lumNum,
+      };
+      const r3b = evalCustomNode('A + BC', stars[0], nBC, config.splits[0], 120.0);
+      const i3b = evalCustomNode('BC', stars[1], stars[2], config.splits[1], 8.0, r3b.sB);
+      addLeaf(stars[0], r3b.sA);
+      if (r3b.pZone) zones.push(r3b.pZone);
+      addLeaf(stars[1], i3b.sA);
+      if (i3b.pZone) zones.push(i3b.pZone);
+      addLeaf(stars[2], i3b.sB);
+      archName = 'Trinary (A + (B+C)) (Pre-Programmed)';
+    }
+  } else {
+    const qAB = {
+      mass: stars[0].mass + stars[1].mass,
+      lumNum: stars[0].lumNum + stars[1].lumNum,
+    };
+    const qCD = {
+      mass: stars[2].mass + stars[3].mass,
+      lumNum: stars[2].lumNum + stars[3].lumNum,
+    };
+    const r4 = evalCustomNode('AB + CD', qAB, qCD, config.splits[0], 240.0);
+    const iAB = evalCustomNode('AB', stars[0], stars[1], config.splits[1], 12.0, r4.sA);
+    const iCD = evalCustomNode('CD', stars[2], stars[3], config.splits[2], 12.0, r4.sB);
+    addLeaf(stars[0], iAB.sA);
+    if (iAB.pZone) zones.push(iAB.pZone);
+    addLeaf(stars[1], iAB.sB);
+    if (r4.pZone) zones.push(r4.pZone);
+    addLeaf(stars[2], iCD.sA);
+    if (iCD.pZone) zones.push(iCD.pZone);
+    addLeaf(stars[3], iCD.sB);
+    archName = 'Quadruple (2+2 Hierarchy) (Pre-Programmed)';
+  }
+
+  // Fallback stability zone if custom binary separations destabilized all inner/outer zones
+  if (zones.length === 0) {
+    const sA = stars[0];
+    zones.push({
+      title: `Star A (${sA.spectralType})`,
+      mass: sA.mass,
+      lum: sA.lumNum,
+      age,
+      feh,
+      a_in: +Math.max(0.015, 0.055 * Math.sqrt(sA.lumNum)).toFixed(4),
+      a_out: +(50.0 * Math.pow(sA.mass, 0.55)).toFixed(2),
+    });
   }
 
   return { archName, stars, splits, zones };
@@ -3626,19 +3913,25 @@ export function runRealisticGenerator(
   rng?: PRNG
 ): RealisticStarSystemResult {
   let seedUsed: number | undefined;
-  if (!rng && (params.id !== undefined || params.seed !== undefined)) {
-    seedUsed = seedFromId(params.id ?? params.seed!);
+  if (!rng && (params.seed !== undefined || params.id !== undefined)) {
+    seedUsed = seedFromId(params.seed ?? params.id!);
     rng = new PRNG(seedUsed);
   }
   globalRollCounter++;
 
   // Special System: If solar masses > 999999, ignore regular algorithm and create SMBH system
-  if (params.sysMass > 999999) {
+  if (params.sysMass > 999999 && !params.customStellarConfig?.enabled) {
     return generateSupermassiveBlackHoleSystem(params, rng, seedUsed);
   }
 
-  const nStars = rollStep2(params.sysMass, params.forcedMult, rng);
-  const h = buildHierarchy(params.sysMass, params.age, params.feh, nStars, rng);
+  let h: RealisticHierarchyResult;
+  if (params.customStellarConfig?.enabled) {
+    h = buildCustomHierarchy(params.customStellarConfig, params.age, params.feh);
+  } else {
+    const nStars = rollStep2(params.sysMass, params.forcedMult, rng);
+    h = buildHierarchy(params.sysMass, params.age, params.feh, nStars, rng);
+  }
+
   const pZones: RealisticPlanetaryZone[] = [];
   for (let i = 0; i < h.zones.length; i++) {
     const gz = generateZoneSystem(h.zones[i], rng);
@@ -4140,6 +4433,27 @@ export function convertRealisticToSectorStarSystem(
   const tMS_Gyr = calculateMSLifetimeGyr(progenitorMass);
   const progressPct = Math.min(100.0, (starAgeGyr / tMS_Gyr) * 50.0);
   const starState = calculateStellarEvolution(progenitorMass, progressPct);
+  if (res.step1.customStellarConfig?.enabled && primary) {
+    const matchedStar =
+      res.hierarchy.stars.find((s) => zone?.title.includes(`Star ${s.label}`)) ||
+      primary;
+    const effL = zone ? zone.lum : matchedStar.lumNum;
+    starState.L = effL;
+    starState.Teff = matchedStar.Teff;
+    starState.currentMass = zone ? zone.mass : matchedStar.mass;
+    starState.radiusRsun = matchedStar.radius;
+    starState.radiusAU = +(matchedStar.radius * 0.00465047).toFixed(5);
+    starState.radiusKm = Math.round(matchedStar.radius * 695700);
+    starState.spectralMK = matchedStar.spectralType;
+    starState.phase = matchedStar.category;
+    starState.rInHZ = +(0.95 * Math.sqrt(Math.max(1e-6, effL))).toFixed(3);
+    starState.rOutHZ = +(1.67 * Math.sqrt(Math.max(1e-6, effL))).toFixed(3);
+    starState.snowLineAU = +(2.7 * Math.sqrt(Math.max(1e-6, effL))).toFixed(3);
+    starState.isRemnant =
+      matchedStar.category.includes('White Dwarf') ||
+      matchedStar.category.includes('Neutron') ||
+      matchedStar.category.includes('Black Hole');
+  }
   const colorData = getStarColorRGB(starState.Teff, starState.phase);
 
   const planets = zone ? convertZoneBodiesToPlanetArchetypes(zone) : [];

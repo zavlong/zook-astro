@@ -1,4 +1,4 @@
-import { Crosshair, X } from 'lucide-react';
+import { Crosshair, Sliders, X } from 'lucide-react';
 import { RealisticStarNode, RealisticStarSystemResult } from '../types';
 import { BlackHoleIcon } from '../../ui/BlackHoleIcon';
 
@@ -8,6 +8,7 @@ interface StarDossierModalProps {
   systemResult: RealisticStarSystemResult;
   onSelectStar: (idx: number) => void;
   onTrackInOrrery: (starIdx: number) => void;
+  onOpenPreProgramStars?: () => void;
   onClose: () => void;
 }
 
@@ -17,6 +18,7 @@ export const StarDossierModal: React.FC<StarDossierModalProps> = ({
   systemResult,
   onSelectStar,
   onTrackInOrrery,
+  onOpenPreProgramStars,
   onClose,
 }) => {
   const catLower = (star.category || '').toLowerCase();
@@ -64,6 +66,20 @@ export const StarDossierModal: React.FC<StarDossierModalProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {onOpenPreProgramStars && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenPreProgramStars();
+                }}
+                className="px-2.5 py-1 rounded-lg bg-amber-950/80 hover:bg-amber-900 text-amber-200 border border-amber-700 text-xs font-mono flex items-center gap-1 cursor-pointer transition shadow-sm"
+                title="Pre-Program Star Data & Generate Planets Only"
+              >
+                <Sliders className="w-3.5 h-3.5 text-amber-400" />
+                Pre-Program Stars
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onTrackInOrrery(starIdx)}

@@ -18,8 +18,11 @@ import {
   Gauge,
   Tag,
   ListTree,
+  Star,
+  Lock,
 } from 'lucide-react';
 import {
+  CustomStellarConfig,
   RealisticBeltBody,
   RealisticPlanetBody,
   RealisticPlanetaryZone,
@@ -58,6 +61,7 @@ import {
   getBodyWorldPosAU,
 } from './math/kepler';
 import { SystemJsonManagerModal } from './modals/SystemJsonManagerModal';
+import { PreProgramStarModal } from './modals/PreProgramStarModal';
 import { StarDossierModal } from './modals/StarDossierModal';
 import { BinarySplitModal } from './modals/BinarySplitModal';
 import { BeltDossierModal } from './modals/BeltDossierModal';
@@ -134,8 +138,12 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   // Click-to-Blow-Up Selected Entity Modal State
   const [selectedEntity, setSelectedEntity] = useState<SelectedMapEntity | null>(null);
 
-  // Modals (JSON Import/Export)
+  // Modals (JSON Import/Export & Pre-Program Star Data)
   const [showJsonModal, setShowJsonModal] = useState<boolean>(false);
+  const [showPreProgramModal, setShowPreProgramModal] = useState<boolean>(false);
+  const [customStellarConfig, setCustomStellarConfig] = useState<
+    CustomStellarConfig | undefined
+  >(undefined);
 
   // Orrery System Map Labels Toggle (default false)
   const [showLabels, setShowLabels] = useState<boolean>(false);
@@ -741,12 +749,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (selectedEntity) setSelectedEntity(null);
+        else if (showPreProgramModal) setShowPreProgramModal(false);
         else if (showJsonModal) setShowJsonModal(false);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isActive, selectedEntity, showJsonModal]);
+  }, [isActive, selectedEntity, showPreProgramModal, showJsonModal]);
 
   // Keyboard navigation: Page Up for higher view level (Sector Hex Map), Page Down already at System
   useEffect(() => {
@@ -773,7 +782,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         return;
       }
 
-      if (selectedEntity || showJsonModal) return;
+      if (selectedEntity || showJsonModal || showPreProgramModal) return;
 
       if (isLabelKey) {
         e.preventDefault();
@@ -806,7 +815,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isActive, selectedEntity, showJsonModal, handleBackToSectorWithTransition]);
+  }, [
+    isActive,
+    selectedEntity,
+    showJsonModal,
+    showPreProgramModal,
+    handleBackToSectorWithTransition,
+  ]);
 
   const handleParamChange = (
     newLogMass: number,
@@ -826,6 +841,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         age: newAge,
         feh: newFeh,
         forcedMult: newMult,
+        seed: Math.floor(Math.random() * 2147483647),
+        customStellarConfig: customStellarConfig?.enabled ? customStellarConfig : undefined,
       },
       true
     );
@@ -838,12 +855,14 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     setAge(p.age);
     setFeh(p.feh);
     setPresetKey('');
+    setCustomStellarConfig(undefined);
     triggerRun(
       {
         sysMass: p.sysMass,
         age: p.age,
         feh: p.feh,
         forcedMult,
+        seed: Math.floor(Math.random() * 2147483647),
       },
       true
     );
@@ -857,6 +876,80 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
         feh,
         forcedMult,
         id: currentSysId,
+        seed: Math.floor(Math.random() * 2147483647),
+        customStellarConfig: customStellarConfig?.enabled ? customStellarConfig : undefined,
+      },
+      true
+    );
+  };
+
+  const handleApplyCustomStars = (
+    config: CustomStellarConfig,
+    newAge: number,
+    newFeh: number
+  ) => {
+    const totalMass = +config.stars
+      .slice(0, config.nStars)
+      .reduce((acc, s) => acc + (Number(s.mass) || 0.5), 0)
+      .toFixed(3);
+    const newLogM = +log10(Math.max(0.01, totalMass)).toFixed(3);
+    setCustomStellarConfig(config);
+    setLogMass(newLogM);
+    setAge(newAge);
+    setFeh(newFeh);
+    setForcedMult(String(config.nStars) as '1' | '2' | '3' | '4');
+    setPresetKey('');
+    triggerRun(
+      {
+        sysMass: totalMass,
+        age: newAge,
+        feh: newFeh,
+        forcedMult: String(config.nStars) as '1' | '2' | '3' | '4',
+        id: currentSysId,
+        seed: Math.floor(Math.random() * 2147483647),
+        customStellarConfig: config,
+      },
+      true
+    );
+  };
+
+  const handleRerollPlanetsOnly = () => {
+    let activeConfig = customStellarConfig;
+    if (!activeConfig?.enabled && systemResult && systemResult.hierarchy.stars.length > 0) {
+      const nSt = Math.min(4, Math.max(1, systemResult.hierarchy.stars.length)) as 1 | 2 | 3 | 4;
+      activeConfig = {
+        enabled: true,
+        nStars: nSt,
+        trinaryTopology: systemResult.hierarchy.archName.includes('A + (B+C)')
+          ? 'A_BC'
+          : 'AB_C',
+        stars: systemResult.hierarchy.stars.slice(0, nSt).map((st) => ({
+          label: st.label,
+          mass: st.mass,
+          overrideMode: 'custom',
+          category: st.category,
+          spectralType: st.spectralType,
+          lumNum: st.lumNum,
+          radius: st.radius,
+          Teff: st.Teff,
+          colorHex: st.colorHex,
+        })),
+        splits: systemResult.hierarchy.splits.map((sp) => ({
+          a_AU: sp.a_AU,
+          e: sp.e,
+        })),
+      };
+      setCustomStellarConfig(activeConfig);
+    }
+    triggerRun(
+      {
+        sysMass,
+        age,
+        feh,
+        forcedMult,
+        id: currentSysId,
+        seed: Math.floor(Math.random() * 2147483647),
+        customStellarConfig: activeConfig,
       },
       true
     );
@@ -866,6 +959,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     setPresetKey(key);
     const p = STARGEN_BENCHMARK_PRESETS[key];
     if (!p) return;
+    setCustomStellarConfig(undefined);
     const newLogM = +log10(p.sysMass).toFixed(2);
     handleParamChange(newLogM, p.age, p.feh, p.forcedMult, false);
   };
@@ -2444,6 +2538,36 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               <kbd className="px-1 py-0.2 text-[9px] bg-slate-950/80 rounded text-slate-400 border border-slate-700 font-mono ml-0.5">
                 P
               </kbd>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPreProgramModal(true)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1.5 cursor-pointer transition ${
+                customStellarConfig?.enabled
+                  ? 'bg-amber-600 text-white font-bold border border-amber-400 shadow-md shadow-amber-500/25'
+                  : 'bg-slate-900/90 text-amber-300 hover:text-white border border-slate-700/80'
+              }`}
+              title="Pre-Program Star Data & Generate Planets Only"
+            >
+              {customStellarConfig?.enabled ? (
+                <Lock className="w-3.5 h-3.5" />
+              ) : (
+                <Star className="w-3.5 h-3.5" />
+              )}
+              <span>
+                {customStellarConfig?.enabled
+                  ? `Stars Locked (${customStellarConfig.nStars}★)`
+                  : 'Pre-Program Stars'}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={handleRerollPlanetsOnly}
+              className="px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1.5 cursor-pointer bg-slate-900/90 text-sky-300 hover:text-white border border-slate-700/80 transition"
+              title="Keep current star(s) fixed and re-roll only the planetary system"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-sky-400" />
+              <span>Roll Planets</span>
             </button>
           </div>
 
@@ -4945,6 +5069,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             handleTrackBody({ kind: 'star', starIdx: idx });
             setMapMode('orrery2d');
           }}
+          onOpenPreProgramStars={() => setShowPreProgramModal(true)}
           onClose={() => setSelectedEntity(null)}
         />
       );
@@ -5145,9 +5270,38 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               type="button"
               onClick={handleRerollKeepSliders}
               className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#151d2c] hover:bg-[#1e293b] text-slate-100 border border-[#2a3852] hover:border-sky-400 flex items-center gap-1.5 cursor-pointer transition"
+              title="Re-roll system using current parameters"
             >
               <RefreshCw className="w-3.5 h-3.5 text-sky-400" />
               Re-Roll
+            </button>
+            <button
+              type="button"
+              onClick={handleRerollPlanetsOnly}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#151d2c] hover:bg-[#1e293b] text-sky-200 border border-[#2a3852] hover:border-sky-400 flex items-center gap-1.5 cursor-pointer transition"
+              title="Keep current star(s) fixed and re-roll only the planets and moons"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
+              Roll Planets Only
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPreProgramModal(true)}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition ${
+                customStellarConfig?.enabled
+                  ? 'bg-amber-600 hover:bg-amber-500 text-white border border-amber-400 shadow'
+                  : 'bg-[#151d2c] hover:bg-[#1e293b] text-amber-200 border border-[#2a3852] hover:border-amber-400'
+              }`}
+              title="Pre-program custom star data (mass, luminosity, radius, Teff, spectral type, binary orbits) and generate planets only"
+            >
+              {customStellarConfig?.enabled ? (
+                <Lock className="w-3.5 h-3.5 text-white" />
+              ) : (
+                <Star className="w-3.5 h-3.5 text-amber-400" />
+              )}
+              {customStellarConfig?.enabled
+                ? `Stars Pre-Programmed (${customStellarConfig.nStars}★)`
+                : 'Pre-Program Stars'}
             </button>
             {systemResult && systemResult.zones.length > 0 && (
               <>
@@ -5392,6 +5546,19 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
 
       {/* Click-to-Blow-Up Full Details Modal */}
       {renderBlowUpModal()}
+
+      {/* Pre-Program Star Data Modal */}
+      {showPreProgramModal && (
+        <PreProgramStarModal
+          currentConfig={customStellarConfig}
+          currentAge={age}
+          currentFeh={feh}
+          currentSystem={systemResult}
+          onApplyAndGeneratePlanets={handleApplyCustomStars}
+          onDisableCustomStars={() => setCustomStellarConfig(undefined)}
+          onClose={() => setShowPreProgramModal(false)}
+        />
+      )}
 
       {/* JSON Import/Export Modal */}
       {showJsonModal && (
