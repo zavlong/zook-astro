@@ -687,6 +687,82 @@ export function getPlanetaryGoldbergGrid(
     });
   }
 
+  // Second pass: refine mixed tiles using bordering neighbor tiles so secondary biome choice & transition orientation
+  // align with the surrounding tiles on the planetary grid
+  if (!surfaceModel.isNoSurface) {
+    const primaryIds = tiles.map((t) => t.biomeId);
+    for (let tId = 0; tId < tileCount; tId++) {
+      const tile = tiles[tId];
+      const cell = cells[tId];
+      const w = sumWeight[tId] || 1;
+      const weights = biomeWeights[tId];
+      const bestBiome = tile.biomeId;
+      const bestW = weights[bestBiome] || 0;
+
+      // Re-score candidate secondary biomes with a bonus when a candidate biome matches one or more bordering tiles
+      let candBiome = tile.secondaryBiomeId ?? -1;
+      let bestScore = -1;
+      let candW = candBiome >= 0 ? weights[candBiome] : 0;
+      let candSample: ReturnType<typeof sampleSurfacePoint> | null = null;
+
+      for (let b = 0; b < 25; b++) {
+        if (b === bestBiome) continue;
+        const bw = weights[b];
+        if (bw / w >= 0.075 && biomeHasRep[tId][b]) {
+          const sLat = biomeRepLat[tId][b];
+          const sLon = biomeRepLon[tId][b];
+          const sSample = sampleSurfacePoint(surfaceModel, planet, moon, sLat, sLon);
+          if (sSample.biome !== tile.primaryBiomeName) {
+            let nbMatchCount = 0;
+            for (let k = 0; k < cell.neighbors.length; k++) {
+              const nbId = cell.neighbors[k];
+              if (primaryIds[nbId] === b || biomeSimilarityScore(primaryIds[nbId], b) >= 0.8) {
+                nbMatchCount++;
+              }
+            }
+            const score = bw * (1.0 + Math.min(0.45, nbMatchCount * 0.18));
+            if (score > bestScore) {
+              bestScore = score;
+              candW = bw;
+              candBiome = b;
+              candSample = sSample;
+            }
+          }
+        }
+      }
+
+      if (candBiome >= 0) {
+        if (candSample) {
+          tile.secondaryBiomeId = candBiome;
+          tile.secondaryBiomeName = candSample.biome;
+          tile.secondaryBiomeColor = candSample.biomeColor;
+          const rawShare = candW / Math.max(0.001, bestW + candW);
+          tile.secondaryBiomeWeight = +Math.max(0.22, Math.min(0.5, rawShare)).toFixed(2);
+          tile.biomeName =
+            tile.secondaryBiomeName && tile.secondaryBiomeName !== tile.primaryBiomeName
+              ? `${tile.primaryBiomeName} + ${tile.secondaryBiomeName}`
+              : tile.primaryBiomeName;
+        }
+
+        // Orient transitionAngleRad toward the bordering tiles that have higher affinity for secondaryBiomeId
+        let vecX = 0;
+        let vecZ = 0;
+        for (let k = 0; k < cell.neighbors.length; k++) {
+          const nbTile = tiles[cell.neighbors[k]];
+          const azRad = ((cell.neighborAzimuthDeg[k] ?? k * 60) * Math.PI) / 180;
+          const sim1 = biomeSimilarityScore(nbTile.biomeId, bestBiome);
+          const sim2 = biomeSimilarityScore(nbTile.biomeId, candBiome);
+          const diff = sim2 - sim1;
+          vecX += Math.sin(azRad) * diff;
+          vecZ += Math.cos(azRad) * diff;
+        }
+        if (Math.hypot(vecX, vecZ) > 0.08) {
+          tile.transitionAngleRad = Math.atan2(vecZ, vecX);
+        }
+      }
+    }
+  }
+
   const grid: PlanetaryGoldbergGrid = {
     frequency: topology.frequency,
     tileCount,
@@ -695,6 +771,372 @@ export function getPlanetaryGoldbergGrid(
   };
   planetaryGridCache.set(surfaceModel, grid);
   return grid;
+}
+
+function isOceanBiomeId(id: number): boolean {
+  return id <= 2 || id === 17 || id === 23;
+}
+
+function isIceBiomeId(id: number): boolean {
+  return id === 8 || id === 13 || id === 18 || id === 21;
+}
+
+function isVolcanicBiomeId(id: number): boolean {
+  return id === 14 || id === 15 || id === 22;
+}
+
+function isHighlandBiomeId(id: number): boolean {
+  return id === 11 || id === 12 || id === 13;
+}
+
+function characteristicBiomeTraits(id: number): {
+  elev: number;
+  moist: number;
+  temp: number;
+} {
+  if (id === 0) return { elev: -0.35, moist: 1.0, temp: 0.5 };
+  if (id === 1) return { elev: -0.22, moist: 1.0, temp: 0.5 };
+  if (id === 2 || id === 17 || id === 23) return { elev: -0.08, moist: 1.0, temp: 0.58 };
+  if (id === 3) return { elev: 0.04, moist: 0.85, temp: 0.66 };
+  if (id === 4) return { elev: 0.1, moist: 0.48, temp: 0.58 };
+  if (id === 5) return { elev: 0.11, moist: 0.72, temp: 0.58 };
+  if (id === 6) return { elev: 0.14, moist: 0.58, temp: 0.38 };
+  if (id === 7) return { elev: 0.1, moist: 0.4, temp: 0.28 };
+  if (id === 8 || id === 21) return { elev: 0.15, moist: 0.4, temp: 0.15 };
+  if (id === 9) return { elev: 0.14, moist: 0.22, temp: 0.68 };
+  if (id === 10) return { elev: 0.14, moist: 0.08, temp: 0.82 };
+  if (id === 11) return { elev: 0.28, moist: 0.2, temp: 0.6 };
+  if (id === 12) return { elev: 0.4, moist: 0.35, temp: 0.35 };
+  if (id === 13) return { elev: 0.44, moist: 0.45, temp: 0.12 };
+  if (id === 14 || id === 16) return { elev: 0.15, moist: 0.08, temp: 0.5 };
+  if (id === 15 || id === 22) return { elev: 0.28, moist: 0.08, temp: 0.95 };
+  if (id === 18) return { elev: 0.08, moist: 0.3, temp: 0.05 };
+  return { elev: 0.12, moist: 0.4, temp: 0.5 };
+}
+
+export function biomeSimilarityScore(
+  bA: number,
+  bB: number,
+  activePairIsCoast = false
+): number {
+  if (bA === bB) return 1.0;
+  if (isOceanBiomeId(bA) && isOceanBiomeId(bB)) return 0.9;
+  if (isIceBiomeId(bA) && isIceBiomeId(bB)) return 0.86;
+  if (isVolcanicBiomeId(bA) && isVolcanicBiomeId(bB)) return 0.88;
+  if (isHighlandBiomeId(bA) && isHighlandBiomeId(bB)) return 0.84;
+  if ((bA === 9 || bA === 10) && (bB === 9 || bB === 10)) return 0.82;
+  if (bA >= 3 && bA <= 6 && bB >= 3 && bB <= 6) return 0.74;
+  if (activePairIsCoast && !isOceanBiomeId(bA) && !isOceanBiomeId(bB)) return 0.8;
+
+  const tA = characteristicBiomeTraits(bA);
+  const tB = characteristicBiomeTraits(bB);
+  const dElev = Math.abs(tA.elev - tB.elev);
+  const dMoist = Math.abs(tA.moist - tB.moist);
+  const dTemp = Math.abs(tA.temp - tB.temp);
+  return Math.max(0, 0.55 - (dElev * 0.7 + dMoist * 0.35 + dTemp * 0.35));
+}
+
+export interface NeighborTileDirectionEntry {
+  tile: GoldbergPlanetaryTile;
+  dirX: number; // Outward unit vector X in the local view's (px, pz) plane
+  dirZ: number; // Outward unit vector Z in the local view's (px, pz) plane
+}
+
+export interface TileBorderTerrainContext {
+  biomeMix: number; // [0..1] blend factor (0 = primary biome, 1 = secondary biome)
+  localMacroH: number; // Spatially blended macro elevation relative to sea level
+  borderReliefBoost: number; // [-0.08..+0.14] foothill/coastal slope modulation from bordering tiles
+}
+
+/**
+ * Builds a fast, quantile-calibrated spatial terrain evaluator for a Goldberg tile that takes into account
+ * all of its bordering tiles (`neighborEntries`) when placing primary vs. secondary biomes, coastal shelves,
+ * islands, inland lakes, mountain foothills, volcanic cones, and elevation gradients.
+ */
+export function createNeighborAwareTileEvaluator(
+  activeTile: GoldbergPlanetaryTile,
+  neighborEntries: NeighborTileDirectionEntry[],
+  seaLevelNormalized: number,
+  isNoSurface: boolean
+): {
+  evalBorderContext: (px: number, pz: number, baseFbm: number, ridge: number) => TileBorderTerrainContext;
+  pickPreferredFeatureSpot: (
+    targetIsSecondary: boolean,
+    fallbackAngle: number,
+    fallbackDist: number
+  ) => { x: number; z: number };
+  preferredFissureStrike: { cosA: number; sinA: number };
+} {
+  const bId1 = activeTile.biomeId;
+  const bId2 = activeTile.secondaryBiomeId;
+  const hasSecondary = bId2 !== null && bId2 !== bId1 && !isNoSurface;
+  const secWeight = Math.max(0.2, Math.min(0.5, activeTile.secondaryBiomeWeight || 0.35));
+  const baseMacroH = activeTile.meanHNorm - seaLevelNormalized;
+
+  const nCount = neighborEntries.length;
+  const dirX = new Float64Array(nCount);
+  const dirZ = new Float64Array(nCount);
+  const nbBias = new Float64Array(nCount);
+  const nbMacroH = new Float64Array(nCount);
+  const nbRelief = new Float64Array(nCount);
+
+  const isCoastPair = hasSecondary && bId2 !== null && isOceanBiomeId(bId1) !== isOceanBiomeId(bId2);
+  const traits1 = characteristicBiomeTraits(bId1);
+  const traits2 = bId2 !== null ? characteristicBiomeTraits(bId2) : traits1;
+  const dCharElev = traits2.elev - traits1.elev;
+  const dCharMoist = traits2.moist - traits1.moist;
+  const dCharTemp = traits2.temp - traits1.temp;
+
+  let minBias = 1e9;
+  let maxBias = -1e9;
+  let sumBias = 0;
+  let secVecX = Math.cos(activeTile.transitionAngleRad || 0);
+  let secVecZ = Math.sin(activeTile.transitionAngleRad || 0);
+  let priVecX = -secVecX;
+  let priVecZ = -secVecZ;
+  let sumSecVecX = 0;
+  let sumSecVecZ = 0;
+  let sumPriVecX = 0;
+  let sumPriVecZ = 0;
+  let fracVecX = 0.75;
+  let fracVecZ = -0.45;
+
+  for (let s = 0; s < nCount; s++) {
+    const entry = neighborEntries[s];
+    const nb = entry.tile;
+    const len = Math.hypot(entry.dirX, entry.dirZ) || 1;
+    const ux = entry.dirX / len;
+    const uz = entry.dirZ / len;
+    dirX[s] = ux;
+    dirZ[s] = uz;
+
+    const nbH = nb.meanHNorm - seaLevelNormalized;
+    nbMacroH[s] = nbH;
+    nbRelief[s] = isHighlandBiomeId(nb.biomeId)
+      ? 0.08
+      : isVolcanicBiomeId(nb.biomeId)
+      ? 0.05
+      : isOceanBiomeId(nb.biomeId)
+      ? -0.05
+      : 0;
+
+    if (nb.fractureIntensity > 0.18) {
+      fracVecX += -uz * nb.fractureIntensity;
+      fracVecZ += ux * nb.fractureIntensity;
+    }
+
+    if (hasSecondary && bId2 !== null) {
+      const nbSecW = nb.secondaryBiomeId !== null ? Math.min(0.45, nb.secondaryBiomeWeight || 0.3) : 0;
+      const sim1Primary = biomeSimilarityScore(nb.biomeId, bId1, isCoastPair);
+      const sim2Primary = biomeSimilarityScore(nb.biomeId, bId2, isCoastPair);
+      const sim1Sec =
+        nb.secondaryBiomeId !== null ? biomeSimilarityScore(nb.secondaryBiomeId, bId1, isCoastPair) : sim1Primary;
+      const sim2Sec =
+        nb.secondaryBiomeId !== null ? biomeSimilarityScore(nb.secondaryBiomeId, bId2, isCoastPair) : sim2Primary;
+
+      let sim1 = sim1Primary * (1 - nbSecW) + sim1Sec * nbSecW;
+      let sim2 = sim2Primary * (1 - nbSecW) + sim2Sec * nbSecW;
+
+      // Physical telemetry affinity (elevation, moisture, temperature, crater/volcano/fracture continuity)
+      if (Math.abs(dCharElev) >= 0.08) {
+        const relH = (nb.meanHNorm - activeTile.meanHNorm) * Math.sign(dCharElev);
+        const elevBonus = Math.max(-0.35, Math.min(0.35, relH * 2.2));
+        sim2 += elevBonus;
+        sim1 -= elevBonus;
+      }
+      if (Math.abs(dCharMoist) >= 0.12) {
+        const relM = (nb.moisture - activeTile.moisture) * Math.sign(dCharMoist);
+        const moistBonus = Math.max(-0.25, Math.min(0.25, relM * 0.9));
+        sim2 += moistBonus;
+        sim1 -= moistBonus;
+      }
+      if (Math.abs(dCharTemp) >= 0.12) {
+        const relT = ((nb.temperatureK - activeTile.temperatureK) / 40) * Math.sign(dCharTemp);
+        const tempBonus = Math.max(-0.25, Math.min(0.25, relT * 0.45));
+        sim2 += tempBonus;
+        sim1 -= tempBonus;
+      }
+
+      const bias = Math.max(-1, Math.min(1, (sim2 - sim1) * 1.4));
+      nbBias[s] = bias;
+      if (bias < minBias) minBias = bias;
+      if (bias > maxBias) maxBias = bias;
+      sumBias += bias;
+
+      if (bias > 0) {
+        sumSecVecX += ux * bias;
+        sumSecVecZ += uz * bias;
+      } else if (bias < 0) {
+        sumPriVecX += ux * -bias;
+        sumPriVecZ += uz * -bias;
+      }
+    } else {
+      nbBias[s] = -1;
+      minBias = -1;
+      maxBias = -1;
+    }
+  }
+
+  if (Math.hypot(sumSecVecX, sumSecVecZ) > 0.05) {
+    const l = Math.hypot(sumSecVecX, sumSecVecZ);
+    secVecX = sumSecVecX / l;
+    secVecZ = sumSecVecZ / l;
+  }
+  if (Math.hypot(sumPriVecX, sumPriVecZ) > 0.05) {
+    const l = Math.hypot(sumPriVecX, sumPriVecZ);
+    priVecX = sumPriVecX / l;
+    priVecZ = sumPriVecZ / l;
+  } else {
+    priVecX = -secVecX;
+    priVecZ = -secVecZ;
+  }
+
+  const fLen = Math.hypot(fracVecX, fracVecZ) || 1;
+  const preferredFissureStrike = { cosA: fracVecX / fLen, sinA: fracVecZ / fLen };
+
+  const meanBias = nCount > 0 ? sumBias / nCount : 0;
+  const biasSpan = Math.max(0, maxBias - minBias);
+
+  // Continuous C-infinity spatial score toward secondary biome bId2 at any (px, pz) in [-1, 1]^2
+  const evalRawSpatialScore = (px: number, pz: number): number => {
+    if (!hasSecondary || nCount === 0) return -1;
+    const r = Math.hypot(px, pz);
+
+    // Case A: All bordering tiles strongly match the secondary biome (e.g. island of primary biome surrounded by secondary biome)
+    if (minBias > 0.22 && biasSpan < 0.35) {
+      return (r - 0.56) * 1.4 + (px * secVecX + pz * secVecZ) * 0.22;
+    }
+    // Case B: All bordering tiles strongly match the primary biome (e.g. inland lake or central massif inside primary biome)
+    if (maxBias < -0.22 && biasSpan < 0.35) {
+      return (0.54 - r) * 1.4 + (px * secVecX + pz * secVecZ) * 0.22;
+    }
+    // Case C: Bordering tiles differ — place secondary biome along the specific bordering edges that favor bId2
+    if (biasSpan > 0.1) {
+      let wSum = 0;
+      let weightedBias = 0;
+      let maxEdgeDot = -2;
+      for (let s = 0; s < nCount; s++) {
+        const proj = px * dirX[s] + pz * dirZ[s];
+        const w = Math.exp(proj * 3.6);
+        const normB = (nbBias[s] - minBias) / biasSpan; // [0..1]
+        wSum += w;
+        weightedBias += w * normB;
+        if (nbBias[s] > 0.08 && proj > maxEdgeDot) {
+          maxEdgeDot = proj;
+        }
+      }
+      const angularScore = wSum > 0 ? weightedBias / wSum : 0.5;
+      const radialStrength = 0.38 + 0.82 * Math.min(1.15, r);
+      const rimPull = meanBias * 0.28 * (r - 0.52);
+      const edgeProximity = maxEdgeDot > -1 ? maxEdgeDot * 0.22 : 0;
+      return (angularScore - 0.5) * radialStrength * 1.85 + rimPull + edgeProximity;
+    }
+
+    // Fallback: smooth planar transition along transitionAngleRad
+    return px * secVecX + pz * secVecZ;
+  };
+
+  // Quantile-calibrate threshold and scale over an 11x11 interior grid so the secondary biome covers ~secWeight of the tile
+  let calibratedThreshold = 0;
+  let calibratedSpan = 0.52;
+  if (hasSecondary) {
+    const samples: number[] = [];
+    for (let gz = -5; gz <= 5; gz++) {
+      const sz = gz * 0.17;
+      for (let gx = -5; gx <= 5; gx++) {
+        const sx = gx * 0.17;
+        if (sx * sx + sz * sz <= 0.95) {
+          samples.push(evalRawSpatialScore(sx, sz));
+        }
+      }
+    }
+    samples.sort((a, b) => a - b);
+    if (samples.length > 4) {
+      const qIdx = Math.max(
+        0,
+        Math.min(samples.length - 1, Math.round((1.0 - secWeight) * (samples.length - 1)))
+      );
+      const qLow = samples[Math.max(0, Math.floor(samples.length * 0.18))];
+      const qHigh = samples[Math.min(samples.length - 1, Math.ceil(samples.length * 0.82))];
+      calibratedThreshold = samples[qIdx];
+      calibratedSpan = Math.max(0.28, (qHigh - qLow) * 0.85);
+    }
+  }
+
+  const evalBorderContext = (
+    px: number,
+    pz: number,
+    baseFbm: number,
+    ridge: number
+  ): TileBorderTerrainContext => {
+    let biomeMix = 0;
+    if (hasSecondary) {
+      const rawScore = evalRawSpatialScore(px, pz);
+      const patchNoise = ((baseFbm - 0.5) * 0.62 + (ridge - 0.5) * 0.30) * calibratedSpan;
+      const u = (rawScore + patchNoise - calibratedThreshold) / calibratedSpan + 0.5;
+      const t = Math.max(0, Math.min(1, u));
+      biomeMix = t * t * (3.0 - 2.0 * t);
+    }
+
+    // Smoothly blend baseline elevation & foothill/coastal relief toward the bordering tiles near the edges
+    let localMacroH = baseMacroH;
+    let borderReliefBoost = 0;
+    if (nCount > 0 && !isNoSurface) {
+      let wSum = 0;
+      let hSum = 0;
+      let relSum = 0;
+      for (let s = 0; s < nCount; s++) {
+        const proj = px * dirX[s] + pz * dirZ[s];
+        const w = Math.exp(proj * 3.2);
+        wSum += w;
+        hSum += w * nbMacroH[s];
+        relSum += w * nbRelief[s];
+      }
+      if (wSum > 0) {
+        const r = Math.min(1.0, Math.hypot(px, pz));
+        const edgeWeight = r * r * 0.48;
+        const nbAvgH = hSum / wSum;
+        localMacroH = baseMacroH * (1.0 - edgeWeight) + nbAvgH * edgeWeight;
+        borderReliefBoost = (relSum / wSum) * (0.35 + 0.65 * r);
+      }
+    }
+
+    return {
+      biomeMix,
+      localMacroH,
+      borderReliefBoost,
+    };
+  };
+
+  const pickPreferredFeatureSpot = (
+    targetIsSecondary: boolean,
+    fallbackAngle: number,
+    fallbackDist: number
+  ): { x: number; z: number } => {
+    if (!hasSecondary) {
+      return {
+        x: Math.cos(fallbackAngle) * fallbackDist,
+        z: Math.sin(fallbackAngle) * fallbackDist,
+      };
+    }
+    const vx = targetIsSecondary ? secVecX : priVecX;
+    const vz = targetIsSecondary ? secVecZ : priVecZ;
+    const baseAng = Math.atan2(vz, vx);
+    // Constrain feature angle within +/- 55 degrees of the target biome's bordering sector
+    const jitter = ((fallbackAngle / (Math.PI * 2)) - 0.5) * 1.9;
+    const finalAng = baseAng + jitter;
+    const dist = Math.max(0.22, Math.min(0.76, fallbackDist * 0.85 + 0.14));
+    return {
+      x: Math.cos(finalAng) * dist,
+      z: Math.sin(finalAng) * dist,
+    };
+  };
+
+  return {
+    evalBorderContext,
+    pickPreferredFeatureSpot,
+    preferredFissureStrike,
+  };
 }
 
 /**
@@ -709,3 +1151,4 @@ export function getGoldbergTileAtLatLon(
   const { tileId } = queryGoldbergTileAtUnitVec(grid.topology, sx, sy, sz);
   return grid.tiles[tileId] || grid.tiles[0];
 }
+

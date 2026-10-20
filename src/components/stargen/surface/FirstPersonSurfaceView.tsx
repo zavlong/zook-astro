@@ -18,6 +18,7 @@ import {
 import {
   GoldbergPlanetaryTile,
   PlanetaryGoldbergGrid,
+  createNeighborAwareTileEvaluator,
 } from './goldbergTileGrid';
 
 interface FirstPersonSurfaceViewProps {
@@ -256,19 +257,26 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
     const bId1 = activeTile.biomeId;
     const bId2 = activeTile.secondaryBiomeId;
     const hasSecondaryBiome = bId2 !== null && bId2 !== bId1 && !surfaceModel.isNoSurface;
-    const transCos = Math.cos(activeTile.transitionAngleRad || 0);
-    const transSin = Math.sin(activeTile.transitionAngleRad || 0);
-    const secWeight = activeTile.secondaryBiomeWeight || 0.35;
 
-    const evalBiomeMix = (px: number, pz: number, baseFbm: number, ridge: number): number => {
-      if (!hasSecondaryBiome) return 0;
-      const along = px * transCos + pz * transSin;
-      const patchNoise = (baseFbm - 0.5) * 0.85 + (ridge - 0.5) * 0.42;
-      const threshold = (0.5 - secWeight) * 0.65;
-      const raw = (along + patchNoise - threshold) / 0.52 + 0.5;
-      const t = Math.max(0, Math.min(1, raw));
-      return t * t * (3 - 2 * t);
-    };
+    // Build neighbor-aware spatial evaluator aligned with the compass azimuths of bordering tiles (0 = North/+z, 90 = East/+x)
+    const neighborEntries = neighborTiles.map((nb) => {
+      const azRad = (nb.azimuthDeg * Math.PI) / 180;
+      return {
+        tile: nb.tile,
+        dirX: Math.sin(azRad),
+        dirZ: Math.cos(azRad),
+      };
+    });
+    const {
+      evalBorderContext,
+      pickPreferredFeatureSpot,
+      preferredFissureStrike,
+    } = createNeighborAwareTileEvaluator(
+      activeTile,
+      neighborEntries,
+      surfaceModel.seaLevelNormalized,
+      surfaceModel.isNoSurface
+    );
 
     const isBiomeOcean = (id: number) => !surfaceModel.isNoSurface && (id <= 2 || id === 17 || id === 23);
     const isBiomeIce = (id: number) => id === 8 || id === 13 || id === 18 || id === 21;
@@ -293,15 +301,22 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
     const craters: { cx: number; cz: number; rad: number; depth: number; hasCentralPeak: boolean }[] = [];
     if (effCraterIntensity > 0.02) {
       const heroCount = effCraterIntensity > 0.55 ? 3 : effCraterIntensity > 0.22 ? 2 : 1;
+      const craterPrefersSecondary =
+        hasSecondaryBiome && bId2 !== null && (bId2 === 16 || (isBiomeOcean(bId1) && !isBiomeOcean(bId2)));
+      const craterBiasSector =
+        hasSecondaryBiome && bId2 !== null && (isBiomeOcean(bId1) !== isBiomeOcean(bId2) || bId1 === 16 || bId2 === 16);
       for (let h = 0; h < heroCount; h++) {
         const angle = hash2(h, 11, tileSeed) * Math.PI * 2;
         const dist = (0.18 + hash2(h, 12, tileSeed) * 0.46) * (h === 0 ? 0.8 : 1.0);
         const rad =
           (h === 0 ? 0.19 : 0.13) +
           hash2(h, 13, tileSeed) * (0.09 * Math.min(1, effCraterIntensity + 0.3));
+        const spot = craterBiasSector
+          ? pickPreferredFeatureSpot(craterPrefersSecondary, angle, dist)
+          : { x: Math.cos(angle) * dist, z: Math.sin(angle) * dist };
         craters.push({
-          cx: Math.cos(angle) * dist,
-          cz: Math.sin(angle) * dist,
+          cx: spot.x,
+          cz: spot.z,
           rad,
           depth: rad * (0.44 + hash2(h, 14, tileSeed) * 0.22),
           hasCentralPeak: rad > 0.155,
@@ -335,12 +350,20 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         surfaceModel.isMoltenWorld);
     if (hasVolcanoes) {
       const vCount = bId1 === 15 || bId2 === 15 ? 3 : 2;
+      const volcIsSecondaryOnly =
+        hasSecondaryBiome && bId2 !== null && (bId2 === 15 || bId2 === 22) && bId1 !== 15 && bId1 !== 22;
+      const volcIsPrimaryOnly =
+        hasSecondaryBiome && bId2 !== null && (bId1 === 15 || bId1 === 22) && bId2 !== 15 && bId2 !== 22;
       for (let v = 0; v < vCount; v++) {
         const vDist = v === 0 ? 0.28 : 0.42 + hash2(v, 19, tileSeed) * 0.35;
         const vAng = hash2(v, 23, tileSeed) * Math.PI * 2;
+        const spot =
+          volcIsSecondaryOnly || volcIsPrimaryOnly
+            ? pickPreferredFeatureSpot(volcIsSecondaryOnly, vAng, vDist)
+            : { x: Math.cos(vAng) * vDist, z: Math.sin(vAng) * vDist };
         volcanicCones.push({
-          vx: Math.cos(vAng) * vDist,
-          vz: Math.sin(vAng) * vDist,
+          vx: spot.x,
+          vz: spot.z,
           rad: v === 0 ? 0.34 : 0.2 + hash2(v, 29, tileSeed) * 0.12,
           height: v === 0 ? 0.42 : 0.25 + hash2(v, 31, tileSeed) * 0.12,
         });
@@ -383,8 +406,6 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       return Math.min(1, (n - threshold) / (1 - threshold));
     };
 
-    const macroH = activeTile.meanHNorm - surfaceModel.seaLevelNormalized;
-
     const evalSingleBiomeHeight = (
       bId: number,
       px: number,
@@ -393,7 +414,8 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       wz: number,
       baseFbm: number,
       ridge: number,
-      fine: number
+      fine: number,
+      macroH: number
     ): number => {
       if (isBiomeOcean(bId)) {
         const seamount = ridge > 0.72 ? (ridge - 0.72) * 0.25 : 0;
@@ -453,11 +475,11 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       const ridge = ridgedFbm2D(wx * 3.8, wz * 3.8, tileSeed + 79, 4);
       const fine = fbm2D(px * 11.5, pz * 11.5, tileSeed + 151, 3) - 0.5;
 
-      const biomeMix = evalBiomeMix(px, pz, baseFbm, ridge);
-      const h1 = evalSingleBiomeHeight(bId1, px, pz, wx, wz, baseFbm, ridge, fine);
+      const { biomeMix, localMacroH, borderReliefBoost } = evalBorderContext(px, pz, baseFbm, ridge);
+      const h1 = evalSingleBiomeHeight(bId1, px, pz, wx, wz, baseFbm, ridge, fine, localMacroH);
       let hLocal = h1;
       if (hasSecondaryBiome && bId2 !== null) {
-        const h2 = evalSingleBiomeHeight(bId2, px, pz, wx, wz, baseFbm, ridge, fine);
+        const h2 = evalSingleBiomeHeight(bId2, px, pz, wx, wz, baseFbm, ridge, fine, localMacroH);
         hLocal = h1 * (1 - biomeMix) + h2 * biomeMix;
       }
 
@@ -466,7 +488,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       const oceanWeight = !surfaceModel.isNoSurface && anyOceanBiome ? oceanWeightAtPoint : 0;
       const isOceanPoint = oceanWeight >= 0.45;
       if (!isOceanPoint) {
-        hLocal = Math.max(0.025, hLocal);
+        hLocal = Math.max(0.025, hLocal + borderReliefBoost * (0.35 + 0.65 * ridge));
       }
 
       let craterRimTint = 0;
@@ -531,7 +553,9 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         bId2 === 15
       ) {
         const fissureCurve = Math.abs(
-          px * 0.75 - pz * 0.45 + (fbm2D(px * 3.6, pz * 3.6, tileSeed + 211, 3) - 0.5) * 0.32
+          px * preferredFissureStrike.cosA +
+            pz * preferredFissureStrike.sinA +
+            (fbm2D(px * 3.6, pz * 3.6, tileSeed + 211, 3) - 0.5) * 0.32
         );
         if (fissureCurve < 0.062) {
           const cleft = 1.0 - fissureCurve / 0.062;
@@ -1138,7 +1162,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       cloudMap,
       effCloudCover,
     };
-  }, [surfaceModel, activeTile, pBarAtmo, hasAtmosphere]);
+  }, [surfaceModel, activeTile, neighborTiles, pBarAtmo, hasAtmosphere]);
 
   // Keyboard listener for WASD / Arrow movement
   useEffect(() => {
