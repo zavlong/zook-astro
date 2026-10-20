@@ -6,7 +6,6 @@ import {
   Layers,
   ArrowLeft,
   Sparkles,
-  Mountain,
   Cloud,
   ZoomIn,
 } from 'lucide-react';
@@ -188,7 +187,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
   const [rotYaw, setRotYaw] = useState<number>(0.62); // ~35 deg isometric angle
   const [rotPitch, setRotPitch] = useState<number>(0.54); // ~31 deg immersive biome tilt
   const [zoom, setZoom] = useState<number>(1.28); // Default zoomed-in so the tile fills the viewport like a full biome
-  const [verticalExag, setVerticalExag] = useState<number>(1.45);
+  const verticalExag = 0.6;
   const [showWireframe, setShowWireframe] = useState<boolean>(false);
   const [showClouds3D, setShowClouds3D] = useState<boolean>(true);
   const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -1827,21 +1826,6 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           </div>
 
           <div className="flex items-center gap-1">
-            <Mountain className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="text-[10px] text-slate-400">RELIEF:</span>
-            <input
-              type="range"
-              min="0.4"
-              max="2.5"
-              step="0.05"
-              value={verticalExag}
-              onChange={(e) => setVerticalExag(+e.target.value)}
-              className="w-16 accent-emerald-400 cursor-pointer"
-            />
-            <span className="text-[10px] text-emerald-300 w-7 font-bold">{verticalExag.toFixed(1)}×</span>
-          </div>
-
-          <div className="flex items-center gap-1">
             <Sun className="w-3.5 h-3.5 text-amber-400" />
             <span className="text-[10px] text-slate-400">SUN:</span>
             <input
@@ -1890,7 +1874,6 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
               setRotYaw(0.62);
               setRotPitch(0.54);
               setZoom(1.28);
-              setVerticalExag(1.45);
             }}
             className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[10px] flex items-center gap-1 cursor-pointer"
           >

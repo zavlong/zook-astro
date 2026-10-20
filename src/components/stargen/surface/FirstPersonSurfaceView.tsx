@@ -814,8 +814,8 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
 
         const fineRight = valueNoise2D((px + 0.006) * 42.0, pz * 42.0, tileSeed + 313);
         const fineDown = valueNoise2D(px * 42.0, (pz + 0.006) * 42.0, tileSeed + 313);
-        let nx = -dhx * 1.35 + (fine1 - fineRight) * 1.8;
-        let nz = -dhz * 1.35 + (fine1 - fineDown) * 1.8;
+        let nx = -dhx * 0.6 + (fine1 - fineRight) * 1.8;
+        let nz = -dhz * 0.6 + (fine1 - fineDown) * 1.8;
 
         let r = baseRgb1[0];
         let g = baseRgb1[1];
@@ -1259,8 +1259,8 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
         colorBuffer.fill(baseSkyPixel, rowOff, rowOff + W);
       }
 
-      // 2. Front-to-Back First-Person 3D Terrain Raycasting
-      const verticalScale = 1.35;
+      // 2. Front-to-Back First-Person 3D Terrain Raycasting (Locked 0.6x Relief)
+      const verticalScale = 0.6;
       const nightDim = isNight ? 0.36 : 1.0;
       const cloudShadowStrength = showClouds ? Math.min(0.45, surfaceModel.cloudOpacity * 0.52) : 0;
       const atmoHazeStrength = hasAtmosphere
