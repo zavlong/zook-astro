@@ -2114,7 +2114,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
             starRad * 5.5
           );
           glare.addColorStop(0, starPal.coreHex);
-          glare.addColorStop(0.22, surfaceModel.starColorHex);
+          glare.addColorStop(0.22, starPal.baseHex);
           glare.addColorStop(0.55, `${starPal.limbHex}55`);
           glare.addColorStop(1, 'rgba(255, 255, 255, 0)');
           ctx.fillStyle = glare;
@@ -2142,8 +2142,28 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           ctx.fill();
           ctx.clip();
 
-          // Render bipolar sunspot groups (faculae + penumbra + umbra) across the solar disc
-          if (starPal.spotCoverage > 0.1) {
+          if (starPal.isBrownDwarf) {
+            // Brown Dwarf: render gas-giant latitudinal cloud bands instead of sunspots
+            ctx.save();
+            ctx.translate(sunPos.sx, sunPos.sy);
+            ctx.rotate(-0.14);
+            const bandOffsets = [
+              { y: -0.68, h: 0.20, col: starPal.penumbraHex, alpha: 0.78 },
+              { y: -0.34, h: 0.22, col: starPal.umbraHex, alpha: 0.72 },
+              { y: -0.05, h: 0.16, col: starPal.faculaeHex, alpha: 0.42 },
+              { y: 0.18, h: 0.24, col: starPal.penumbraHex, alpha: 0.80 },
+              { y: 0.54, h: 0.20, col: starPal.umbraHex, alpha: 0.74 },
+            ];
+            for (let bIdx = 0; bIdx < bandOffsets.length; bIdx++) {
+              const bd = bandOffsets[bIdx];
+              ctx.fillStyle = bd.col;
+              ctx.globalAlpha = bd.alpha;
+              ctx.fillRect(-starRad * 1.2, bd.y * starRad, starRad * 2.4, bd.h * starRad);
+            }
+            ctx.restore();
+            ctx.globalAlpha = 1.0;
+          } else if (!starPal.isCompactRemnant && starPal.spotCoverage > 0.1) {
+            // Live Star: render bipolar sunspot groups (faculae + penumbra + umbra) across the solar disc
             const spotRot = radTOD * 0.18;
             const spotDefs = [
               { dx: -0.28, dy: -0.18, r: 0.15, tilt: 0.25 },

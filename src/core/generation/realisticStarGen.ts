@@ -21,7 +21,7 @@ import {
   calculateMSLifetimeGyr,
   calculateStellarEvolution,
 } from '../astrophysics/evolution';
-import { getStarColorRGB } from '../astrophysics/colors';
+import { getStarColorRGB, teffToHex } from '../astrophysics/colors';
 import {
   resolvePlanetClass,
   resolveMoonClass,
@@ -264,18 +264,7 @@ function makeRngHelpers(rng?: PRNG) {
 }
 
 export function starColorHex(T: number, bd?: string): string {
-  if (bd === 'L') return '#e11d48';
-  if (bd === 'T') return '#a855f7';
-  if (bd === 'Y') return '#6366f1';
-  if (T >= 25000) return '#9bb0ff';
-  if (T >= 10000) return '#aabfff';
-  if (T >= 7400) return '#cad7ff';
-  if (T >= 6000) return '#f8f7ff';
-  if (T >= 5200) return '#fff4ea';
-  if (T >= 3850) return '#ffaa55'; // K-dwarfs warm orange
-  if (T >= 3000) return '#ff4438'; // Early M-dwarf (M0-M4) vivid red
-  if (T >= 2200) return '#e61919'; // Mid/late M-dwarf (M5-M9) deep rich red
-  return '#c8102e'; // Sub-stellar / coolest late M ruby red
+  return teffToHex(T, bd === 'L' || bd === 'T' || bd === 'Y');
 }
 
 export function rollStep1(rng?: PRNG): { sysMass: number; age: number; feh: number } {

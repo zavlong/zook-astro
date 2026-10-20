@@ -1,43 +1,119 @@
-import { StarColorData } from '../../types/astrophysics';
+import { SpectralCategory, StarColorData } from '../../types/astrophysics';
+
+function clampByte(n: number): number {
+  return Math.max(0, Math.min(255, Math.round(n)));
+}
+
+function rgbTupleToHex(r: number, g: number, b: number): string {
+  return (
+    '#' +
+    clampByte(r).toString(16).padStart(2, '0') +
+    clampByte(g).toString(16).padStart(2, '0') +
+    clampByte(b).toString(16).padStart(2, '0')
+  );
+}
+
+/**
+ * Continuous blackbody & sub-stellar chromaticity from effective surface temperature (K),
+ * calibrated so 6500 K = pure white (#ffffff / [255, 255, 255]).
+ */
+export function teffToRgb(Teff: number, isBrownDwarf: boolean = false): [number, number, number] {
+  const T = Math.max(150, Number.isFinite(Teff) ? Teff : 5778);
+
+  // Sub-stellar Brown Dwarf regime (L / T / Y sequence below 2250 K, or explicit BD flag < 2450 K)
+  if (T < 2250 || (isBrownDwarf && T < 2450)) {
+    if (T >= 1350) {
+      // L-dwarf sequence (1350 K - 2250 K): glowing ember-crimson to deep ruby-magenta
+      const w = Math.max(0, Math.min(1, (T - 1350) / (2250 - 1350)));
+      return [
+        clampByte(188 + 34 * w),
+        clampByte(36 - 4 * w),
+        clampByte(112 - 96 * w),
+      ];
+    }
+    if (T >= 550) {
+      // T-dwarf sequence (550 K - 1350 K): alkali/methane-broadened magenta to rich violet
+      const w = Math.max(0, Math.min(1, (T - 550) / (1350 - 550)));
+      return [
+        clampByte(132 + 56 * w),
+        clampByte(58 - 22 * w),
+        clampByte(232 - 120 * w),
+      ];
+    }
+    // Y-dwarf sequence (< 550 K): cool indigo-violet
+    const w = Math.max(0, Math.min(1, (T - 180) / (550 - 180)));
+    return [
+      clampByte(82 + 50 * w),
+      clampByte(72 - 14 * w),
+      clampByte(238 - 6 * w),
+    ];
+  }
+
+  // Exact 6500 K White Point
+  if (Math.abs(T - 6500) < 1e-3) {
+    return [255, 255, 255];
+  }
+
+  // Hotter than 6500 K (6500 K -> 50,000+ K): continuous Planckian Rayleigh-Jeans blue shift from white
+  if (T > 6500) {
+    const ratio = T / 6500;
+    const r = clampByte(255 * Math.pow(ratio, -0.44));
+    const g = clampByte(255 * Math.pow(ratio, -0.25));
+    const b = 255;
+    return [Math.max(115, r), Math.max(158, g), b];
+  }
+
+  // Cooler than 6500 K (2250 K -> 6500 K): continuous Planckian locus from ruby-red -> orange -> yellow -> 6500 K white
+  const u = Math.max(0, Math.min(1, (T - 2250) / (6500 - 2250)));
+  const r = T >= 3000 ? 255 : clampByte(222 + 33 * ((T - 2250) / 750));
+  const g = clampByte(32 + 223 * Math.pow(u, 0.72));
+  const b = clampByte(16 + 239 * Math.pow(u, 1.92));
+  return [r, g, b];
+}
+
+/**
+ * Returns hex color string (#rrggbb) directly from surface temperature Teff (6500 K = #ffffff).
+ */
+export function teffToHex(Teff: number, isBrownDwarf: boolean = false): string {
+  const [r, g, b] = teffToRgb(Teff, isBrownDwarf);
+  return rgbTupleToHex(r, g, b);
+}
 
 /**
  * Maps effective surface temperature (Kelvin) and evolutionary phase
- * to realistic astronomical blackbody color coordinates and visual halos.
+ * to continuous astronomical blackbody color coordinates and visual halos (6500 K = white).
  */
 export function getStarColorRGB(Teff: number, phase: string): StarColorData {
   if (phase.includes('Black Hole')) {
     return { r: 10, g: 10, b: 20, glow: 'rgba(168, 85, 247, 0.4)', hex: '#000000', cat: 'remnant' };
   }
-  if (phase.includes('Neutron Star')) {
-    return { r: 180, g: 230, b: 255, glow: 'rgba(140, 220, 255, 0.9)', hex: '#e0f2fe', cat: 'remnant' };
-  }
-  if (phase.includes('White Dwarf')) {
-    return { r: 230, g: 240, b: 255, glow: 'rgba(200, 230, 255, 0.7)', hex: '#f0f9ff', cat: 'remnant' };
+
+  const isRemnant = phase.includes('Neutron Star') || phase.includes('White Dwarf') || phase.includes('Remnant');
+  const isBD = phase.includes('Brown Dwarf');
+  const [r, g, b] = teffToRgb(Teff, isBD);
+  const hex = rgbTupleToHex(r, g, b);
+
+  let cat: SpectralCategory = 'g';
+  if (isRemnant) {
+    cat = 'remnant';
+  } else if (Teff >= 10000) {
+    cat = 'ob';
+  } else if (Teff >= 6000) {
+    cat = 'af';
+  } else if (Teff >= 5200) {
+    cat = 'g';
+  } else {
+    cat = 'km';
   }
 
-  if (Teff < 2600) {
-    return { r: 215, g: 25, b: 35, glow: 'rgba(220, 38, 38, 0.75)', hex: '#dc2626', cat: 'km' };
-  }
-  if (Teff < 3300) {
-    return { r: 240, g: 45, b: 35, glow: 'rgba(239, 68, 68, 0.70)', hex: '#ef4444', cat: 'km' };
-  }
-  if (Teff < 3900) {
-    return { r: 255, g: 69, b: 0, glow: 'rgba(255, 69, 0, 0.65)', hex: '#ff4500', cat: 'km' };
-  }
-  if (Teff < 5200) {
-    return { r: 255, g: 160, b: 60, glow: 'rgba(255, 152, 0, 0.50)', hex: '#ff9800', cat: 'km' };
-  }
-  if (Teff < 6200) {
-    return { r: 255, g: 245, b: 180, glow: 'rgba(255, 240, 160, 0.40)', hex: '#fff59d', cat: 'g' };
-  }
-  if (Teff < 7600) {
-    return { r: 245, g: 248, b: 255, glow: 'rgba(240, 245, 255, 0.40)', hex: '#ffffff', cat: 'af' };
-  }
-  if (Teff < 12000) {
-    return { r: 200, g: 225, b: 255, glow: 'rgba(180, 215, 255, 0.55)', hex: '#90caf9', cat: 'af' };
-  }
-  if (Teff < 30000) {
-    return { r: 150, g: 200, b: 255, glow: 'rgba(120, 180, 255, 0.70)', hex: '#42a5f5', cat: 'ob' };
-  }
-  return { r: 140, g: 220, b: 255, glow: 'rgba(100, 210, 255, 0.85)', hex: '#29b6f6', cat: 'ob' };
+  const glowAlpha = isRemnant ? 0.78 : Teff >= 10000 ? 0.72 : Teff < 3900 ? 0.68 : 0.45;
+  return {
+    r,
+    g,
+    b,
+    glow: `rgba(${r}, ${g}, ${b}, ${glowAlpha})`,
+    hex,
+    cat,
+  };
 }
+
