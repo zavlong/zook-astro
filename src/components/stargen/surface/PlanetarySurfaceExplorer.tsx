@@ -759,10 +759,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       </div>
 
       {/* Interactive Surface Site Telemetry Inspector */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 bg-[#151d2c] p-3 rounded-xl border border-slate-800">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 bg-[#151d2c] p-3 rounded-xl border border-slate-800">
         <div>
           <span className="text-sky-400 font-bold block text-[10px]">
-            COORDINATES
+            LAT / LONG
           </span>
           <b className="text-sky-200 font-mono text-sm">
             {currentTelemetry.lat >= 0 ? `${currentTelemetry.lat}°N` : `${Math.abs(currentTelemetry.lat)}°S`},{' '}
@@ -771,7 +771,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         </div>
 
         <div>
-          <span className="text-slate-400 block text-[10px]">ELEVATION</span>
+          <span className="text-slate-400 block text-[10px]">AVERAGE ELEVATION</span>
           <b
             className={
               surfaceModel.isNoSurface
@@ -808,64 +808,29 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         </div>
 
         <div>
-          <span className="text-slate-400 block text-[10px]">ATMOSPHERE & CLOUDS</span>
+          <span className="text-slate-400 block text-[10px]">PRESSURE</span>
           <b className="text-white">
             {surfaceModel.isNoSurface
-              ? '100% Opaque Deck'
+              ? 'Opaque Deck'
               : currentTelemetry.pressureBar > 0
-              ? `${currentTelemetry.pressureBar} bar (${Math.round(surfaceModel.cloudOpacity * 100)}% cloud)`
-              : 'Vacuum (0% cloud)'}
+              ? `${currentTelemetry.pressureBar} bar`
+              : '0 bar (Vacuum)'}
           </b>
         </div>
 
-        <div className="col-span-2">
-          <span className="text-slate-400 block text-[10px]">
-            {showTileGrid || displayMode === 'terrain' || displayMode === 'horizon'
-              ? activeInspectedTile.secondaryBiomeName
-                ? 'DUAL-BIOME ECOTONE TILE & GEOLOGY'
-                : 'UNIFIED TILE BIOME & GEOLOGY'
-              : 'LOCAL BIOME & GEOLOGY'}
-          </span>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="inline-flex items-center -space-x-1 flex-shrink-0">
-              <span
-                className="w-3 h-3 rounded-full border border-white/25"
-                style={{ backgroundColor: currentTelemetry.biomeColor }}
-              />
-              {(showTileGrid || displayMode === 'terrain' || displayMode === 'horizon') &&
-                activeInspectedTile.secondaryBiomeColor && (
-                  <span
-                    className="w-3 h-3 rounded-full border border-white/35"
-                    style={{ backgroundColor: activeInspectedTile.secondaryBiomeColor }}
-                  />
-                )}
-            </span>
-            <b className="text-slate-200 truncate" title={currentTelemetry.biome}>
-              {currentTelemetry.biome}
-            </b>
-            <div className="ml-auto flex items-center gap-1 flex-shrink-0">
-              {displayMode !== 'terrain' && (
-                <button
-                  type="button"
-                  onClick={() => setDisplayMode('terrain')}
-                  className="px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 border border-emerald-700 text-emerald-200 text-[10px] font-bold cursor-pointer transition"
-                  title="Open 3D Isometric Terrain Block for this Goldberg Tile"
-                >
-                  3D Block
-                </button>
-              )}
-              {displayMode !== 'horizon' && (
-                <button
-                  type="button"
-                  onClick={() => setDisplayMode('horizon')}
-                  className="px-2 py-0.5 rounded bg-amber-950 hover:bg-amber-900 border border-amber-700 text-amber-200 text-[10px] font-bold cursor-pointer transition"
-                  title="Explore this Goldberg Tile in real-time 3D First-Person Surface View"
-                >
-                  First-Person
-                </button>
-              )}
-            </div>
-          </div>
+        <div>
+          <span className="text-slate-400 block text-[10px]">CLOUD COVERAGE</span>
+          <b className="text-sky-200">
+            {surfaceModel.isNoSurface
+              ? '100%'
+              : currentTelemetry.pressureBar > 0
+              ? `${Math.round(
+                  (showTileGrid || displayMode === 'terrain' || displayMode === 'horizon'
+                    ? activeInspectedTile.cloudCover
+                    : surfaceModel.cloudOpacity) * 100
+                )}%`
+              : '0%'}
+          </b>
         </div>
       </div>
 

@@ -5,7 +5,6 @@ import {
   Sun,
   Layers,
   ArrowLeft,
-  Sparkles,
   Cloud,
   ZoomIn,
 } from 'lucide-react';
@@ -2153,22 +2152,6 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           }}
         >
           <canvas ref={canvasRef} className="w-full h-[380px] sm:h-[440px] block object-cover" />
-
-          {/* Bottom-left Telemetry Overlay */}
-          <div className="absolute bottom-2.5 left-2.5 bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-lg border border-slate-800/90 text-[11px] text-slate-300 pointer-events-none flex flex-col gap-0.5">
-            <div className="text-sky-300 font-bold flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5" />
-              3D Biome Terrain Block ({activeTile.biomeName})
-            </div>
-            <div className="text-slate-400 text-[10px]">
-              Surface Temp: <span className="text-white font-semibold">{activeTile.temperatureK} K</span> ({Math.round(activeTile.temperatureK - 273.15)}°C) • Moisture:{' '}
-              <span className="text-cyan-300 font-semibold">{Math.round(activeTile.moisture * 100)}%</span> • Clouds:{' '}
-              <span className="text-sky-200 font-semibold">{Math.round(meshData.effCloudCover * 100)}%</span>
-            </div>
-            <div className="text-slate-400 text-[10px]">
-              Atmosphere: <span className="text-amber-200 font-semibold">{pBarAtmo.toFixed(2)} bar</span> • Drag to orbit 360° • Scroll to zoom ({zoom.toFixed(1)}×)
-            </div>
-          </div>
         </div>
 
         {/* Right Column: Linked Adjacent Tiles */}
