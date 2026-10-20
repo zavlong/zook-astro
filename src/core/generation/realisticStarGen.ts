@@ -2936,12 +2936,17 @@ export function generateZoneSystem(
     }
 
     // Universal thermodynamic safeguard: a water-rich world (b.iceFrac >= 0.04, b.massEarth >= 0.25)
-    // with Teq >= 310 K or Tsurf >= 373.15 K cannot remain solid ice or a subcritical ocean — it is a Supercritical Water World!
+    // with Teq >= 310 K, Tsurf >= 647.1 K, or above freezing (Tsurf >= 273.15 K) with no subcritical liquid ocean
+    // cannot remain solid surface ice — it transitions to a Supercritical Water World!
+    const hasSubcriticalOcean =
+      Boolean(hydro) && (hydro.coveragePct ?? 0) > 0 && hydro.solvent !== 'Supercritical H2O';
     if (
       !hasEnv &&
       b.massEarth >= 0.25 &&
       b.iceFrac >= 0.04 &&
-      (Teq >= 310 || (Tsurf ?? Teq) >= 373.15)
+      (Teq >= 310 ||
+        (Tsurf ?? Teq) >= 647.1 ||
+        ((Tsurf ?? Teq) >= 273.15 && !hasSubcriticalOcean))
     ) {
       pBar = null;
       ghK = 0;
@@ -3953,18 +3958,56 @@ export function sanitizeRealisticSystem(
       const Teq = body.T_eq ?? 255;
       const Tatm = body.T_atm ?? Teq;
       const Tsurf = body.surfaceTempK ?? Tatm;
+      const hasSubcriticalLiquid =
+        (body.hydrosphere?.coveragePct ?? 0) > 0 &&
+        body.hydrosphere?.solvent !== 'Supercritical H2O';
+      const hasSubcriticalAtmo =
+        body.pressureBar !== null &&
+        body.pressureBar !== undefined &&
+        body.pressureBar > 0 &&
+        body.pressureBar < 220.6 &&
+        Tsurf < 647.1;
+
+      // Repair any cached planet that was previously misclassified as Supercritical despite having a subcritical ocean or subcritical atmosphere
+      if (
+        !hasEnv &&
+        (hasSubcriticalLiquid || hasSubcriticalAtmo) &&
+        (body.planetClass?.includes('Supercritical') ||
+          body.atmosphereType?.includes('Supercritical'))
+      ) {
+        body.planetClass = resolvePlanetClass(
+          body.planetClass,
+          Tsurf,
+          body.hydrosphere,
+          body.massEarth,
+          body.iceFrac,
+          body.planetClass.includes('Chthonian'),
+          false,
+          body.pressureBar,
+          body.gases
+        );
+        body.atmosphereType = deriveAtmosphereClassification(
+          body.pressureBar,
+          body.gases,
+          false,
+          false
+        );
+      }
+
       const isAlreadySupercritical =
-        body.hydrosphere?.solvent === 'Supercritical H2O' ||
-        Boolean(body.hydrosphere?.state?.includes('Supercritical')) ||
-        body.planetClass?.includes('Supercritical') ||
-        body.planetClass?.includes('Steam');
+        !hasSubcriticalLiquid &&
+        !hasSubcriticalAtmo &&
+        (body.hydrosphere?.solvent === 'Supercritical H2O' ||
+          Boolean(body.hydrosphere?.state?.includes('Supercritical')) ||
+          body.planetClass?.includes('Supercritical') ||
+          body.planetClass?.includes('Steam'));
 
       if (
         !hasEnv &&
         !isAlreadySupercritical &&
         body.massEarth >= 0.25 &&
         body.iceFrac >= 0.04 &&
-        (Teq >= 310 || Tsurf >= 373.15)
+        (Teq >= 310 || Tsurf >= 647.1 || (Tsurf >= 273.15 && !hasSubcriticalLiquid))
       ) {
         const grav = Math.max(0.05, body.gravityG || 1.0);
         const rE = Math.max(0.1, body.radiusEarth || 1.0);

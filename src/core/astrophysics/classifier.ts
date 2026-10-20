@@ -316,15 +316,32 @@ export function formatRockyBodyClass(
   fallbackClass = ''
 ): string {
   // 0. Supercritical Water World / Water Giant / Steam World check
+  // Water is only supercritical when hydro.solvent is 'Supercritical H2O' (or T >= 647.1 K / P >= 220.6 bar with no subcritical liquid ocean).
+  const hasSubcriticalSurfaceLiquid = Boolean(
+    hydro &&
+      hydro.solvent &&
+      hydro.solvent !== 'Supercritical H2O' &&
+      !hydro.solvent.toLowerCase().includes('supercritical') &&
+      !hydro.state?.toLowerCase().includes('supercritical') &&
+      (hydro.coveragePct ?? 0) > 0 &&
+      T < 647.1
+  );
+  const isSubcriticalAtmosphere =
+    pressureBar !== null &&
+    pressureBar !== undefined &&
+    pressureBar > 0 &&
+    pressureBar < 220.6 &&
+    T < 647.1;
+
   if (
-    fallbackClass.includes('Supercritical') ||
-    fallbackClass.includes('Water Giant') ||
-    fallbackClass.includes('Steam World') ||
-    fallbackClass.includes('Steam Moon') ||
-    hydro?.solvent === 'Supercritical H2O' ||
-    hydro?.state?.includes('Supercritical') ||
-    (!isMoon && massEarth >= 0.25 && iceFrac >= 0.04 && T >= 310) ||
-    (isMoon && massEarth >= 0.25 && iceFrac >= 0.05 && T >= 310)
+    !hasSubcriticalSurfaceLiquid &&
+    !isSubcriticalAtmosphere &&
+    (hydro?.solvent === 'Supercritical H2O' ||
+      hydro?.state?.includes('Supercritical') ||
+      fallbackClass.includes('Supercritical') ||
+      fallbackClass.includes('Water Giant') ||
+      fallbackClass.includes('Steam World') ||
+      fallbackClass.includes('Steam Moon'))
   ) {
     if (isMoon) {
       return T > 500 ? 'Steam Moon' : 'Supercritical Water Moon';
@@ -488,12 +505,30 @@ export function resolvePlanetClass(
   }
 
   // 2. Supercritical Water Worlds, Water Giants, & Steam Worlds
+  const hasSubcriticalLiquid = Boolean(
+    hydro &&
+      hydro.solvent &&
+      hydro.solvent !== 'Supercritical H2O' &&
+      !hydro.solvent.toLowerCase().includes('supercritical') &&
+      !hydro.state?.toLowerCase().includes('supercritical') &&
+      (hydro.coveragePct ?? 0) > 0 &&
+      T < 647.1
+  );
+  const isSubcriticalAtmo =
+    pressureBar !== null &&
+    pressureBar !== undefined &&
+    pressureBar > 0 &&
+    pressureBar < 220.6 &&
+    T < 647.1;
+
   if (
-    c.includes('Supercritical') ||
-    c.includes('Water Giant') ||
-    c.includes('Steam World') ||
-    hydro?.solvent === 'Supercritical H2O' ||
-    hydro?.state?.includes('Supercritical')
+    !hasSubcriticalLiquid &&
+    !isSubcriticalAtmo &&
+    (hydro?.solvent === 'Supercritical H2O' ||
+      hydro?.state?.includes('Supercritical') ||
+      c.includes('Supercritical') ||
+      c.includes('Water Giant') ||
+      c.includes('Steam World'))
   ) {
     if (massEarth >= 10) return 'Water Giant';
     if (T > 500) return 'Steam World';
@@ -520,12 +555,31 @@ export function resolveMoonClass(
   let c = currentClass.split('/')[0].replace(/\s*\([^)]*\)/g, '').trim();
   c = c.replace(/^Sudarsky\s+/i, '');
 
+  const hasSubcriticalLiquid = Boolean(
+    hydro &&
+      hydro.solvent &&
+      hydro.solvent !== 'Supercritical H2O' &&
+      !hydro.solvent.toLowerCase().includes('supercritical') &&
+      !hydro.state?.toLowerCase().includes('supercritical') &&
+      (hydro.coveragePct ?? 0) > 0 &&
+      T < 647.1
+  );
+  const isSubcriticalAtmo =
+    pressureBar !== null &&
+    pressureBar !== undefined &&
+    pressureBar > 0 &&
+    pressureBar < 220.6 &&
+    T < 647.1;
+
   if (
-    c.includes('Supercritical') ||
-    c.includes('Water Giant') ||
-    c.includes('Steam World') ||
-    hydro?.solvent === 'Supercritical H2O' ||
-    hydro?.state?.includes('Supercritical')
+    !hasSubcriticalLiquid &&
+    !isSubcriticalAtmo &&
+    (hydro?.solvent === 'Supercritical H2O' ||
+      hydro?.state?.includes('Supercritical') ||
+      c.includes('Supercritical') ||
+      c.includes('Water Giant') ||
+      c.includes('Steam World') ||
+      c.includes('Steam Moon'))
   ) {
     if (T > 500) return 'Steam Moon';
     return 'Supercritical Water Moon';
