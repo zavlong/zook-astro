@@ -37,7 +37,6 @@ interface LocalVertex {
   x: number; // [-1, 1] in local hex plane
   z: number; // [-1, 1] in local hex plane
   y: number; // Clamped surface elevation (0 over water)
-  seaFloorY: number; // Unclamped solid floor elevation (below sea level if ocean/river)
   nx: number; // Smooth vertex normal X
   ny: number; // Smooth vertex normal Y
   nz: number; // Smooth vertex normal Z
@@ -191,7 +190,6 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
   const [zoom, setZoom] = useState<number>(1.28); // Default zoomed-in so the tile fills the viewport like a full biome
   const [verticalExag, setVerticalExag] = useState<number>(1.45);
   const [showWireframe, setShowWireframe] = useState<boolean>(false);
-  const [showWaterLayer, setShowWaterLayer] = useState<boolean>(true);
   const [showClouds3D, setShowClouds3D] = useState<boolean>(true);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const dragRef = useRef<{
@@ -217,8 +215,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
   const meshData = useMemo(() => {
     const sides = activeTile.isPentagon ? 5 : 6;
     const tileRings = 28; // Rings inside the active Goldberg tile border (edgeFrac = 1.0)
-    const rings = 44; // Total rings including continuous outer terrain apron (edgeFrac up to 1.80)
-    const maxExtent = 1.80; // World coordinate extent [-maxExtent, +maxExtent] for seamless outward continuation
+    const rings = 48; // Total rings including continuous outer terrain apron
+    const maxExtent = 2.25; // World coordinate extent [-maxExtent, +maxExtent] for seamless outward continuation
     const tileSeed = (surfaceModel.seed * 1664525 + activeTile.tileId * 1013904223) & 0x7fffffff;
 
     // Corner angles in local (x, z) plane aligned with neighbor compass directions
@@ -547,17 +545,16 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         !surfaceModel.isNoSurface &&
         (surfaceModel.hasLiquid || anyOceanBiome || isRiverChannel) &&
         hLocal < 0;
-      const finalY = hasSeaHere && showWaterLayer ? 0 : hLocal;
+      const finalY = hasSeaHere ? 0 : hLocal;
 
-      let nx = hasSeaHere && showWaterLayer ? 0 : -(hx - hLocal) / eps;
+      let nx = hasSeaHere ? 0 : -(hx - hLocal) / eps;
       let ny = 1.0;
-      let nz = hasSeaHere && showWaterLayer ? 0 : -(hz - hLocal) / eps;
+      let nz = hasSeaHere ? 0 : -(hz - hLocal) / eps;
       const nLen = Math.hypot(nx, ny, nz) || 1;
       return {
         x: px,
         z: pz,
         y: finalY,
-        seaFloorY: hLocal,
         nx: nx / nLen,
         ny: ny / nLen,
         nz: nz / nLen,
@@ -939,7 +936,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
               g = Math.round(basaltRgb[1] * 0.45 + 15);
               b = Math.round(basaltRgb[2] * 0.45 + 10);
             }
-          } else if (hasSeaHere && showWaterLayer) {
+          } else if (hasSeaHere) {
             flags |= FLAG_WATER;
             const pal = surfaceModel.seaPalette;
             const depthT = Math.min(1, waterDepth / 0.25);
@@ -1141,7 +1138,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       texCloudShadow,
       tileSeed,
     };
-  }, [surfaceModel, activeTile, neighborTiles, showWaterLayer, pBarAtmo, hasAtmosphere]);
+  }, [surfaceModel, activeTile, neighborTiles, pBarAtmo, hasAtmosphere]);
 
   // Render the Per-Pixel Textured & Bump-Mapped 3D Hexagonal Biome Block + Atmosphere & 3D Clouds to Canvas
   useEffect(() => {
@@ -1362,7 +1359,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       if (minX > maxX || minY > maxY) continue;
 
       const area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
-      if (Math.abs(area) < 0.05) continue;
+      // Strictly cull back-facing / underside triangles so underground faces are never rendered
+      if (area <= 0.05) continue;
       const invArea = 1.0 / area;
 
       // Convert vertex coordinates [-maxExtent, +maxExtent] into texture coordinates [0, TEX_RES - 1]
@@ -1482,7 +1480,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
               const wx = w0 * v0.x + w1 * v1.x + w2 * v2.x;
               const wz = w0 * v0.z + w1 * v1.z + w2 * v2.z;
               const rDist = Math.hypot(wx, wz);
-              const edgeFade = rDist > 1.42 ? Math.max(0, Math.min(1, 1.0 - (rDist - 1.42) / (maxExtent - 1.42))) : 1.0;
+              const edgeFade = rDist > 1.75 ? Math.max(0, Math.min(1, 1.0 - (rDist - 1.75) / (maxExtent - 1.75))) : 1.0;
               const alpha = Math.round(255 * edgeFade);
 
               if (alpha > 2) {
@@ -1626,7 +1624,6 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     zoom,
     verticalExag,
     showWireframe,
-    showWaterLayer,
     showClouds3D,
     timeOfDayDeg,
     surfaceModel,
@@ -1731,21 +1728,6 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             >
               <Cloud className="w-3 h-3" />
               Clouds
-            </button>
-          )}
-
-          {surfaceModel.hasLiquid && !surfaceModel.isNoSurface && (
-            <button
-              type="button"
-              onClick={() => setShowWaterLayer((v) => !v)}
-              className={`px-2 py-0.5 rounded border text-[10px] font-bold cursor-pointer transition ${
-                showWaterLayer
-                  ? 'bg-cyan-900/60 border-cyan-500/70 text-cyan-200'
-                  : 'bg-slate-900 border-slate-700 text-slate-400'
-              }`}
-              title="Toggle liquid sea/lake layer to inspect underwater bathymetry"
-            >
-              {showWaterLayer ? 'Liquid ON' : 'Bathymetry'}
             </button>
           )}
 

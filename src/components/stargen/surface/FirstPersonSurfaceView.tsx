@@ -1098,7 +1098,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       const eyeClearance = heightMode === 'flight' ? 0.26 : heightMode === 'skim' ? 0.095 : 0.026;
       const groundH = sampleBilinearHeight(cam.x, cam.z);
       const targetY = groundH + eyeClearance;
-      cam.y += (targetY - cam.y) * Math.min(1, dt * 8.5);
+      cam.y = Math.max(groundH + eyeClearance * 0.85, cam.y + (targetY - cam.y) * Math.min(1, dt * 8.5));
 
       const degHeading = Math.round((((cam.yaw * 180) / Math.PI) % 360 + 360) % 360);
       setHudHeadingDeg((prev) => (prev !== degHeading ? degHeading : prev));
