@@ -494,6 +494,8 @@ export function getPlanetaryGoldbergGrid(
   const maxCrater = new Float32Array(tileCount);
   const sumFracture = new Float32Array(tileCount);
   const maxFracture = new Float32Array(tileCount);
+  const maxFractureLat = new Float32Array(tileCount);
+  const maxFractureLon = new Float32Array(tileCount);
   const maxVolcano = new Float32Array(tileCount);
 
   for (let y = 0; y < 180; y++) {
@@ -523,7 +525,11 @@ export function getPlanetaryGoldbergGrid(
       if (crVal > maxCrater[tId]) maxCrater[tId] = crVal;
       const frVal = surfaceModel.fractureGrid[idx];
       sumFracture[tId] += frVal * cosLat;
-      if (frVal > maxFracture[tId]) maxFracture[tId] = frVal;
+      if (frVal > maxFracture[tId]) {
+        maxFracture[tId] = frVal;
+        maxFractureLat[tId] = 90 - y;
+        maxFractureLon[tId] = x - 180;
+      }
       if (surfaceModel.volcanoGrid[idx] > maxVolcano[tId]) {
         maxVolcano[tId] = surfaceModel.volcanoGrid[idx];
       }
@@ -562,7 +568,10 @@ export function getPlanetaryGoldbergGrid(
     let repLon = cell.centerLon;
     const cy = Math.max(0, Math.min(179, Math.floor(90 - cell.centerLat)));
     const cx = Math.max(0, Math.min(359, Math.floor(cell.centerLon + 180)));
-    if (surfaceModel.biomeGrid[cy * 360 + cx] !== bestBiome) {
+    if (surfaceModel.isNoSurface && maxFracture[tId] > 0.24) {
+      repLat = maxFractureLat[tId];
+      repLon = maxFractureLon[tId];
+    } else if (surfaceModel.biomeGrid[cy * 360 + cx] !== bestBiome) {
       if (biomeHasRep[tId][bestBiome]) {
         repLat = biomeRepLat[tId][bestBiome];
         repLon = biomeRepLon[tId][bestBiome];

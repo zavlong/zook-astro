@@ -15,6 +15,7 @@ import { RealisticMoon } from '../../../types/astrophysics';
 import {
   PlanetarySurfaceModel,
   resolveSolidBiomeColorHex,
+  resolveGasGiantStormColors,
 } from './surfaceGenMath';
 import {
   GoldbergPlanetaryTile,
@@ -936,10 +937,36 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
 
         if (surfaceModel.isNoSurface) {
           const pal = surfaceModel.atmospherePalette;
+          const sc = resolveGasGiantStormColors(
+            pal,
+            surfaceModel.isSupercritical,
+            surfaceModel.isIceGiant
+          );
+          const stormInt = activeTile.fractureIntensity || 0;
+          const dxV = px * 0.85;
+          const dzV = pz * 1.15;
+          const rV = Math.hypot(dxV, dzV);
+          const thetaV = Math.atan2(dzV, dxV);
+          const spinDir = activeTile.centerLat >= 0 ? -1 : 1;
+          const vortexWeight =
+            stormInt > 0.14 && rV < 0.85
+              ? Math.pow(1.0 - rV / 0.85, 1.25) * Math.min(1.0, 0.45 + stormInt * 0.75)
+              : 0;
+          const spiralWave = Math.sin(thetaV * 2.0 + spinDir * rV * 11.0 + fine1 * 3.8) * 0.5 + 0.5;
           const swirl = Math.sin(pz * 18 + fine1 * 3.5 + fine2 * 1.2) * 0.5 + 0.5;
+
           r = Math.round(pal.bandDarkRgb[0] + (pal.bandLightRgb[0] - pal.bandDarkRgb[0]) * swirl);
           g = Math.round(pal.bandDarkRgb[1] + (pal.bandLightRgb[1] - pal.bandDarkRgb[1]) * swirl);
           b = Math.round(pal.bandDarkRgb[2] + (pal.bandLightRgb[2] - pal.bandDarkRgb[2]) * swirl);
+
+          if (vortexWeight > 0.03) {
+            const stR = sc.coreRgb[0] * (1 - spiralWave * 0.45) + sc.collarRgb[0] * (spiralWave * 0.45);
+            const stG = sc.coreRgb[1] * (1 - spiralWave * 0.45) + sc.collarRgb[1] * (spiralWave * 0.45);
+            const stB = sc.coreRgb[2] * (1 - spiralWave * 0.45) + sc.collarRgb[2] * (spiralWave * 0.45);
+            r = Math.round(r * (1 - vortexWeight) + stR * vortexWeight);
+            g = Math.round(g * (1 - vortexWeight) + stG * vortexWeight);
+            b = Math.round(b * (1 - vortexWeight) + stB * vortexWeight);
+          }
         } else {
           const hasSeaHere = isOceanPoint && hLocal < 0;
           const waterDepth = hasSeaHere ? Math.max(0, -hLocal) : 0;

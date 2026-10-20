@@ -1837,11 +1837,79 @@ export function generatePlanetarySurfaceModel(
     cloudRgb: perturbRgbSlightly(rawAtmoPalette.cloudRgb, ggHue * 0.6, ggSat, ggLit, ggWarm * 0.5),
   };
 
-  // Slightly randomized zonal band parameters & storm vortex coordinates for Gas Giants / Ice Giants
+  // Multi-storm vortex system & zonal band parameters for Gas Giants, Ice Giants, & Supercritical Worlds
   const ggBandFreqScale = 0.88 + colorPrng() * 0.24;
   const ggBandPhase = colorPrng() * Math.PI * 2;
-  const ggVortexLat = (colorPrng() < 0.5 ? -1 : 1) * (14 + colorPrng() * 20);
-  const ggVortexLon = (colorPrng() - 0.5) * 280;
+  const ggPrimaryLat = (colorPrng() < 0.5 ? -1 : 1) * (15 + colorPrng() * 13);
+  const ggPrimaryLon = (colorPrng() - 0.5) * 260;
+  const ggPrimaryWakeDir = colorPrng() < 0.5 ? 1 : -1;
+
+  const ggStorms: Array<{
+    lat: number;
+    lon: number;
+    rxLon: number;
+    ryLat: number;
+    isGreatOval: boolean;
+    spinDir: number;
+    wakeDir: number;
+    strength: number;
+  }> = isNoSurface
+    ? [
+        // 0: Primary Great Anticyclonic Oval (e.g., Great Red Spot / Great Dark Spot / Great White Megastorm)
+        {
+          lat: ggPrimaryLat,
+          lon: ggPrimaryLon,
+          rxLon: 16.5 + colorPrng() * 6.5,
+          ryLat: 8.2 + colorPrng() * 3.2,
+          isGreatOval: true,
+          spinDir: ggPrimaryLat >= 0 ? -1 : 1,
+          wakeDir: ggPrimaryWakeDir,
+          strength: 1.0,
+        },
+        // 1: Secondary Temperate Anticyclonic Oval (e.g., Oval BA / Small Dark Spot) in opposite hemisphere
+        {
+          lat: -Math.sign(ggPrimaryLat) * (24 + colorPrng() * 16),
+          lon: ((ggPrimaryLon + 115 + colorPrng() * 130 + 540) % 360) - 180,
+          rxLon: 10.5 + colorPrng() * 4.5,
+          ryLat: 5.8 + colorPrng() * 2.2,
+          isGreatOval: true,
+          spinDir: ggPrimaryLat >= 0 ? 1 : -1,
+          wakeDir: -ggPrimaryWakeDir,
+          strength: 0.86,
+        },
+        // 2..4: Convective Supercell Plumes & Cyclonic Barges in equatorial/mid-latitude shear belts
+        {
+          lat: (colorPrng() - 0.5) * 26,
+          lon: ((ggPrimaryLon - 75 - colorPrng() * 60 + 540) % 360) - 180,
+          rxLon: 8.5 + colorPrng() * 4.0,
+          ryLat: 4.4 + colorPrng() * 1.8,
+          isGreatOval: false,
+          spinDir: 1,
+          wakeDir: ggPrimaryWakeDir,
+          strength: 0.78,
+        },
+        {
+          lat: (colorPrng() < 0.5 ? -1 : 1) * (36 + colorPrng() * 16),
+          lon: (colorPrng() - 0.5) * 320,
+          rxLon: 8.0 + colorPrng() * 3.8,
+          ryLat: 4.2 + colorPrng() * 1.8,
+          isGreatOval: false,
+          spinDir: -1,
+          wakeDir: -ggPrimaryWakeDir,
+          strength: 0.74,
+        },
+        {
+          lat: (colorPrng() < 0.5 ? -1 : 1) * (10 + colorPrng() * 38),
+          lon: (colorPrng() - 0.5) * 320,
+          rxLon: 7.2 + colorPrng() * 3.5,
+          ryLat: 3.8 + colorPrng() * 1.6,
+          isGreatOval: false,
+          spinDir: 1,
+          wakeDir: ggPrimaryWakeDir,
+          strength: 0.70,
+        },
+      ]
+    : [];
 
   // Pre-generate 3D spherical tectonic plates with continental/oceanic crust buoyancy & drift vectors
   const plateCenters: {
@@ -1901,16 +1969,112 @@ export function generatePlanetarySurfaceModel(
 
       // 1. Compute swirling atmospheric / cloud field for all worlds with an atmosphere
       if (isNoSurface) {
-        // Zonal banded jet streams + cyclonic storms for Gas Giants, Ice Giants, & Supercritical Water Worlds
+        // Zonal banded jet streams + multi-vortex storm systems for Gas Giants, Ice Giants, & Supercritical Worlds
         const bandFreq = (isSupercritical ? 9 : isIceGiant ? 8 : 14) * ggBandFreqScale;
         const swirl = sphericalFbm(lat * 1.4, lon * 0.9, seed + 701, 4);
-        const jetWave = Math.sin(latRad * bandFreq + ggBandPhase + (swirl - 0.5) * 3.6) * 0.5 + 0.5;
-        const fineBands = Math.cos(latRad * bandFreq * 2.1 - ggBandPhase * 0.6 - swirl * 2.4) * 0.22;
-        const vortex = Math.max(
+        const fineSwirl = sphericalFbm(lat * 3.2, lon * 2.4, seed + 1103, 3);
+
+        let deflectedLatRad = latRad;
+        let bestStormInt = 0;
+        let bestStormCode = 0;
+        let stormCloudMod = 0;
+
+        for (let sIdx = 0; sIdx < ggStorms.length; sIdx++) {
+          const st = ggStorms[sIdx];
+          const dLatRaw = lat - st.lat;
+          const dLonRaw = ((lon - st.lon + 540) % 360) - 180;
+
+          // Quick bounding box check including downstream turbulent wake
+          if (Math.abs(dLatRaw) > st.ryLat * 2.8 || Math.abs(dLonRaw) > st.rxLon * 4.2) continue;
+
+          // Organic domain warp so storm ovals and convective plumes have fluid boundaries
+          const dLat = dLatRaw + (swirl - 0.5) * st.ryLat * 0.28;
+          const dLon = dLonRaw + (fineSwirl - 0.5) * st.rxLon * 0.25;
+          const nx = dLon / st.rxLon;
+          const ny = dLat / st.ryLat;
+          const rNorm = Math.hypot(nx, ny);
+
+          // Deflect zonal jet streams north/south around the anticyclonic vortex periphery
+          if (rNorm < 2.2) {
+            const deflectEnv = Math.exp(-rNorm * rNorm * 0.65) * st.strength;
+            deflectedLatRad += ((dLatRaw >= 0 ? 1 : -1) * deflectEnv * 0.14) / Math.max(1, bandFreq * 0.12);
+          }
+
+          // 1. Primary Vortex Core & Spiral Eyewall Collar
+          if (rNorm < 1.32) {
+            const theta = Math.atan2(ny, nx);
+            const spiralArms =
+              Math.sin(theta * 2.0 + st.spinDir * rNorm * 8.5 + swirl * 3.8 + fineSwirl * 2.2) * 0.5 + 0.5;
+            const coreDome = rNorm < 0.92 ? Math.pow(1.0 - rNorm / 0.92, 1.35) : 0;
+            const collarRing = Math.exp(-Math.pow((rNorm - 0.84) / 0.19, 2));
+
+            if (st.isGreatOval) {
+              const ovalInt = Math.min(
+                1.0,
+                (coreDome * (0.76 + 0.24 * spiralArms) + collarRing * 0.62) * st.strength
+              );
+              if (ovalInt > bestStormInt) {
+                bestStormInt = ovalInt;
+                bestStormCode = rNorm < 0.78 ? 0.85 : 0.62;
+              }
+              // Sculpt 3D spiral cloud top relief inside the Great Oval
+              stormCloudMod +=
+                coreDome * (0.22 + 0.28 * spiralArms) - collarRing * 0.18 + (rNorm < 0.28 ? 0.12 : 0);
+            } else {
+              // Convective Lightning Supercell / Cyclonic Barge
+              const plumePulse = Math.sin(theta * 3.0 - st.spinDir * rNorm * 6.5 + fineSwirl * 4.5) * 0.5 + 0.5;
+              const supercellInt = Math.min(
+                1.0,
+                (coreDome * (0.72 + 0.28 * plumePulse) + collarRing * 0.45) * st.strength
+              );
+              if (supercellInt > bestStormInt) {
+                bestStormInt = supercellInt;
+                bestStormCode = 0.42;
+              }
+              stormCloudMod += coreDome * (0.32 + 0.22 * plumePulse);
+            }
+          }
+
+          // 2. Downstream Turbulent Wake Train (Karman Vortex Street trailing in the shear zone)
+          const wakeDist = (dLonRaw * st.wakeDir) / st.rxLon;
+          if (wakeDist > 0.75 && wakeDist < 3.8 && Math.abs(ny) < 1.25) {
+            const wakeDecay = (1.0 - (wakeDist - 0.75) / 3.05) * Math.max(0, 1.0 - Math.abs(ny) / 1.25);
+            const wakeEddy =
+              Math.sin(wakeDist * 5.2 + ny * 3.6 + swirl * 5.0 + fineSwirl * 3.0) * 0.5 + 0.5;
+            const wakeInt = wakeDecay * (0.35 + 0.65 * wakeEddy) * 0.68 * st.strength;
+            if (wakeInt > bestStormInt) {
+              bestStormInt = wakeInt;
+              bestStormCode = st.isGreatOval ? 0.58 : 0.38;
+            }
+            stormCloudMod += wakeDecay * (wakeEddy - 0.45) * 0.36;
+          }
+        }
+
+        // 3. Circumpolar Cyclonic Vortex Collar (Hexagonal / Rosette Polar Jet at |lat| > 72°)
+        const absLat = Math.abs(lat);
+        if (absLat > 71) {
+          const lonRad = (lon * Math.PI) / 180;
+          const polyWave = Math.sin(lonRad * 6.0 + ggBandPhase) * 1.8;
+          const polarDist = (absLat - (73.5 + polyWave)) / 15.0;
+          if (polarDist > 0) {
+            const polarSwirl = Math.sin(lonRad * 8.0 - polarDist * 9.0 + swirl * 4.2) * 0.5 + 0.5;
+            const polarInt = Math.min(0.85, polarDist * (0.65 + 0.35 * polarSwirl));
+            if (polarInt > bestStormInt) {
+              bestStormInt = polarInt;
+              bestStormCode = 0.20;
+            }
+            stormCloudMod += polarDist * (polarSwirl - 0.5) * 0.32;
+          }
+        }
+
+        const jetWave = Math.sin(deflectedLatRad * bandFreq + ggBandPhase + (swirl - 0.5) * 3.6) * 0.5 + 0.5;
+        const fineBands = Math.cos(deflectedLatRad * bandFreq * 2.1 - ggBandPhase * 0.6 - swirl * 2.4) * 0.22;
+        cloudGrid[idx] = Math.max(
           0,
-          1.0 - Math.hypot((lat - ggVortexLat) * 0.08, ((lon - ggVortexLon + 540) % 360 - 180) * 0.045)
+          Math.min(1, jetWave * 0.72 + fineBands + swirl * 0.28 + stormCloudMod)
         );
-        cloudGrid[idx] = Math.max(0, Math.min(1, jetWave * 0.72 + fineBands + swirl * 0.28 + vortex * 0.35));
+        fractureGrid[idx] = bestStormInt;
+        craterGrid[idx] = bestStormCode;
         hypsometry[idx] = 0.5; // Blank solid surface
         continue;
       }
@@ -3202,6 +3366,79 @@ export function resolveSolidBiomeColorHex(
   return (BIOMES.find((bm) => bm.id === biomeId) || BIOMES[4]).color;
 }
 
+export interface GasGiantStormPalette {
+  greatOvalName: string;
+  coreRgb: [number, number, number];
+  collarRgb: [number, number, number];
+  supercellRgb: [number, number, number];
+  polarRgb: [number, number, number];
+}
+
+export function resolveGasGiantStormColors(
+  atmospherePalette: AtmosphereCloudPalette,
+  isSupercritical: boolean,
+  isIceGiant: boolean
+): GasGiantStormPalette {
+  const label = atmospherePalette.classLabel;
+
+  if (isSupercritical || label.includes('Class II')) {
+    return {
+      greatOvalName: isSupercritical
+        ? 'Supercritical Anticyclonic Megastorm'
+        : 'Great Anticyclonic Water-Cloud Vortex',
+      coreRgb: [42, 86, 158],
+      collarRgb: [248, 252, 255],
+      supercellRgb: [255, 255, 255],
+      polarRgb: [28, 62, 124],
+    };
+  }
+  if (isIceGiant && label.includes('Ice Giant')) {
+    // Neptune / Uranus-like Great Dark Spot with bright white high-altitude methane-ice companion clouds
+    return {
+      greatOvalName: 'Great Dark Methane Anticyclone',
+      coreRgb: [12, 48, 118],
+      collarRgb: [232, 252, 255],
+      supercellRgb: [244, 254, 255],
+      polarRgb: [18, 82, 138],
+    };
+  }
+  if (label.includes('Class V')) {
+    return {
+      greatOvalName: 'Incandescent Silicate-Iron Super-Vortex',
+      coreRgb: [255, 206, 64],
+      collarRgb: [188, 48, 22],
+      supercellRgb: [255, 232, 128],
+      polarRgb: [64, 14, 12],
+    };
+  }
+  if (label.includes('Class IV')) {
+    return {
+      greatOvalName: 'Alkali-Vapor Crimson Megavortex',
+      coreRgb: [204, 52, 108],
+      collarRgb: [238, 152, 206],
+      supercellRgb: [248, 188, 228],
+      polarRgb: [28, 18, 62],
+    };
+  }
+  if (label.includes('Class III')) {
+    return {
+      greatOvalName: 'Abyssal Indigo Anticyclonic Vortex',
+      coreRgb: [10, 28, 96],
+      collarRgb: [148, 202, 255],
+      supercellRgb: [196, 228, 255],
+      polarRgb: [14, 38, 112],
+    };
+  }
+  // Default Sudarsky Class I (Jovian Ammonia Cloud Decks): Great Red / Crimson-Amber Spot chromophores
+  return {
+    greatOvalName: 'Great Anticyclonic Chromophore Oval',
+    coreRgb: [214, 74, 38],
+    collarRgb: [250, 212, 168],
+    supercellRgb: [255, 248, 234],
+    polarRgb: [124, 68, 36],
+  };
+}
+
 /**
  * Computes the RGB color and physical properties of a single (x, y) texel in the 360x180
  * surface map for any requested layer ('satellite', 'clouds', 'biomes', 'topography', etc.),
@@ -3309,16 +3546,62 @@ export function evaluateSurfaceMapTexel(
             bandScale -
           bandWarmth * 0.75;
       }
+
+      // Blend Gas Giant / Ice Giant / Supercritical Storm Vortices, Eyewall Collars, & Convective Supercells
+      const stormInt = fractureGrid[idx];
+      const stormCode = craterGrid[idx];
+      if (stormInt > 0.04) {
+        const sc = resolveGasGiantStormColors(
+          atmospherePalette,
+          surfaceModel.isSupercritical,
+          surfaceModel.isIceGiant
+        );
+        const spiralFilaments = 0.55 + 0.45 * Math.sin(cVal * Math.PI * 3.2);
+        let stR = sc.coreRgb[0];
+        let stG = sc.coreRgb[1];
+        let stB = sc.coreRgb[2];
+
+        if (stormCode >= 0.70) {
+          // Great Anticyclonic Oval Core (spiral arms blending core chromophores with collar clouds)
+          const collarMix = Math.max(0, Math.min(1, (1.0 - stormInt) * 1.45)) * 0.55 + (1 - spiralFilaments) * 0.25;
+          stR = sc.coreRgb[0] * (1 - collarMix) + sc.collarRgb[0] * collarMix;
+          stG = sc.coreRgb[1] * (1 - collarMix) + sc.collarRgb[1] * collarMix;
+          stB = sc.coreRgb[2] * (1 - collarMix) + sc.collarRgb[2] * collarMix;
+        } else if (stormCode >= 0.50) {
+          // Peripheral Vortex Collar & Downstream Karman Wake Eddies
+          const wakeMix = 0.35 + 0.65 * spiralFilaments;
+          stR = sc.coreRgb[0] * (1 - wakeMix) + sc.collarRgb[0] * wakeMix;
+          stG = sc.coreRgb[1] * (1 - wakeMix) + sc.collarRgb[1] * wakeMix;
+          stB = sc.coreRgb[2] * (1 - wakeMix) + sc.collarRgb[2] * wakeMix;
+        } else if (stormCode >= 0.30) {
+          // Convective Supercell & Lightning Plume
+          stR = sc.supercellRgb[0] * (0.82 + 0.18 * spiralFilaments);
+          stG = sc.supercellRgb[1] * (0.82 + 0.18 * spiralFilaments);
+          stB = sc.supercellRgb[2] * (0.82 + 0.18 * spiralFilaments);
+        } else {
+          // Circumpolar Cyclonic Vortex Collar
+          stR = sc.polarRgb[0] * (0.75 + 0.25 * spiralFilaments);
+          stG = sc.polarRgb[1] * (0.75 + 0.25 * spiralFilaments);
+          stB = sc.polarRgb[2] * (0.75 + 0.25 * spiralFilaments);
+        }
+
+        const blendW = Math.min(0.92, Math.pow(stormInt, 0.82) * 0.94);
+        r = r * (1 - blendW) + stR * blendW;
+        g = g * (1 - blendW) + stG * blendW;
+        b = b * (1 - blendW) + stB * blendW;
+      }
+
       r = Math.max(0, Math.min(255, r));
       g = Math.max(0, Math.min(255, g));
       b = Math.max(0, Math.min(255, b));
 
       if (applyReliefInSatellite) {
-        const cnx = -dcdx * 14;
-        const cny = -dcdy * 14;
+        const reliefBoost = 14 + stormInt * 12;
+        const cnx = -dcdx * reliefBoost;
+        const cny = -dcdy * reliefBoost;
         const invLen = 1.0 / Math.sqrt(cnx * cnx + cny * cny + 1.0);
         const NdotL = (cnx * Lx + cny * Ly + Lz) * invLen;
-        const cloudRelief = 0.95 + (NdotL - Lz) * 0.65;
+        const cloudRelief = 0.95 + (NdotL - Lz) * (0.65 + stormInt * 0.25);
         r = Math.max(0, Math.min(255, Math.round(r * cloudRelief)));
         g = Math.max(0, Math.min(255, Math.round(g * cloudRelief)));
         b = Math.max(0, Math.min(255, Math.round(b * cloudRelief)));
@@ -4402,8 +4685,32 @@ export function sampleSurfacePoint(
   let biomeColor = resolveSolidBiomeColorHex(biomeId, model.floraPalette, model.compositionPalette);
 
   if (model.isNoSurface) {
-    biomeName = model.atmospherePalette.classLabel;
-    biomeColor = rgbToHex(model.atmospherePalette.bandLightRgb);
+    const stormInt = model.fractureGrid[idx];
+    const stormCode = model.craterGrid[idx];
+    const cVal = model.cloudGrid[idx];
+    const sc = resolveGasGiantStormColors(
+      model.atmospherePalette,
+      model.isSupercritical,
+      model.isIceGiant
+    );
+    if (stormInt > 0.26 && stormCode >= 0.70) {
+      biomeName = sc.greatOvalName;
+      biomeColor = rgbToHex(sc.coreRgb);
+    } else if (stormInt > 0.22 && stormCode >= 0.50) {
+      biomeName = 'Turbulent Storm Collar & Wake Eddies';
+      biomeColor = rgbToHex(sc.collarRgb);
+    } else if (stormInt > 0.22 && stormCode >= 0.30) {
+      biomeName = 'Convective Supercell & Lightning Plume';
+      biomeColor = rgbToHex(sc.supercellRgb);
+    } else if (stormInt > 0.22 && stormCode >= 0.15) {
+      biomeName = 'Circumpolar Cyclonic Vortex';
+      biomeColor = rgbToHex(sc.polarRgb);
+    } else {
+      biomeName = model.atmospherePalette.classLabel;
+      biomeColor = rgbToHex(
+        lerpRgbTuple(model.atmospherePalette.bandDarkRgb, model.atmospherePalette.bandLightRgb, cVal)
+      );
+    }
   } else if (volcVal > 1.1) {
     biomeName = 'Active Volcanic Lava Caldera';
     biomeColor = '#fbbf24';
@@ -4516,7 +4823,13 @@ export function sampleSurfacePoint(
   // Generate plausible procedural name for geographical feature
   const hemisphere = clampedLat >= 0 ? 'Northern' : 'Southern';
   const prefix = model.isNoSurface
-    ? 'Zonal Band'
+    ? model.fractureGrid[idx] > 0.26 && model.craterGrid[idx] >= 0.70
+      ? 'Anticyclonic Oval'
+      : model.fractureGrid[idx] > 0.22 && model.craterGrid[idx] >= 0.30
+      ? 'Supercell Vortex'
+      : model.fractureGrid[idx] > 0.22
+      ? 'Polar Vortex'
+      : 'Zonal Band'
     : volcVal > 0.38
     ? 'Tholus / Mons'
     : isOcean

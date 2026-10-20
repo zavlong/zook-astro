@@ -13,6 +13,7 @@ import { RealisticMoon } from '../../../types/astrophysics';
 import {
   PlanetarySurfaceModel,
   resolveSolidBiomeColorHex,
+  resolveGasGiantStormColors,
 } from './surfaceGenMath';
 import {
   GoldbergPlanetaryTile,
@@ -55,6 +56,7 @@ interface CloudPuff3D {
   ry: number;
   density: number; // [0..1]
   isStormAnvil: boolean;
+  hasLightning?: boolean;
   r?: number;
   g?: number;
   b?: number;
@@ -1258,6 +1260,11 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const cloudPuffs: CloudPuff3D[] = [];
     if (surfaceModel.isNoSurface) {
       const pal = surfaceModel.atmospherePalette;
+      const stormColors = resolveGasGiantStormColors(
+        pal,
+        surfaceModel.isSupercritical,
+        surfaceModel.isIceGiant
+      );
       const tileRgb = hexToRgb(activeTile.biomeColor || surfaceModel.skyHorizonHex);
       const nbColors = neighborEntries.map((ne) => ({
         dirX: ne.dirX,
@@ -1269,13 +1276,18 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       const decks = [
         { yBase: -0.30, gridN: 11, span: 1.55, deckType: 0 }, // Deep tropospheric belt cloud deck
         { yBase: -0.02, gridN: 14, span: 1.45, deckType: 1 }, // Mid-troposphere banded zonal cloud deck
-        { yBase: 0.24, gridN: 12, span: 1.35, deckType: 2 },  // Upper ammonia/methane/alkali bright cloud deck
+        { yBase: 0.24, gridN: 13, span: 1.38, deckType: 2 },  // Upper ammonia/methane/alkali bright cloud & storm deck
       ];
 
-      // Optional anticyclonic storm vortex oval center
-      const hasGreatOval = hash2(activeTile.tileId, 17, tileSeed) > 0.42;
-      const ovalX = (hash2(activeTile.tileId, 31, tileSeed) - 0.5) * 0.65;
-      const ovalZ = (hash2(activeTile.tileId, 47, tileSeed) - 0.5) * 0.55;
+      // Determine storm vortex presence & intensity from global storm grid (fractureIntensity & craterIntensity)
+      const globalStormInt = activeTile.fractureIntensity || 0;
+      const globalStormCode = activeTile.craterIntensity || 0;
+      const isMajorStormTile = globalStormInt > 0.16;
+      const hasGreatOval = isMajorStormTile || hash2(activeTile.tileId, 17, tileSeed) > 0.45;
+      const ovalX = (hash2(activeTile.tileId, 31, tileSeed) - 0.5) * (isMajorStormTile ? 0.36 : 0.65);
+      const ovalZ = (hash2(activeTile.tileId, 47, tileSeed) - 0.5) * (isMajorStormTile ? 0.30 : 0.55);
+      const ovalRadius = isMajorStormTile ? 0.62 + globalStormInt * 0.38 : 0.40;
+      const spinDir = activeTile.centerLat >= 0 ? -1 : 1;
 
       for (let dIdx = 0; dIdx < decks.length; dIdx++) {
         const deck = decks[dIdx];
@@ -1291,17 +1303,33 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             // Zonal jet stream wave & turbulent eddies
             const warpX = fbm2D(cx * 2.1 + dIdx * 1.7, cz * 2.1 - dIdx * 1.3, tileSeed + 307 + dIdx * 59, 3) - 0.5;
             const warpZ = fbm2D(cx * 2.1 - 3.4, cz * 2.1 + 2.8, tileSeed + 409 + dIdx * 83, 3) - 0.5;
-            const bandPhase = (cz + warpZ * 0.28) * 7.5 + Math.sin(cx * 2.6 + warpX * 2.4) * 0.85;
+
+            // Distance & logarithmic spiral phase around anticyclonic/cyclonic storm vortex
+            const dxOval = (cx - ovalX) * 0.76;
+            const dzOval = (cz - ovalZ) * 1.18;
+            const dOval = hasGreatOval ? Math.hypot(dxOval, dzOval) : 99;
+            const rNorm = dOval / ovalRadius;
+            const inOval = rNorm < 1.25;
+            const thetaOval = inOval ? Math.atan2(dzOval, dxOval) : 0;
+            const spiralArms = inOval
+              ? Math.sin(thetaOval * 2.0 + spinDir * rNorm * 8.5 + warpX * 3.2) * 0.5 + 0.5
+              : 0;
+            const collarWeight = inOval ? Math.exp(-Math.pow((rNorm - 0.78) / 0.22, 2)) : 0;
+            const coreWeight = rNorm < 0.92 ? Math.pow(1.0 - rNorm / 0.92, 1.35) : 0;
+            const ovalWeight = inOval
+              ? Math.min(1.0, coreWeight * (0.68 + 0.32 * spiralArms) + collarWeight * 0.65) *
+                (isMajorStormTile ? 1.0 : 0.68)
+              : 0;
+
+            // Deflect zonal bands around the storm vortex
+            const deflectZ = inOval ? (dzOval >= 0 ? 1 : -1) * Math.exp(-rNorm * rNorm * 0.9) * 0.22 : 0;
+            const bandPhase =
+              (cz + deflectZ + warpZ * 0.28) * 7.5 + Math.sin(cx * 2.6 + warpX * 2.4) * 0.85;
             const bandWave = Math.sin(bandPhase) * 0.5 + 0.5;
             const eddy = fbm2D((cx + warpX * 0.35) * 3.4, (cz + warpZ * 0.35) * 3.4, tileSeed + 523 + dIdx * 97, 4);
 
-            // Distance to anticyclonic storm vortex
-            const dOval = hasGreatOval ? Math.hypot((cx - ovalX) * 0.78, (cz - ovalZ) * 1.25) : 99;
-            const inOval = dOval < 0.38;
-            const ovalWeight = inOval ? Math.pow(1.0 - dOval / 0.38, 1.4) : 0;
-
-            const densRaw = eddy * 0.62 + bandWave * 0.38 + ovalWeight * 0.45;
-            const threshold = deck.deckType === 2 ? 0.46 : deck.deckType === 1 ? 0.34 : 0.30;
+            const densRaw = eddy * 0.58 + bandWave * 0.36 + ovalWeight * 0.56;
+            const threshold = deck.deckType === 2 ? 0.44 : deck.deckType === 1 ? 0.33 : 0.29;
             if (densRaw <= threshold) continue;
 
             const dens = Math.min(1, (densRaw - threshold) / (1 - threshold));
@@ -1353,28 +1381,51 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
               pB = pal.bandLightRgb[2] * (1 - u) + pal.cloudRgb[2] * u;
             }
 
-            // Anticyclonic storm vortex chromophore tint (e.g. Great Red/Amber/Cobalt Spot swirl)
-            if (ovalWeight > 0.05) {
-              const stormR = Math.min(255, pal.bandDarkRgb[0] * 0.55 + pal.bandLightRgb[0] * 0.45 + 38);
-              const stormG = Math.max(0, pal.bandDarkRgb[1] * 0.65 + pal.bandLightRgb[1] * 0.25 - 12);
-              const stormB = Math.max(0, pal.bandDarkRgb[2] * 0.70 + pal.atmoRgb[2] * 0.30);
-              pR = pR * (1 - ovalWeight * 0.75) + stormR * (ovalWeight * 0.75);
-              pG = pG * (1 - ovalWeight * 0.75) + stormG * (ovalWeight * 0.75);
-              pB = pB * (1 - ovalWeight * 0.75) + stormB * (ovalWeight * 0.75);
+            // Apply authentic Gas Giant / Ice Giant / Supercritical Storm Vortex & Supercell colors
+            if (ovalWeight > 0.04) {
+              let stormR = stormColors.coreRgb[0];
+              let stormG = stormColors.coreRgb[1];
+              let stormB = stormColors.coreRgb[2];
+
+              if (globalStormCode >= 0.30 && globalStormCode < 0.50) {
+                // Convective Lightning Supercell Plume
+                const scMix = 0.35 + 0.65 * spiralArms;
+                stormR = stormColors.coreRgb[0] * (1 - scMix) + stormColors.supercellRgb[0] * scMix;
+                stormG = stormColors.coreRgb[1] * (1 - scMix) + stormColors.supercellRgb[1] * scMix;
+                stormB = stormColors.coreRgb[2] * (1 - scMix) + stormColors.supercellRgb[2] * scMix;
+              } else {
+                // Great Anticyclonic Oval: core chromophore + bright spiral collar ring
+                const cMix = Math.min(1, collarWeight * 0.72 + (1 - coreWeight) * 0.35 * spiralArms);
+                stormR = stormColors.coreRgb[0] * (1 - cMix) + stormColors.collarRgb[0] * cMix;
+                stormG = stormColors.coreRgb[1] * (1 - cMix) + stormColors.collarRgb[1] * cMix;
+                stormB = stormColors.coreRgb[2] * (1 - cMix) + stormColors.collarRgb[2] * cMix;
+              }
+
+              const blendStorm = Math.min(0.92, ovalWeight * (isMajorStormTile ? 0.92 : 0.76));
+              pR = pR * (1 - blendStorm) + stormR * blendStorm;
+              pG = pG * (1 - blendStorm) + stormG * blendStorm;
+              pB = pB * (1 - blendStorm) + stormB * blendStorm;
             }
 
             const yJitter = (hash2(gx, gz, tileSeed + 991 + dIdx * 43) - 0.5) * 0.07;
-            const alt = deck.yBase + yJitter + bandWave * 0.04 + ovalWeight * 0.06;
+            const stormTowerLift =
+              ovalWeight * (deck.deckType === 2 ? 0.13 : 0.07) + collarWeight * 0.04;
+            const alt = deck.yBase + yJitter + bandWave * 0.04 + stormTowerLift;
+            const hasLightning =
+              deck.deckType >= 1 &&
+              ovalWeight > 0.32 &&
+              hash2(gx * 3, gz * 3, tileSeed + 1409 + dIdx * 71) > 0.68;
 
             cloudPuffs.push({
               x: cx,
               y: alt,
               z: cz,
-              // Elongate horizontally along zonal wind bands
-              rx: (0.11 + dens * 0.11) * (deck.deckType === 1 ? 1.35 : 1.15),
-              ry: 0.032 + dens * (deck.deckType === 2 ? 0.048 : 0.038),
-              density: Math.min(0.95, 0.38 + dens * 0.56),
-              isStormAnvil: ovalWeight > 0.25 || dens > 0.72,
+              // Elongate horizontally along zonal wind bands or storm spiral arms
+              rx: (0.11 + dens * 0.11) * (deck.deckType === 1 ? 1.35 : 1.18),
+              ry: 0.032 + dens * (deck.deckType === 2 ? 0.052 : 0.038) + ovalWeight * 0.018,
+              density: Math.min(0.96, 0.38 + dens * 0.56 + ovalWeight * 0.12),
+              isStormAnvil: ovalWeight > 0.22 || dens > 0.72,
+              hasLightning,
               r: Math.max(0, Math.min(255, Math.round(pR))),
               g: Math.max(0, Math.min(255, Math.round(pG))),
               b: Math.max(0, Math.min(255, Math.round(pB))),
@@ -1657,6 +1708,11 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       //    (NO SOLID SURFACE OR GROUND PLANE)
       // ============================================================================
       const pal = surfaceModel.atmospherePalette;
+      const stormColors = resolveGasGiantStormColors(
+        pal,
+        surfaceModel.isSupercritical,
+        surfaceModel.isIceGiant
+      );
       const tileRgb = hexToRgb(activeTile.biomeColor || surfaceModel.skyHorizonHex);
       const nightCloudMult = isNight ? 0.36 : isSunset ? 0.86 : 1.0;
 
@@ -1700,6 +1756,37 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         ctx.fill();
         ctx.restore();
       }
+
+      // If this tile is in or near a Gas Giant Storm, paint a deep swirling anticyclonic vortex glow in the cloud deck
+      if ((activeTile.fractureIntensity || 0) > 0.16) {
+        const ovalX = (hash2(activeTile.tileId, 31, meshData.tileSeed) - 0.5) * 0.36;
+        const ovalZ = (hash2(activeTile.tileId, 47, meshData.tileSeed) - 0.5) * 0.30;
+        const pCenter = project3D(ovalX, -0.05, ovalZ);
+        const vRx = scale * (0.68 + (activeTile.fractureIntensity || 0) * 0.25) * pCenter.persp;
+        const vRy = vRx * (0.48 + 0.36 * Math.sin(rotPitch));
+        const stR = Math.round(stormColors.coreRgb[0] * nightCloudMult);
+        const stG = Math.round(stormColors.coreRgb[1] * nightCloudMult);
+        const stB = Math.round(stormColors.coreRgb[2] * nightCloudMult);
+        const colR = Math.round(stormColors.collarRgb[0] * nightCloudMult);
+        const colG = Math.round(stormColors.collarRgb[1] * nightCloudMult);
+        const colB = Math.round(stormColors.collarRgb[2] * nightCloudMult);
+
+        const vGrad = ctx.createRadialGradient(
+          pCenter.sx,
+          pCenter.sy,
+          vRy * 0.08,
+          pCenter.sx,
+          pCenter.sy,
+          Math.max(vRx, vRy)
+        );
+        vGrad.addColorStop(0, `rgba(${stR}, ${stG}, ${stB}, 0.55)`);
+        vGrad.addColorStop(0.55, `rgba(${colR}, ${colG}, ${colB}, 0.32)`);
+        vGrad.addColorStop(1, `rgba(${stR}, ${stG}, ${stB}, 0)`);
+        ctx.fillStyle = vGrad;
+        ctx.beginPath();
+        ctx.ellipse(pCenter.sx, pCenter.sy, vRx, vRy, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
 
       // Project & depth-sort all 3D colored cloud puffs
@@ -1713,7 +1800,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       const drawCloudPuffItem = (puff: CloudPuff3D, p: ReturnType<typeof project3D>) => {
         const rxPx = puff.rx * scale * p.persp;
         const ryPx = puff.ry * scale * p.persp * (0.54 + 0.46 * Math.sin(rotPitch));
-        const alpha = Math.min(0.90, puff.density * 0.82);
+        const alpha = Math.min(0.92, puff.density * 0.84);
 
         const cR = puff.r ?? pal.cloudRgb[0];
         const cG = puff.g ?? pal.cloudRgb[1];
@@ -1745,6 +1832,18 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         ctx.beginPath();
         ctx.ellipse(p.sx, p.sy, rxPx, ryPx, 0, 0, Math.PI * 2);
         ctx.fill();
+
+        // Deep convective storm lightning illumination inside storm eyewall / supercell clouds
+        if (puff.hasLightning) {
+          const lGrad = ctx.createRadialGradient(p.sx, p.sy, 1, p.sx, p.sy, rxPx * 0.62);
+          lGrad.addColorStop(0, 'rgba(224, 242, 254, 0.55)');
+          lGrad.addColorStop(0.45, 'rgba(125, 211, 252, 0.22)');
+          lGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+          ctx.fillStyle = lGrad;
+          ctx.beginPath();
+          ctx.ellipse(p.sx, p.sy, rxPx * 0.62, ryPx * 0.62, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
       };
 
       // Render lower & mid-troposphere colored cloud decks first
