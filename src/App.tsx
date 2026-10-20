@@ -24,6 +24,7 @@ import { StarGenParams } from './core/generation/realisticStarGen';
 import { GalaxySectorHex } from './core/generation/galaxyGen';
 import { SectorHexConfig } from './core/generation/sectorHex';
 import { PlanetarySurfaceApp, PlanetarySurfaceTarget } from './components/surface/PlanetarySurfaceApp';
+import { GenerationLoadingOverlay, yieldToMainThread } from './components/ui/GenerationLoadingOverlay';
 
 export const App: React.FC = () => {
   // Global HUD UI toggle state (Off by default for full-screen edge-to-edge immersion)
@@ -229,8 +230,12 @@ export const App: React.FC = () => {
   // Resizable 3-column layout hook for 3D Sector Sim
   const { colWidths, mainContainerRef, startDrag, resetColWidths } = useResizableColumns();
 
+  const [isGenerating3DSector, setIsGenerating3DSector] = useState<boolean>(false);
+
   // Sector Generation
-  const handleRegenerate = useCallback((currentConfig = config) => {
+  const handleRegenerate = useCallback(async (currentConfig = config) => {
+    setIsGenerating3DSector(true);
+    await yieldToMainThread();
     const generated = generateSectorStars(currentConfig);
     setStars(generated);
 
@@ -243,11 +248,12 @@ export const App: React.FC = () => {
     );
     setSelectedStar(solAnalog || generated[0] || null);
     setSelectedPlanetIndex(0);
+    setIsGenerating3DSector(false);
   }, [config]);
 
   // Initial load
   useEffect(() => {
-    handleRegenerate(config);
+    void handleRegenerate(config);
   }, []);
 
   // Update seed
@@ -381,6 +387,14 @@ export const App: React.FC = () => {
           ref={mainContainerRef}
           className="w-full flex-1 flex flex-row gap-0 min-h-0 relative overflow-hidden select-none"
         >
+          {isGenerating3DSector && (
+            <GenerationLoadingOverlay
+              title={`Synthesizing 3D Sector (${morphologyLabels[config.morphology] || 'Sector'})`}
+              subtitle={`${config.starCount.toLocaleString()} Stellar Systems • Radius ${config.radiusLy} ly • Seed #${config.seed}`}
+              detail="Computing 3D spatial distribution, stellar evolution tracks, and habitable zones..."
+              accentColor="#38bdf8"
+            />
+          )}
           {/* SEC-02: LEFT PANEL - Sector Controls */}
           {showUI && (
             <div

@@ -35,6 +35,7 @@ import { getStarAssetPath } from '../../core/generation/starAssets';
 import { ImageQuantizerModal } from './ImageQuantizerModal';
 import { SavedGalaxiesModal } from './SavedGalaxiesModal';
 import { universeCache, SavedGalaxy } from '../../core/storage/universeCache';
+import { GenerationLoadingOverlay, yieldToMainThread } from '../ui/GenerationLoadingOverlay';
 
 interface GalaxyGenAppProps {
   onSelectSector: (sector: GalaxySectorHex) => void;
@@ -667,8 +668,13 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     }
   };
 
+  // Loading overlay state when generating/rerolling galaxy
+  const [isGeneratingGalaxy, setIsGeneratingGalaxy] = useState<boolean>(false);
+
   // Roll new galaxy
-  const handleRollGalaxy = () => {
+  const handleRollGalaxy = async () => {
+    setIsGeneratingGalaxy(true);
+    await yieldToMainThread();
     setCustomGalaxyData(null);
     setBgImageUrl(null);
     universeCache.clearSectorCache();
@@ -678,10 +684,14 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
       ...prev,
       seed: newSeed,
     }));
+    await yieldToMainThread();
+    setIsGeneratingGalaxy(false);
   };
 
   // Switch morphology
-  const handleMorphologyChange = (morph: GalaxyMorphology) => {
+  const handleMorphologyChange = async (morph: GalaxyMorphology) => {
+    setIsGeneratingGalaxy(true);
+    await yieldToMainThread();
     setCustomGalaxyData(null);
     setBgImageUrl(null);
     universeCache.clearSectorCache();
@@ -690,6 +700,8 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
       ...prev,
       morphology: morph,
     }));
+    await yieldToMainThread();
+    setIsGeneratingGalaxy(false);
   };
 
   // Apply custom quantized galaxy from uploaded / procedural image
@@ -730,17 +742,29 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   };
 
   // Apply custom sliders
-  const handleApplySliders = () => {
+  const handleApplySliders = async () => {
+    setShowConfigModal(false);
+    setIsGeneratingGalaxy(true);
+    await yieldToMainThread();
     if (draftConfig.seed !== config.seed || draftConfig.morphology !== config.morphology) {
       universeCache.clearSectorCache();
       universeCache.clearSystemCache();
     }
     setConfig({ ...draftConfig });
-    setShowConfigModal(false);
+    await yieldToMainThread();
+    setIsGeneratingGalaxy(false);
   };
 
   return (
     <div className="w-full h-full flex flex-col bg-[#030611] text-slate-100 overflow-hidden font-sans select-none relative">
+      {isGeneratingGalaxy && (
+        <GenerationLoadingOverlay
+          title={`Synthesizing ${config.name || `Galaxy Seed #${config.seed}`}`}
+          subtitle={`${config.columns}×${config.rows} Sector Grid (2,500 Sectors) • ${config.morphology.toUpperCase()} Morphology`}
+          detail="Computing galactic spiral density waves, radial metallicity gradients, and H-II star-forming nebulae..."
+          accentColor="#818cf8"
+        />
+      )}
       {/* Toast Save Confirmation Notification */}
       {saveBanner && (
         <div className="absolute top-14 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-slate-950/95 border border-emerald-500/80 text-emerald-200 text-xs font-mono font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 duration-200 backdrop-blur-md">

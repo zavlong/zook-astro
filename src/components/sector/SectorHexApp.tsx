@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import {
   SectorHexConfig,
+  SectorHexGridData,
   SectorHexSystem,
   type SectorHyperlane,
   DEFAULT_SECTOR_CONFIG,
@@ -40,6 +41,7 @@ import {
 } from '../../core/generation/sectorHex';
 import { getStarAssetPath, type StarAssetDescriptor } from '../../core/generation/starAssets';
 import { BlackHoleIcon } from '../ui/BlackHoleIcon';
+import { GenerationLoadingOverlay, yieldToMainThread } from '../ui/GenerationLoadingOverlay';
 import {
   SectorEmpire,
   loadEmpiresForSector,
@@ -261,17 +263,82 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     return universeCache.hasCachedSector(universeCache.getSectorCacheKey(config.seed, config.coord));
   });
 
-  // Generated Grid Data (with persistent cache lookup)
-  const gridData = useMemo(() => {
+  // Loading overlay state for uncached sector synthesis
+  const [isGeneratingSector, setIsGeneratingSector] = useState<boolean>(() => {
+    return !universeCache.hasCachedSector(universeCache.getSectorCacheKey(config.seed, config.coord));
+  });
+
+  // Generated Grid Data (initialized from cache if available, or lightweight placeholder until async synthesis completes)
+  const [gridData, setGridData] = useState<SectorHexGridData>(() => {
+    const key = universeCache.getSectorCacheKey(config.seed, config.coord);
+    const cached = universeCache.getCachedSector(key);
+    if (cached) return cached;
+    return {
+      config,
+      cells: [],
+      systems: [],
+      hyperlanes: [],
+      nebula: null,
+      sectorWidth: 2400,
+      sectorHeight: 2400,
+      parsecWidth: 50,
+      parsecHeight: 50,
+      hexCenterX: 1200,
+      hexCenterY: 1200,
+      hexRadius: 1120,
+      hexPoints: '1200,80 2170,640 2170,1760 1200,2320 230,1760 230,640',
+      hexInnerPoints: '1200,115 2139,658 2139,1742 1200,2285 261,1742 261,658',
+      hexVertices: [],
+      integratedColorHex: '#38bdf8',
+      hasNebula: Boolean(config.hasNebula),
+      stats: {
+        totalHexes: config.columns * config.rows,
+        occupiedHexes: 0,
+        occupancyPct: 0,
+        totalStars: 0,
+        hyperlaneCount: 0,
+        obCount: 0,
+        afCount: 0,
+        gCount: 0,
+        kmCount: 0,
+        remnantCount: 0,
+        multipleSystemCount: 0,
+        heavyMassCount: 0,
+        giantCount: 0,
+        habitableCount: 0,
+        nonMsCount: 0,
+      },
+    };
+  });
+
+  // Asynchronous sector synthesis with main-thread yield so the loading screen paints smoothly
+  useEffect(() => {
     const cached = universeCache.getCachedSector(sectorCacheKey);
     if (cached) {
       setIsFromCache(true);
-      return cached;
+      setGridData(cached);
+      setIsGeneratingSector(false);
+      return;
     }
-    setIsFromCache(false);
-    const fresh = generateSectorHexGrid(config);
-    universeCache.cacheLoadedSector(sectorCacheKey, fresh);
-    return fresh;
+
+    let cancelled = false;
+    setIsGeneratingSector(true);
+
+    (async () => {
+      await yieldToMainThread();
+      if (cancelled) return;
+      const fresh = generateSectorHexGrid(config);
+      universeCache.cacheLoadedSector(sectorCacheKey, fresh);
+      if (!cancelled) {
+        setIsFromCache(false);
+        setGridData(fresh);
+        setIsGeneratingSector(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [config, sectorCacheKey]);
 
   // Selected Hex System and Selected Coordinate
@@ -1259,6 +1326,14 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
         isExitingToGalaxy ? 'animate-sector-exit' : 'animate-sector-enter'
       }`}
     >
+      {isGeneratingSector && (
+        <GenerationLoadingOverlay
+          title={`Generating ${config.name || (config.coord ? `Sector ${config.coord}` : 'Stellar Sector')}`}
+          subtitle={`Synthesizing ${config.columns}×${config.rows} Hex Grid • ${Math.round(config.density * 100)}% Stellar Density • Seed #${config.seed}`}
+          detail={`Sampling Initial Mass Function, binary hierarchies, and hyperlane topology...`}
+          accentColor="#38bdf8"
+        />
+      )}
       {/* ============================================================================ */}
       {/* TOP COMMAND & SECTOR CONFIGURATION TOOLBAR                                   */}
       {/* ============================================================================ */}

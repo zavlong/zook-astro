@@ -43,6 +43,7 @@ import {
 } from './ProceduralPlanetPortrait';
 import { isBlackHoleStar } from '../../core/generation/sectorHex';
 import { BlackHoleIcon } from '../ui/BlackHoleIcon';
+import { GenerationLoadingOverlay, yieldToMainThread } from '../ui/GenerationLoadingOverlay';
 import {
   SelectedMapEntity,
   Vec2AU,
@@ -616,10 +617,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     setOrreryCamAU(pos);
   };
 
-  // System persistent cache status
+  // System persistent cache status & loading state
   const [isFromCache, setIsFromCache] = useState<boolean>(false);
+  const [isGeneratingSystem, setIsGeneratingSystem] = useState<boolean>(false);
+  const [generatingSystemLabel, setGeneratingSystemLabel] = useState<string>('Star System');
+  const genRunIdRef = useRef<number>(0);
 
-  const triggerRun = (params: StarGenParams, forceRegenerate = false) => {
+  const triggerRun = async (params: StarGenParams, forceRegenerate = false) => {
     const effectiveId =
       params.id ||
       `sys_${params.sysMass}_${params.age}_${params.feh}_${params.forcedMult || 'auto'}`;
@@ -638,23 +642,35 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
           if (typeof cached.step1.feh === 'number') setFeh(cached.step1.feh);
         }
         setIsFromCache(true);
+        setIsGeneratingSystem(false);
         setSelectedEntity(null);
         setTrackedTarget(null);
         fitOrreryToFullSystem(cached);
         return;
       }
     }
+
+    const runId = ++genRunIdRef.current;
+    setGeneratingSystemLabel(params.name || params.id || `System (${params.sysMass} M☉)`);
+    setIsGeneratingSystem(true);
+
+    await yieldToMainThread();
+    if (runId !== genRunIdRef.current) return;
+
     const res = runRealisticGenerator(params);
     const sysId = params.id || res.step1?.id || effectiveId;
     if (res.step1 && !res.step1.id) {
       res.step1.id = sysId;
     }
     universeCache.cacheLoadedSystem(sysId, res);
+    if (runId !== genRunIdRef.current) return;
+
     setIsFromCache(false);
     setSystemResult(res);
     setSelectedEntity(null);
     setTrackedTarget(null);
     fitOrreryToFullSystem(res);
+    setIsGeneratingSystem(false);
   };
 
   useEffect(() => {
@@ -665,9 +681,9 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
       setFeh(initialParams.feh);
       setForcedMult(initialParams.forcedMult || 'auto');
       setPresetKey('');
-      triggerRun(initialParams, false);
+      void triggerRun(initialParams, false);
     } else {
-      triggerRun(
+      void triggerRun(
         {
           sysMass: +Math.pow(10, logMass).toFixed(3),
           age,
@@ -4993,7 +5009,15 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   };
 
   return (
-    <div className={`w-full h-full ${showUI ? 'overflow-y-auto p-3 gap-3' : 'overflow-hidden p-0 gap-0'} bg-[#060911] text-slate-100 custom-scrollbar flex flex-col`}>
+    <div className={`w-full h-full ${showUI ? 'overflow-y-auto p-3 gap-3' : 'overflow-hidden p-0 gap-0'} bg-[#060911] text-slate-100 custom-scrollbar flex flex-col relative`}>
+      {isGeneratingSystem && (
+        <GenerationLoadingOverlay
+          title={`Synthesizing ${generatingSystemLabel}`}
+          subtitle={`Mass: ${sysMass} M☉ • Age: ${age.toFixed(2)} Gyr • [Fe/H]: ${feh >= 0 ? `+${feh.toFixed(2)}` : feh.toFixed(2)} dex`}
+          detail="Computing protoplanetary disk condensation zones, Keplerian resonances, atmospheres, and biospheres..."
+          accentColor="#38bdf8"
+        />
+      )}
       {/* Imperial Sovereignty & Realm Banner */}
       {showUI && currentEmpire && (
         <div
