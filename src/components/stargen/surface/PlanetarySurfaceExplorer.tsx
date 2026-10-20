@@ -823,15 +823,28 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         <div className="col-span-2">
           <span className="text-slate-400 block text-[10px]">
             {showTileGrid || displayMode === 'terrain' || displayMode === 'horizon'
-              ? 'UNIFIED TILE BIOME & GEOLOGY'
+              ? activeInspectedTile.secondaryBiomeName
+                ? 'DUAL-BIOME ECOTONE TILE & GEOLOGY'
+                : 'UNIFIED TILE BIOME & GEOLOGY'
               : 'LOCAL BIOME & GEOLOGY'}
           </span>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <span
-              className="w-3 h-3 rounded-full flex-shrink-0"
-              style={{ backgroundColor: currentTelemetry.biomeColor }}
-            />
-            <b className="text-slate-200 truncate">{currentTelemetry.biome}</b>
+            <span className="inline-flex items-center -space-x-1 flex-shrink-0">
+              <span
+                className="w-3 h-3 rounded-full border border-white/25"
+                style={{ backgroundColor: currentTelemetry.biomeColor }}
+              />
+              {(showTileGrid || displayMode === 'terrain' || displayMode === 'horizon') &&
+                activeInspectedTile.secondaryBiomeColor && (
+                  <span
+                    className="w-3 h-3 rounded-full border border-white/35"
+                    style={{ backgroundColor: activeInspectedTile.secondaryBiomeColor }}
+                  />
+                )}
+            </span>
+            <b className="text-slate-200 truncate" title={currentTelemetry.biome}>
+              {currentTelemetry.biome}
+            </b>
             <div className="ml-auto flex items-center gap-1 flex-shrink-0">
               {displayMode !== 'terrain' && (
                 <button

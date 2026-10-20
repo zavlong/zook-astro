@@ -33,7 +33,13 @@ export interface GoldbergPlanetaryTile {
   unitVec: [number, number, number];
   biomeId: number;
   biomeName: string;
+  primaryBiomeName: string;
   biomeColor: string;
+  secondaryBiomeId: number | null;
+  secondaryBiomeName: string | null;
+  secondaryBiomeColor: string | null;
+  secondaryBiomeWeight: number;
+  transitionAngleRad: number;
   isOcean: boolean;
   isIce: boolean;
   isLava: boolean;
@@ -474,6 +480,9 @@ export function getPlanetaryGoldbergGrid(
 
   // Accumulators per tile over the 360x180 spherical grid (weighted by cos(lat) solid angle)
   const biomeWeights = Array.from({ length: tileCount }, () => new Float32Array(24));
+  const biomeRepLat = Array.from({ length: tileCount }, () => new Float32Array(24));
+  const biomeRepLon = Array.from({ length: tileCount }, () => new Float32Array(24));
+  const biomeHasRep = Array.from({ length: tileCount }, () => new Uint8Array(24));
   const sumWeight = new Float32Array(tileCount);
   const sumHNorm = new Float32Array(tileCount);
   const minHNorm = new Float32Array(tileCount).fill(1.0);
@@ -495,6 +504,11 @@ export function getPlanetaryGoldbergGrid(
       const h = surfaceModel.hypsometry[idx];
 
       biomeWeights[tId][bId] += cosLat;
+      if (!biomeHasRep[tId][bId]) {
+        biomeRepLat[tId][bId] = 90 - y;
+        biomeRepLon[tId][bId] = x - 180;
+        biomeHasRep[tId][bId] = 1;
+      }
       sumWeight[tId] += cosLat;
       sumHNorm[tId] += h * cosLat;
       if (h < minHNorm[tId]) minHNorm[tId] = h;
@@ -517,7 +531,7 @@ export function getPlanetaryGoldbergGrid(
     const w = sumWeight[tId] || 1;
     const weights = biomeWeights[tId];
 
-    // Pick unified dominant biome for this tile
+    // Pick primary dominant biome for this tile
     let bestBiome = 4;
     let bestW = -1;
     for (let b = 0; b < 24; b++) {
@@ -537,33 +551,91 @@ export function getPlanetaryGoldbergGrid(
     // Sample canonical telemetry at the tile center, then override with unified tile averages
     const centerSample = sampleSurfacePoint(surfaceModel, planet, moon, cell.centerLat, cell.centerLon);
 
-    const isOcean = !surfaceModel.isNoSurface && bestBiome <= 2;
-    const isIce = bestBiome === 8 || bestBiome === 13 || bestBiome === 18 || bestBiome === 21;
-    const isLava = bestBiome === 15 || (isOcean && (surfaceModel.isMoltenWorld || surfaceModel.seaPalette.solventKey === 'Silicate Magma'));
-
-    // Find a representative texel inside this tile that has `bestBiome` so the biome name & color match the snapped biome
+    // Find a representative texel inside this tile that has `bestBiome` so the biome name & color match the primary biome
     let repLat = cell.centerLat;
     let repLon = cell.centerLon;
     const cy = Math.max(0, Math.min(179, Math.floor(90 - cell.centerLat)));
     const cx = Math.max(0, Math.min(359, Math.floor(cell.centerLon + 180)));
     if (surfaceModel.biomeGrid[cy * 360 + cx] !== bestBiome) {
-      // Search nearby texels in the tile for one with bestBiome
-      let found = false;
-      for (let dy = -6; dy <= 6 && !found; dy++) {
-        const ny = Math.max(0, Math.min(179, cy + dy));
-        for (let dx = -8; dx <= 8; dx++) {
-          const nx = (cx + dx + 360) % 360;
-          const nIdx = ny * 360 + nx;
-          if (texelTileId[nIdx] === tId && surfaceModel.biomeGrid[nIdx] === bestBiome) {
-            repLat = 90 - ny;
-            repLon = nx - 180;
-            found = true;
-            break;
+      if (biomeHasRep[tId][bestBiome]) {
+        repLat = biomeRepLat[tId][bestBiome];
+        repLon = biomeRepLon[tId][bestBiome];
+      } else {
+        let found = false;
+        for (let dy = -6; dy <= 6 && !found; dy++) {
+          const ny = Math.max(0, Math.min(179, cy + dy));
+          for (let dx = -8; dx <= 8; dx++) {
+            const nx = (cx + dx + 360) % 360;
+            const nIdx = ny * 360 + nx;
+            if (texelTileId[nIdx] === tId && surfaceModel.biomeGrid[nIdx] === bestBiome) {
+              repLat = 90 - ny;
+              repLon = nx - 180;
+              found = true;
+              break;
+            }
           }
         }
       }
     }
     const snappedSample = sampleSurfacePoint(surfaceModel, planet, moon, repLat, repLon);
+    const primaryBiomeName = snappedSample.biome;
+
+    // Detect if this tile crosses a biome boundary (ecotone / coastal / alpine transition tile)
+    let secondaryBiomeId: number | null = null;
+    let secondaryBiomeName: string | null = null;
+    let secondaryBiomeColor: string | null = null;
+    let secondaryBiomeWeight = 0;
+    let transitionAngleRad = ((tId * 137.5) % 360) * (Math.PI / 180);
+
+    if (!surfaceModel.isNoSurface) {
+      // Find the strongest second biome inside the tile that has at least 8% area weight
+      // and resolves to a distinct biome name from primaryBiomeName
+      let candBiome = -1;
+      let candW = 0;
+      let candSample: ReturnType<typeof sampleSurfacePoint> | null = null;
+
+      for (let b = 0; b < 24; b++) {
+        if (b === bestBiome) continue;
+        const bw = weights[b];
+        if (bw / w >= 0.08 && bw > candW && biomeHasRep[tId][b]) {
+          const sLat = biomeRepLat[tId][b];
+          const sLon = biomeRepLon[tId][b];
+          const sSample = sampleSurfacePoint(surfaceModel, planet, moon, sLat, sLon);
+          if (sSample.biome !== primaryBiomeName) {
+            candW = bw;
+            candBiome = b;
+            candSample = sSample;
+          }
+        }
+      }
+
+      if (candBiome >= 0 && candSample) {
+        secondaryBiomeId = candBiome;
+        secondaryBiomeName = candSample.biome;
+        secondaryBiomeColor = candSample.biomeColor;
+        const rawShare = candW / Math.max(0.001, bestW + candW);
+        secondaryBiomeWeight = +Math.max(0.22, Math.min(0.5, rawShare)).toFixed(2);
+
+        // Compute geographic direction from primary biome representative point toward secondary biome point
+        const dLat = biomeRepLat[tId][candBiome] - repLat;
+        let dLon = ((biomeRepLon[tId][candBiome] - repLon + 540) % 360) - 180;
+        dLon *= Math.max(0.2, Math.cos((cell.centerLat * Math.PI) / 180));
+        if (Math.hypot(dLon, dLat) > 0.1) {
+          transitionAngleRad = Math.atan2(-dLat, dLon);
+        }
+      }
+    }
+
+    const combinedBiomeName =
+      secondaryBiomeName && secondaryBiomeName !== primaryBiomeName
+        ? `${primaryBiomeName} + ${secondaryBiomeName}`
+        : primaryBiomeName;
+
+    const isOcean = !surfaceModel.isNoSurface && bestBiome <= 2;
+    const isIce = bestBiome === 8 || bestBiome === 13 || bestBiome === 18 || bestBiome === 21;
+    const isLava =
+      bestBiome === 15 ||
+      (isOcean && (surfaceModel.isMoltenWorld || surfaceModel.seaPalette.solventKey === 'Silicate Magma'));
 
     const spanNorm = Math.max(0.02, maxHNorm[tId] - minHNorm[tId]);
     const totalElevRangeKm = Math.max(1, surfaceModel.maxElevationKm - surfaceModel.minElevationKm);
@@ -579,8 +651,14 @@ export function getPlanetaryGoldbergGrid(
       centerLon: cell.centerLon,
       unitVec: cell.unitVec,
       biomeId: bestBiome,
-      biomeName: snappedSample.biome,
+      biomeName: combinedBiomeName,
+      primaryBiomeName,
       biomeColor: snappedSample.biomeColor,
+      secondaryBiomeId,
+      secondaryBiomeName,
+      secondaryBiomeColor,
+      secondaryBiomeWeight,
+      transitionAngleRad,
       isOcean,
       isIce,
       isLava,

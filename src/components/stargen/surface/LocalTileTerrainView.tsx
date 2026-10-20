@@ -246,13 +246,41 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       }
     }
 
-    // Volcanic cones for volcanic / tectonic worlds
+    // Primary and optional Secondary (ecotone crossing) biome IDs
+    const bId1 = activeTile.biomeId;
+    const bId2 = activeTile.secondaryBiomeId;
+    const hasSecondaryBiome = bId2 !== null && bId2 !== bId1 && !surfaceModel.isNoSurface;
+    const transCos = Math.cos(activeTile.transitionAngleRad || 0);
+    const transSin = Math.sin(activeTile.transitionAngleRad || 0);
+    const secWeight = activeTile.secondaryBiomeWeight || 0.35;
+
+    // Evaluates local organic biome blend factor [0 = Primary Biome, 1 = Secondary Biome]
+    const evalBiomeMix = (px: number, pz: number, baseFbm: number, ridge: number): number => {
+      if (!hasSecondaryBiome) return 0;
+      const along = px * transCos + pz * transSin;
+      const patchNoise = (baseFbm - 0.5) * 0.85 + (ridge - 0.5) * 0.42;
+      const threshold = (0.5 - secWeight) * 0.65;
+      const raw = (along + patchNoise - threshold) / 0.52 + 0.5;
+      const t = Math.max(0, Math.min(1, raw));
+      return t * t * (3 - 2 * t);
+    };
+
+    const isBiomeOcean = (id: number) => !surfaceModel.isNoSurface && id <= 2;
+    const isBiomeIce = (id: number) => id === 8 || id === 13 || id === 18 || id === 21;
+    const anyOceanBiome = isBiomeOcean(bId1) || (bId2 !== null && isBiomeOcean(bId2));
+
+    // Volcanic cones for volcanic / tectonic worlds (checks both primary and secondary biomes)
     const volcanicCones: { vx: number; vz: number; rad: number; height: number }[] = [];
     const hasVolcanoes =
       !surfaceModel.isNoSurface &&
-      (activeTile.biomeId === 15 || activeTile.volcanoIntensity > 0.22 || surfaceModel.isMoltenWorld);
+      (bId1 === 15 ||
+        bId1 === 22 ||
+        bId2 === 15 ||
+        bId2 === 22 ||
+        activeTile.volcanoIntensity > 0.22 ||
+        surfaceModel.isMoltenWorld);
     if (hasVolcanoes) {
-      const vCount = activeTile.biomeId === 15 ? 3 : 2;
+      const vCount = bId1 === 15 || bId2 === 15 ? 3 : 2;
       for (let v = 0; v < vCount; v++) {
         const vDist = v === 0 ? 0.18 : 0.35 + hash2(v, 19, tileSeed) * 0.45;
         const vAng = hash2(v, 23, tileSeed) * Math.PI * 2;
@@ -265,22 +293,29 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       }
     }
 
-    // Meandering river valley on liquid-bearing land biomes (Marsh, Plains, Forest, Taiga, Tundra)
+    // Meandering river valley on liquid-bearing land biomes (active if either biome supports rivers)
+    const isRiverBiome = (id: number | null) =>
+      id !== null && !isBiomeOcean(id) && !isBiomeIce(id) && ((id >= 3 && id <= 7) || activeTile.moisture > 0.45);
     const hasRiverValley =
       !surfaceModel.isNoSurface &&
       surfaceModel.hasLiquid &&
-      !activeTile.isOcean &&
-      !activeTile.isIce &&
-      ((activeTile.biomeId >= 3 && activeTile.biomeId <= 7) || activeTile.moisture > 0.45);
+      (isRiverBiome(bId1) || isRiverBiome(bId2));
     const riverAngle = hash2(31, 37, tileSeed) * Math.PI;
     const riverCos = Math.cos(riverAngle);
     const riverSin = Math.sin(riverAngle);
 
-    // Base biome palette and secondary sub-biome palettes for rich local color variation
-    const baseHex =
+    // Base biome palette and secondary biome palette for rich local color & ecotone variation
+    const baseHex1 =
       activeTile.biomeColor ||
-      resolveSolidBiomeColorHex(activeTile.biomeId, surfaceModel.floraPalette, surfaceModel.compositionPalette);
-    const baseRgb = hexToRgb(baseHex);
+      resolveSolidBiomeColorHex(bId1, surfaceModel.floraPalette, surfaceModel.compositionPalette);
+    const baseRgb1 = hexToRgb(baseHex1);
+    const baseHex2 =
+      bId2 !== null
+        ? activeTile.secondaryBiomeColor ||
+          resolveSolidBiomeColorHex(bId2, surfaceModel.floraPalette, surfaceModel.compositionPalette)
+        : baseHex1;
+    const baseRgb2 = hexToRgb(baseHex2);
+
     const highRgb = hexToRgb(surfaceModel.compositionPalette.mountainHex);
     const peakRgb = hexToRgb(surfaceModel.compositionPalette.peakHex);
     const basaltRgb = hexToRgb(surfaceModel.compositionPalette.basaltHex);
@@ -306,6 +341,56 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       return Math.min(1, (n - threshold) / (1 - threshold));
     };
 
+    // Evaluates the characteristic landform height profile for a single biome ID
+    const evalSingleBiomeHeight = (
+      bId: number,
+      px: number,
+      pz: number,
+      wx: number,
+      wz: number,
+      baseFbm: number,
+      ridge: number,
+      fine: number,
+      macroH: number
+    ): number => {
+      let h = isBiomeOcean(bId) ? Math.min(-0.04, macroH * 0.45) : Math.max(0.02, macroH * 0.52);
+
+      if (bId === 12 || bId === 13) {
+        // Rugged Alpine Mountain Range / Permanent Glaciated Peaks
+        h += ridge * 0.36 + baseFbm * 0.16 - 0.1 + fine * 0.045;
+      } else if (bId === 11) {
+        // Tiered Canyon & Flat-Topped Mesa Plateau
+        const raw = baseFbm * 1.18 + fine * 0.08;
+        const steps = 5;
+        const stepped = (Math.floor(raw * steps) + Math.pow((raw * steps) % 1, 3.5)) / steps;
+        const gorge = Math.abs(wx * 0.85 - wz * 0.52 + Math.sin(wz * 4.5) * 0.14);
+        const gorgeCarve = gorge < 0.13 ? (1.0 - Math.pow(gorge / 0.13, 2)) * 0.22 : 0;
+        h += (stepped - 0.32) * 0.34 - gorgeCarve;
+      } else if (bId === 10) {
+        // Erg Sand Dunes + Rocky Yardang Outcrops
+        const dunePhase = px * 22.0 + pz * 9.0 + Math.sin(pz * 7.5 + baseFbm * 4.0) * 2.6;
+        const duneWave = Math.pow(Math.sin(dunePhase) * 0.5 + 0.5, 1.65);
+        const yardang = ridge > 0.72 ? (ridge - 0.72) * 0.45 : 0;
+        h += (baseFbm - 0.42) * 0.14 + duneWave * 0.065 + yardang;
+      } else if (bId === 18) {
+        // Precipitated Tabular Iceberg / Floating Ice Shelf
+        const sastrugi = Math.sin(px * 26 + baseFbm * 5) * 0.012;
+        h = 0.055 + (ridge - 0.4) * 0.065 + sastrugi;
+      } else if (bId === 16 || bId === 17 || bId === 21) {
+        // Glacial Ice Sheet / Cryotectonic Chaos
+        const sastrugi = Math.sin(px * 20 - pz * 12 + baseFbm * 4) * 0.015;
+        h += (baseFbm - 0.42) * 0.16 + ridge * 0.09 + sastrugi;
+      } else if (isBiomeOcean(bId)) {
+        // Abyssal Bathymetry + Mid-Ocean Ridges & Seamounts
+        const seamount = ridge > 0.68 ? (ridge - 0.68) * 0.35 : 0;
+        h = Math.min(-0.025, macroH * 0.48 + (baseFbm - 0.52) * 0.22 + seamount + fine * 0.02);
+      } else {
+        // Rolling Hills, Plains, Forest, Taiga, Tundra, Regolith
+        h += (baseFbm - 0.44) * 0.22 + (ridge - 0.45) * 0.11 + fine * 0.028;
+      }
+      return h;
+    };
+
     // Pure elevation evaluator continuing seamlessly outward past the tile border
     const sampleHeightOnly = (px: number, pz: number) => {
       if (surfaceModel.isNoSurface) {
@@ -319,10 +404,10 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           isRiverChannel: false,
           baseFbm: bandWave * 0.5 + 0.5,
           ridge: 0.5,
+          biomeMix: 0,
         };
       }
 
-      const bId = activeTile.biomeId;
       const macroH = activeTile.meanHNorm - surfaceModel.seaLevelNormalized;
 
       // Domain-warped coordinates for natural organic landforms
@@ -335,45 +420,17 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       const ridge = ridgedFbm2D(wx * 3.8, wz * 3.8, tileSeed + 79, 4);
       const fine = fbm2D(px * 11.5, pz * 11.5, tileSeed + 151, 3) - 0.5;
 
-      let hLocal = macroH * 0.52;
-
-      if (bId === 12 || bId === 13) {
-        // Rugged Alpine Mountain Range / Permanent Glaciated Peaks
-        hLocal += (ridge * 0.36 + baseFbm * 0.16 - 0.10) + fine * 0.045;
-      } else if (bId === 11) {
-        // Tiered Canyon & Flat-Topped Mesa Plateau
-        const raw = baseFbm * 1.18 + fine * 0.08;
-        const steps = 5;
-        const stepped = (Math.floor(raw * steps) + Math.pow((raw * steps) % 1, 3.5)) / steps;
-        const gorge = Math.abs(wx * 0.85 - wz * 0.52 + Math.sin(wz * 4.5) * 0.14);
-        const gorgeCarve = gorge < 0.13 ? (1.0 - Math.pow(gorge / 0.13, 2)) * 0.22 : 0;
-        hLocal += (stepped - 0.32) * 0.34 - gorgeCarve;
-      } else if (bId === 10) {
-        // Erg Sand Dunes + Rocky Yardang Outcrops
-        const dunePhase = px * 22.0 + pz * 9.0 + Math.sin(pz * 7.5 + baseFbm * 4.0) * 2.6;
-        const duneWave = Math.pow(Math.sin(dunePhase) * 0.5 + 0.5, 1.65);
-        const yardang = ridge > 0.72 ? (ridge - 0.72) * 0.45 : 0;
-        hLocal += (baseFbm - 0.42) * 0.14 + duneWave * 0.065 + yardang;
-      } else if (bId === 18) {
-        // Precipitated Tabular Iceberg / Floating Ice Shelf (continuous outward without edge cliff)
-        const sastrugi = Math.sin(px * 26 + baseFbm * 5) * 0.012;
-        hLocal = 0.055 + (ridge - 0.4) * 0.065 + sastrugi;
-      } else if (bId === 16 || bId === 17 || bId === 21) {
-        // Glacial Ice Sheet / Cryotectonic Chaos
-        const sastrugi = Math.sin(px * 20 - pz * 12 + baseFbm * 4) * 0.015;
-        hLocal += (baseFbm - 0.42) * 0.16 + ridge * 0.09 + sastrugi;
-      } else if (activeTile.isOcean) {
-        // Abyssal Bathymetry + Mid-Ocean Ridges & Seamounts
-        const seamount = ridge > 0.68 ? (ridge - 0.68) * 0.35 : 0;
-        hLocal = Math.min(-0.025, macroH * 0.48 + (baseFbm - 0.52) * 0.22 + seamount + fine * 0.02);
-      } else {
-        // Rolling Hills, Plains, Forest, Taiga, Tundra, Regolith
-        hLocal += (baseFbm - 0.44) * 0.22 + (ridge - 0.45) * 0.11 + fine * 0.028;
+      const biomeMix = evalBiomeMix(px, pz, baseFbm, ridge);
+      const h1 = evalSingleBiomeHeight(bId1, px, pz, wx, wz, baseFbm, ridge, fine, macroH);
+      let hLocal = h1;
+      if (hasSecondaryBiome && bId2 !== null) {
+        const h2 = evalSingleBiomeHeight(bId2, px, pz, wx, wz, baseFbm, ridge, fine, macroH);
+        hLocal = h1 * (1 - biomeMix) + h2 * biomeMix;
       }
 
       // Carve meandering river valley & tributary across fertile/temperate land tiles
       let isRiverChannel = false;
-      if (hasRiverValley) {
+      if (hasRiverValley && hLocal > -0.02) {
         const uRiver = px * riverCos - pz * riverSin;
         const vRiver = px * riverSin + pz * riverCos;
         const meander =
@@ -447,7 +504,13 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
 
       // Apply Cryotectonic Ice Fissure or Tectonic Magma Rift Canyon
       let isFissureFloor = false;
-      if (activeTile.fractureIntensity > 0.12 || bId === 21 || bId === 15) {
+      if (
+        activeTile.fractureIntensity > 0.12 ||
+        bId1 === 21 ||
+        bId1 === 15 ||
+        bId2 === 21 ||
+        bId2 === 15
+      ) {
         const fissureCurve = Math.abs(
           px * 0.75 - pz * 0.45 + (fbm2D(px * 3.6, pz * 3.6, tileSeed + 211, 3) - 0.5) * 0.32
         );
@@ -469,6 +532,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         isRiverChannel,
         baseFbm,
         ridge,
+        biomeMix,
       };
     };
 
@@ -481,7 +545,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       const hz = sampleHeightOnly(px, pz + eps).hLocal;
       const hasSeaHere =
         !surfaceModel.isNoSurface &&
-        (surfaceModel.hasLiquid || activeTile.isOcean || isRiverChannel) &&
+        (surfaceModel.hasLiquid || anyOceanBiome || isRiverChannel) &&
         hLocal < 0;
       const finalY = hasSeaHere && showWaterLayer ? 0 : hLocal;
 
@@ -572,6 +636,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const macroRidgeGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroRimGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroShadowGrid = new Float32Array(MACRO_N * MACRO_N);
+    const macroMixGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroSpecialGrid = new Uint8Array(MACRO_N * MACRO_N); // bit 0: lava, bit 1: fissure, bit 2: river
 
     for (let mz = 0; mz < MACRO_N; mz++) {
@@ -585,6 +650,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         macroRidgeGrid[mIdx] = sh.ridge;
         macroRimGrid[mIdx] = sh.craterRimTint;
         macroShadowGrid[mIdx] = sampleCloudDensityAt(px + 0.08, pz - 0.06);
+        macroMixGrid[mIdx] = sh.biomeMix;
         let sp = 0;
         if (sh.isCalderaLava || sh.isLavaRiver) sp |= 1;
         if (sh.isFissureFloor) sp |= 2;
@@ -593,12 +659,174 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       }
     }
 
-    const bId = activeTile.biomeId;
-    const hasBioCanopy = bId >= 3 && bId <= 6 && surfaceModel.floraPalette.hasAnyLife;
-    const isDesertTile = bId === 10;
-    const isCanyonTile = bId === 11;
-    const isVolcanicTile = bId === 15 || surfaceModel.isMoltenWorld;
-    const isCraterOrBarrenTile = bId === 8 || bId === 9 || bId === 12 || bId === 13 || bId === 14;
+    const isVolcanicAny = bId1 === 15 || bId2 === 15 || surfaceModel.isMoltenWorld;
+
+    // Evaluates the solid-surface micro-texture and bump normal for a specific biome ID
+    const evalSolidBiomeTexel = (
+      targetBiomeId: number,
+      targetBaseRgb: [number, number, number],
+      px: number,
+      pz: number,
+      hLocal: number,
+      slope: number,
+      dhx: number,
+      dhz: number,
+      baseFbm: number,
+      ridge: number,
+      fine1: number,
+      fine2: number,
+      grain: number,
+      baseBumpX: number,
+      baseBumpZ: number,
+      isFissureFloor: boolean
+    ): { r: number; g: number; b: number; bumpX: number; bumpZ: number; flags: number } => {
+      let r = targetBaseRgb[0];
+      let g = targetBaseRgb[1];
+      let b = targetBaseRgb[2];
+      let bumpX = baseBumpX;
+      let bumpZ = baseBumpZ;
+      let flags = 0;
+
+      const isIceB = isBiomeIce(targetBiomeId) || targetBiomeId === 16 || targetBiomeId === 17;
+      const hasBioB = targetBiomeId >= 3 && targetBiomeId <= 6 && surfaceModel.floraPalette.hasAnyLife;
+      const isDesertB = targetBiomeId === 10;
+      const isCanyonB = targetBiomeId === 11;
+      const isVolcB = targetBiomeId === 15 || targetBiomeId === 22 || surfaceModel.isMoltenWorld;
+      const isCraterOrBarrenB =
+        targetBiomeId === 8 ||
+        targetBiomeId === 9 ||
+        targetBiomeId === 12 ||
+        targetBiomeId === 13 ||
+        targetBiomeId === 14;
+
+      if (isIceB) {
+        flags |= FLAG_ICE_SPEC;
+        const sastrugiWave = Math.sin(px * 65 - pz * 32 + fine1 * 5.5);
+        const crevassePattern = Math.abs(fine1 * 2.0 - 1.0 + (ridge - 0.5) * 0.6);
+        const isCrevasse = crevassePattern < 0.14 || isFissureFloor;
+        bumpX += Math.cos(px * 65 - pz * 32 + fine1 * 5.5) * 0.65;
+        bumpZ -= Math.sin(px * 65 - pz * 32 + fine1 * 5.5) * 0.45;
+
+        if (isCrevasse) {
+          const depthCrev = isFissureFloor ? 0.85 : 1.0 - crevassePattern / 0.14;
+          r = Math.round(targetBaseRgb[0] * (1 - depthCrev * 0.62) + 38 * (depthCrev * 0.62));
+          g = Math.round(targetBaseRgb[1] * (1 - depthCrev * 0.42) + 128 * (depthCrev * 0.42));
+          b = Math.round(targetBaseRgb[2] * (1 - depthCrev * 0.25) + 210 * (depthCrev * 0.25));
+          bumpX *= 1.8;
+        } else {
+          const frostSparkle = sastrugiWave * 14 + grain * 16;
+          r = Math.round(targetBaseRgb[0] * 0.72 + iceRgb[0] * 0.28 + frostSparkle);
+          g = Math.round(targetBaseRgb[1] * 0.72 + iceRgb[1] * 0.28 + frostSparkle);
+          b = Math.round(targetBaseRgb[2] * 0.7 + iceRgb[2] * 0.3 + frostSparkle * 1.1);
+        }
+      } else if (hasBioB) {
+        const canopyDensity = Math.max(
+          0,
+          Math.min(1, baseFbm * 1.2 + (targetBiomeId === 5 ? 0.28 : targetBiomeId === 6 ? 0.18 : -0.08))
+        );
+        const cell = cellularFeature2D(px * 26.0, pz * 26.0, tileSeed + 809);
+        const crownRadius = 0.28 + canopyDensity * 0.26;
+
+        if (cell.dist < crownRadius && slope < 0.52 && hLocal > 0.018 && hLocal < 0.27) {
+          const uCrown = cell.dist / crownRadius;
+          const crownHeightProfile = Math.sqrt(Math.max(0, 1.0 - uCrown * uCrown));
+          bumpX = (cell.dx / crownRadius) * 1.45 + (fine2 - 0.5) * 0.45;
+          bumpZ = (cell.dy / crownRadius) * 1.45 + grain * 0.45;
+
+          const speciesShade =
+            (cell.cellHash - 0.5) * 26 + crownHeightProfile * 18 - (1 - crownHeightProfile) * 22;
+          const isJungleOrTaiga = targetBiomeId === 5 || targetBiomeId === 6;
+          const cRgb = isJungleOrTaiga ? forestRgb : plainsRgb;
+          r = Math.round(cRgb[0] + speciesShade + fine2 * 14);
+          g = Math.round(cRgb[1] + speciesShade * 1.15 + fine2 * 18);
+          b = Math.round(cRgb[2] + speciesShade * 0.7 + fine2 * 10);
+        } else {
+          const wetlandT = hLocal < 0.055 ? Math.max(0, Math.min(1, (0.055 - hLocal) / 0.055)) : 0;
+          const grassWave = Math.sin(px * 48 + pz * 32 + fine1 * 6) * 10 + grain * 14;
+          r = Math.round(plainsRgb[0] * (1 - wetlandT * 0.7) + marshRgb[0] * (wetlandT * 0.7) + grassWave);
+          g = Math.round(
+            plainsRgb[1] * (1 - wetlandT * 0.7) + marshRgb[1] * (wetlandT * 0.7) + grassWave * 1.1
+          );
+          b = Math.round(
+            plainsRgb[2] * (1 - wetlandT * 0.7) + marshRgb[2] * (wetlandT * 0.7) + grassWave * 0.8
+          );
+        }
+      } else if (isDesertB) {
+        const ripplePhase =
+          px * 115.0 + pz * 52.0 + Math.sin(pz * 14.0 + baseFbm * 5.0) * 6.5 + fine1 * 4.0;
+        const rippleWave = Math.sin(ripplePhase);
+        bumpX += Math.cos(ripplePhase) * 0.72;
+        bumpZ += Math.sin(ripplePhase) * 0.36;
+
+        const mineralBand = Math.sin(hLocal * 42 + baseFbm * 6.0) * 14 + rippleWave * 9 + grain * 18;
+        r = Math.round(targetBaseRgb[0] + mineralBand * 1.15);
+        g = Math.round(targetBaseRgb[1] + mineralBand * 0.92);
+        b = Math.round(targetBaseRgb[2] + mineralBand * 0.65);
+      } else if (isCanyonB) {
+        const strataPhase = hLocal * 115.0 + fine1 * 2.4 + fine2 * 0.8;
+        const strataBand = Math.sin(strataPhase);
+        const fineLayer = Math.sin(strataPhase * 3.2) * 0.5;
+        const bandContrast = strataBand * 22 + fineLayer * 11 + grain * 12;
+
+        bumpX += dhx * strataBand * 0.85;
+        bumpZ += dhz * strataBand * 0.85;
+
+        r = Math.round(plateauRgb[0] * 0.88 + highRgb[0] * 0.12 + bandContrast * 1.2);
+        g = Math.round(plateauRgb[1] * 0.88 + highRgb[1] * 0.12 + bandContrast * 0.85);
+        b = Math.round(plateauRgb[2] * 0.88 + highRgb[2] * 0.12 + bandContrast * 0.55);
+      } else if (isVolcB) {
+        const pahoehoe = Math.sin(px * 55 + pz * 45 + fine1 * 8.0);
+        const crack = Math.abs(fine1 * 2.0 - 1.0 + (fine2 - 0.5) * 0.5);
+        bumpX += pahoehoe * 0.75;
+        bumpZ -= pahoehoe * 0.65;
+
+        if (crack < 0.065 && (activeTile.volcanoIntensity > 0.35 || surfaceModel.isMoltenWorld)) {
+          const glow = 1.0 - crack / 0.065;
+          r = Math.round(180 + 75 * glow);
+          g = Math.round(55 + 110 * glow);
+          b = Math.round(12 + 30 * glow);
+          flags |= FLAG_LAVA;
+        } else {
+          const ashVar = pahoehoe * 10 + (fine2 - 0.5) * 24 + grain * 16;
+          r = Math.round(basaltRgb[0] + ashVar);
+          g = Math.round(basaltRgb[1] + ashVar * 0.9);
+          b = Math.round(basaltRgb[2] + ashVar * 0.85);
+        }
+      } else if (isCraterOrBarrenB) {
+        const cell = cellularFeature2D(px * 22.0, pz * 22.0, tileSeed + 937);
+        let microRelief = (fine1 - 0.5) * 22 + (fine2 - 0.5) * 16 + grain * 18;
+
+        if (cell.dist < 0.26) {
+          const uCr = cell.dist / 0.26;
+          if (cell.cellHash > 0.45 && activeTile.craterIntensity > 0.05) {
+            if (uCr < 0.75) {
+              bumpX -= (cell.dx / 0.26) * 1.35;
+              bumpZ -= (cell.dy / 0.26) * 1.35;
+              microRelief -= (1 - uCr) * 18;
+            } else {
+              bumpX += (cell.dx / 0.26) * 1.15;
+              bumpZ += (cell.dy / 0.26) * 1.15;
+              microRelief += 14;
+            }
+          } else {
+            bumpX += (cell.dx / 0.26) * 1.25;
+            bumpZ += (cell.dy / 0.26) * 1.25;
+            microRelief += (1 - uCr) * 16;
+          }
+        }
+
+        r = Math.round(targetBaseRgb[0] + microRelief);
+        g = Math.round(targetBaseRgb[1] + microRelief * 0.95);
+        b = Math.round(targetBaseRgb[2] + microRelief * 0.9);
+      } else {
+        const texVar = (fine1 - 0.5) * 26 + (fine2 - 0.5) * 18 + grain * 16;
+        r = Math.round(targetBaseRgb[0] + texVar);
+        g = Math.round(targetBaseRgb[1] + texVar * 0.96);
+        b = Math.round(targetBaseRgb[2] + texVar * 0.9);
+      }
+
+      return { r, g, b, bumpX, bumpZ, flags };
+    };
 
     // Synthesize every pixel of the 512x512 procedural biome texture + bump map across [-maxExtent, +maxExtent]
     for (let tz = 0; tz < TEX_RES; tz++) {
@@ -650,6 +878,11 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           macroShadowGrid[i10] * w10 +
           macroShadowGrid[i01] * w01 +
           macroShadowGrid[i11] * w11;
+        const biomeMix =
+          macroMixGrid[i00] * w00 +
+          macroMixGrid[i10] * w10 +
+          macroMixGrid[i01] * w01 +
+          macroMixGrid[i11] * w11;
 
         // Macro slope from finite difference on macroHGrid
         const dhx = (macroHGrid[i10] - macroHGrid[i00]) * (MACRO_N * 0.5);
@@ -672,9 +905,9 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         let bumpX = (fine1 - fineRight) * 2.2;
         let bumpZ = (fine1 - fineDown) * 2.2;
 
-        let r = baseRgb[0];
-        let g = baseRgb[1];
-        let b = baseRgb[2];
+        let r = baseRgb1[0];
+        let g = baseRgb1[1];
+        let b = baseRgb1[2];
         let flags = 0;
 
         if (surfaceModel.isNoSurface) {
@@ -684,10 +917,10 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           g = Math.round(pal.bandDarkRgb[1] + (pal.bandLightRgb[1] - pal.bandDarkRgb[1]) * swirl);
           b = Math.round(pal.bandDarkRgb[2] + (pal.bandLightRgb[2] - pal.bandDarkRgb[2]) * swirl);
         } else {
-          const hasSeaHere = (surfaceModel.hasLiquid || activeTile.isOcean || isRiverChannel) && hLocal < 0;
+          const hasSeaHere = (surfaceModel.hasLiquid || anyOceanBiome || isRiverChannel) && hLocal < 0;
           const waterDepth = hasSeaHere ? Math.max(0, -hLocal) : 0;
 
-          if (isLavaSpecial || (isFissureFloor && isVolcanicTile)) {
+          if (isLavaSpecial || (isFissureFloor && isVolcanicAny)) {
             // Incandescent magma channel with dark cooling crust plates & white-hot core veins
             const crustCrack = valueNoise2D(px * 45, pz * 45, tileSeed + 601);
             if (crustCrack > 0.32) {
@@ -754,139 +987,61 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           } else {
             // ====================================================================
             // SOLID BIOME HIGH-RESOLUTION PROCEDURAL SURFACE TEXTURES & BUMP MAPS
+            // (Supports mixing primary + secondary biome features across ecotones)
             // ====================================================================
-            if (activeTile.isIce || bId === 16 || bId === 17 || bId === 18 || bId === 21) {
-              // Glacial Ice Sheet / Sastrugi Snow Ridges / Blue Crevasse Fracture Texture
-              flags |= FLAG_ICE_SPEC;
-              const sastrugiWave = Math.sin(px * 65 - pz * 32 + fine1 * 5.5);
-              const crevassePattern = Math.abs(fine1 * 2.0 - 1.0 + (ridge - 0.5) * 0.6);
-              const isCrevasse = crevassePattern < 0.14 || isFissureFloor;
-              bumpX += Math.cos(px * 65 - pz * 32 + fine1 * 5.5) * 0.65;
-              bumpZ -= Math.sin(px * 65 - pz * 32 + fine1 * 5.5) * 0.45;
+            const s1 = evalSolidBiomeTexel(
+              bId1,
+              baseRgb1,
+              px,
+              pz,
+              hLocal,
+              slope,
+              dhx,
+              dhz,
+              baseFbm,
+              ridge,
+              fine1,
+              fine2,
+              grain,
+              bumpX,
+              bumpZ,
+              isFissureFloor
+            );
 
-              if (isCrevasse) {
-                const depthCrev = isFissureFloor ? 0.85 : 1.0 - crevassePattern / 0.14;
-                r = Math.round(baseRgb[0] * (1 - depthCrev * 0.62) + 38 * (depthCrev * 0.62));
-                g = Math.round(baseRgb[1] * (1 - depthCrev * 0.42) + 128 * (depthCrev * 0.42));
-                b = Math.round(baseRgb[2] * (1 - depthCrev * 0.25) + 210 * (depthCrev * 0.25));
-                bumpX *= 1.8;
-              } else {
-                const frostSparkle = sastrugiWave * 14 + grain * 16;
-                r = Math.round(baseRgb[0] * 0.72 + iceRgb[0] * 0.28 + frostSparkle);
-                g = Math.round(baseRgb[1] * 0.72 + iceRgb[1] * 0.28 + frostSparkle);
-                b = Math.round(baseRgb[2] * 0.70 + iceRgb[2] * 0.30 + frostSparkle * 1.1);
-              }
-            } else if (hasBioCanopy) {
-              // Cellular 3D Tree-Crown Canopy, Lush Mossy Clearings, and Wetland Reeds
-              const canopyDensity = Math.max(
-                0,
-                Math.min(1, baseFbm * 1.2 + (bId === 5 ? 0.28 : bId === 6 ? 0.18 : -0.08))
+            if (hasSecondaryBiome && bId2 !== null && biomeMix > 0.03) {
+              const s2 = evalSolidBiomeTexel(
+                bId2,
+                baseRgb2,
+                px,
+                pz,
+                hLocal,
+                slope,
+                dhx,
+                dhz,
+                baseFbm,
+                ridge,
+                fine1,
+                fine2,
+                grain,
+                bumpX,
+                bumpZ,
+                isFissureFloor
               );
-              const cell = cellularFeature2D(px * 26.0, pz * 26.0, tileSeed + 809);
-              const crownRadius = 0.28 + canopyDensity * 0.26;
-
-              if (cell.dist < crownRadius && slope < 0.52 && hLocal > 0.018 && hLocal < 0.27) {
-                // Inside an individual 3D tree crown dome!
-                const uCrown = cell.dist / crownRadius;
-                const crownHeightProfile = Math.sqrt(Math.max(0, 1.0 - uCrown * uCrown));
-                // Radial outward foliage micro-normal so each tree crown catches directional sunlight!
-                bumpX = (cell.dx / crownRadius) * 1.45 + (fine2 - 0.5) * 0.45;
-                bumpZ = (cell.dy / crownRadius) * 1.45 + (grain) * 0.45;
-
-                const speciesShade = (cell.cellHash - 0.5) * 26 + crownHeightProfile * 18 - (1 - crownHeightProfile) * 22;
-                const isJungleOrTaiga = bId === 5 || bId === 6;
-                const cRgb = isJungleOrTaiga ? forestRgb : plainsRgb;
-                r = Math.round(cRgb[0] + speciesShade + fine2 * 14);
-                g = Math.round(cRgb[1] + speciesShade * 1.15 + fine2 * 18);
-                b = Math.round(cRgb[2] + speciesShade * 0.7 + fine2 * 10);
-              } else {
-                // Grassy meadow clearing, forest floor undergrowth, or marshy bank
-                const wetlandT = hLocal < 0.055 ? Math.max(0, Math.min(1, (0.055 - hLocal) / 0.055)) : 0;
-                const grassWave = Math.sin(px * 48 + pz * 32 + fine1 * 6) * 10 + grain * 14;
-                r = Math.round(plainsRgb[0] * (1 - wetlandT * 0.7) + marshRgb[0] * (wetlandT * 0.7) + grassWave);
-                g = Math.round(plainsRgb[1] * (1 - wetlandT * 0.7) + marshRgb[1] * (wetlandT * 0.7) + grassWave * 1.1);
-                b = Math.round(plainsRgb[2] * (1 - wetlandT * 0.7) + marshRgb[2] * (wetlandT * 0.7) + grassWave * 0.8);
-              }
-            } else if (isDesertTile) {
-              // Erg Sand Desert: crisp wind-blown sand ripple striations & quartz/iron-oxide grain
-              const ripplePhase = px * 115.0 + pz * 52.0 + Math.sin(pz * 14.0 + baseFbm * 5.0) * 6.5 + fine1 * 4.0;
-              const rippleWave = Math.sin(ripplePhase);
-              bumpX += Math.cos(ripplePhase) * 0.72;
-              bumpZ += Math.sin(ripplePhase) * 0.36;
-
-              const mineralBand = Math.sin(hLocal * 42 + baseFbm * 6.0) * 14 + rippleWave * 9 + grain * 18;
-              r = Math.round(baseRgb[0] + mineralBand * 1.15);
-              g = Math.round(baseRgb[1] + mineralBand * 0.92);
-              b = Math.round(baseRgb[2] + mineralBand * 0.65);
-            } else if (isCanyonTile) {
-              // Sedimentary Canyon & Mesa Strata: sharp horizontal sandstone, ironstone & shale bands
-              const strataPhase = hLocal * 115.0 + fine1 * 2.4 + fine2 * 0.8;
-              const strataBand = Math.sin(strataPhase);
-              const fineLayer = Math.sin(strataPhase * 3.2) * 0.5;
-              const bandContrast = strataBand * 22 + fineLayer * 11 + grain * 12;
-
-              // Terraced ledge micro-normals along contour gradients
-              bumpX += dhx * strataBand * 0.85;
-              bumpZ += dhz * strataBand * 0.85;
-
-              r = Math.round(plateauRgb[0] * 0.88 + highRgb[0] * 0.12 + bandContrast * 1.2);
-              g = Math.round(plateauRgb[1] * 0.88 + highRgb[1] * 0.12 + bandContrast * 0.85);
-              b = Math.round(plateauRgb[2] * 0.88 + highRgb[2] * 0.12 + bandContrast * 0.55);
-            } else if (isVolcanicTile) {
-              // Ropey Pahoehoe Basalt Flows, Scoria Ash, and Glowing Magma Cooling Cracks
-              const pahoehoe = Math.sin(px * 55 + pz * 45 + fine1 * 8.0);
-              const crack = Math.abs(fine1 * 2.0 - 1.0 + (fine2 - 0.5) * 0.5);
-              bumpX += pahoehoe * 0.75;
-              bumpZ -= pahoehoe * 0.65;
-
-              if (crack < 0.065 && (activeTile.volcanoIntensity > 0.35 || surfaceModel.isMoltenWorld)) {
-                // Glowing incandescent magma crack in basalt crust
-                const glow = 1.0 - crack / 0.065;
-                r = Math.round(180 + 75 * glow);
-                g = Math.round(55 + 110 * glow);
-                b = Math.round(12 + 30 * glow);
-                flags |= FLAG_LAVA;
-              } else {
-                const ashVar = pahoehoe * 10 + (fine2 - 0.5) * 24 + grain * 16;
-                r = Math.round(basaltRgb[0] + ashVar);
-                g = Math.round(basaltRgb[1] + ashVar * 0.9);
-                b = Math.round(basaltRgb[2] + ashVar * 0.85);
-              }
-            } else if (isCraterOrBarrenTile) {
-              // Barren Regolith / Highland Rock: Cellular Micro-Craters, Boulder Fields & Fractured Bedrock
-              const cell = cellularFeature2D(px * 22.0, pz * 22.0, tileSeed + 937);
-              let microRelief = (fine1 - 0.5) * 22 + (fine2 - 0.5) * 16 + grain * 18;
-
-              if (cell.dist < 0.26) {
-                const uCr = cell.dist / 0.26;
-                if (cell.cellHash > 0.45 && activeTile.craterIntensity > 0.05) {
-                  // Secondary micro-crater pockmark with depressed bowl and raised rim
-                  if (uCr < 0.75) {
-                    bumpX -= (cell.dx / 0.26) * 1.35;
-                    bumpZ -= (cell.dy / 0.26) * 1.35;
-                    microRelief -= (1 - uCr) * 18;
-                  } else {
-                    bumpX += (cell.dx / 0.26) * 1.15;
-                    bumpZ += (cell.dy / 0.26) * 1.15;
-                    microRelief += 14;
-                  }
-                } else {
-                  // Outcrop boulder / angular breccia block
-                  bumpX += (cell.dx / 0.26) * 1.25;
-                  bumpZ += (cell.dy / 0.26) * 1.25;
-                  microRelief += (1 - uCr) * 16;
-                }
-              }
-
-              r = Math.round(baseRgb[0] + microRelief);
-              g = Math.round(baseRgb[1] + microRelief * 0.95);
-              b = Math.round(baseRgb[2] + microRelief * 0.90);
+              // Perturb mix with fine micro-patch noise so individual rocks, trees, and dunes interleave naturally
+              const microMix = Math.max(0, Math.min(1, biomeMix + (fine1 - 0.5) * 0.28));
+              r = Math.round(s1.r * (1 - microMix) + s2.r * microMix);
+              g = Math.round(s1.g * (1 - microMix) + s2.g * microMix);
+              b = Math.round(s1.b * (1 - microMix) + s2.b * microMix);
+              bumpX = s1.bumpX * (1 - microMix) + s2.bumpX * microMix;
+              bumpZ = s1.bumpZ * (1 - microMix) + s2.bumpZ * microMix;
+              flags = microMix > 0.5 ? s2.flags : s1.flags;
             } else {
-              // Tundra / Steppe / General rocky soil texture
-              const texVar = (fine1 - 0.5) * 26 + (fine2 - 0.5) * 18 + grain * 16;
-              r = Math.round(baseRgb[0] + texVar);
-              g = Math.round(baseRgb[1] + texVar * 0.96);
-              b = Math.round(baseRgb[2] + texVar * 0.90);
+              r = s1.r;
+              g = s1.g;
+              b = s1.b;
+              bumpX = s1.bumpX;
+              bumpZ = s1.bumpZ;
+              flags = s1.flags;
             }
 
             // High-altitude alpine snow / frost cap with irregular wind-scoured snowline
@@ -1481,10 +1636,18 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
           </button>
 
           <div className="flex items-center gap-2">
-            <span
-              className="w-3 h-3 rounded-full border border-white/30"
-              style={{ backgroundColor: activeTile.biomeColor }}
-            />
+            <span className="inline-flex items-center -space-x-1">
+              <span
+                className="w-3 h-3 rounded-full border border-white/30"
+                style={{ backgroundColor: activeTile.biomeColor }}
+              />
+              {activeTile.secondaryBiomeColor && (
+                <span
+                  className="w-3 h-3 rounded-full border border-white/40"
+                  style={{ backgroundColor: activeTile.secondaryBiomeColor }}
+                />
+              )}
+            </span>
             <span className="text-white font-bold text-xs">
               {moon?.name || planet.planetClass} — Goldberg Tile #{activeTile.tileId + 1} ({activeTile.isPentagon ? 'Pentagon' : 'Hexagon'})
             </span>
@@ -1677,10 +1840,18 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                     <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-950 text-sky-300 border border-slate-800 w-7 text-center shrink-0">
                       {nb.compass}
                     </span>
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0 border border-white/20"
-                      style={{ backgroundColor: nb.tile.biomeColor }}
-                    />
+                    <span className="inline-flex items-center -space-x-1 shrink-0">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full border border-white/20"
+                        style={{ backgroundColor: nb.tile.biomeColor }}
+                      />
+                      {nb.tile.secondaryBiomeColor && (
+                        <span
+                          className="w-2.5 h-2.5 rounded-full border border-white/30"
+                          style={{ backgroundColor: nb.tile.secondaryBiomeColor }}
+                        />
+                      )}
+                    </span>
                     <span className="text-[11px] text-slate-200 font-medium truncate group-hover:text-white">
                       #{nb.tile.tileId + 1} {nb.tile.biomeName}
                     </span>
