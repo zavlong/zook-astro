@@ -367,6 +367,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
     const marshRgb = hexToRgb(surfaceModel.floraPalette.marshHex);
     const plainsRgb = hexToRgb(surfaceModel.floraPalette.plainsHex);
     const forestRgb = hexToRgb(surfaceModel.floraPalette.woodlandHex);
+    const taigaRgb = hexToRgb(surfaceModel.floraPalette.taigaHex);
 
     const effCloudCover = surfaceModel.isNoSurface
       ? 0.85
@@ -700,14 +701,15 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
 
           const speciesShade =
             (cell.cellHash - 0.5) * 24 + crownHeightProfile * 16 - (1 - crownHeightProfile) * 20;
-          const cRgb = isForestBiome ? forestRgb : plainsRgb;
+          const cRgb = targetBiomeId === 6 ? taigaRgb : isForestBiome ? forestRgb : plainsRgb;
           r = Math.round(cRgb[0] + speciesShade + fine2 * 12);
           g = Math.round(cRgb[1] + speciesShade * 1.15 + fine2 * 16);
           b = Math.round(cRgb[2] + speciesShade * 0.7 + fine2 * 9);
         } else {
           const wetlandT = hLocal < 0.055 ? Math.max(0, Math.min(1, (0.055 - hLocal) / 0.055)) : 0;
           const windMeadow = Math.sin(px * 44 + pz * 32 + fine1 * 5.5) * 10 + (fine2 - 0.5) * 14 + grain * 10;
-          const baseBioRgb = isForestBiome ? forestRgb : targetBiomeId === 3 ? marshRgb : plainsRgb;
+          const baseBioRgb =
+            targetBiomeId === 6 ? taigaRgb : isForestBiome ? forestRgb : targetBiomeId === 3 ? marshRgb : plainsRgb;
           r = Math.round(baseBioRgb[0] * (1 - wetlandT * 0.65) + marshRgb[0] * (wetlandT * 0.65) + windMeadow * 0.9);
           g = Math.round(
             baseBioRgb[1] * (1 - wetlandT * 0.65) + marshRgb[1] * (wetlandT * 0.65) + windMeadow * 1.15

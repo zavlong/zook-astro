@@ -1552,10 +1552,16 @@ export function generatePlanetarySurfaceModel(
     coverageFrac >= 0.85 &&
     !bodyClassLower.includes('icy') &&
     !bodyClassLower.includes('frozen');
+  const isContinentalAmmoniaWorld =
+    !isNoSurface &&
+    !isMoltenWorld &&
+    (solventLower.includes('nh3') || solventLower.includes('ammonia') || bodyClassLower.includes('ammonia')) &&
+    ((activeBody.iceFrac ?? 0) < 0.04 || (hydro?.state || '').includes('Cryo-Continent'));
   const isIcyWorld =
     !isNoSurface &&
     !isMoltenWorld &&
     !isWarmGlobalOcean &&
+    !isContinentalAmmoniaWorld &&
     !bodyClassLower.includes('venusian') &&
     ((Tbase < 273.15 &&
       ((activeBody.iceFrac ?? 0) >= 0.15 ||
@@ -1564,7 +1570,7 @@ export function generatePlanetarySurfaceModel(
         bodyClassLower.includes('ice') ||
         bodyClassLower.includes('icy') ||
         bodyClassLower.includes('frozen') ||
-        bodyClassLower.includes('cryo') ||
+        (bodyClassLower.includes('cryo') && !isContinentalAmmoniaWorld) ||
         bodyClassLower.includes('glacial') ||
         (Tbase < 225 && (activeBody.rockFrac ?? 1) < 0.85))) ||
       bodyClassLower.includes('icy') ||
@@ -1694,6 +1700,7 @@ export function generatePlanetarySurfaceModel(
   const isDeepWaterOrIceShell =
     !isNoSurface &&
     !isMoltenWorld &&
+    !isContinentalAmmoniaWorld &&
     (seaPalette.solventKey === 'H2O' ||
       seaPalette.solventKey === 'H2O + CO2' ||
       seaPalette.solventKey === 'NH3-H2O') &&
@@ -2486,15 +2493,34 @@ export function generatePlanetarySurfaceModel(
             );
             hNorm = Math.min(0.99, 0.5 + 0.5 * iceAltRatio);
             hypsometry[idx] = hNorm;
-            localMoisture = Math.min(0.95, localMoisture * 0.75);
+
+            // Compute organic climatic moisture across the floating iceberg continent
+            const bergCoastalBoost = Math.max(0, (0.24 - iceAltRatio) * 0.78);
+            const bergInteriorDry = Math.max(0, (iceAltRatio - 0.2) * 0.42);
+            const rawBergMoist =
+              (moistNoise - 0.5) * 1.38 + 0.5 + circulationMoistTerm + bergCoastalBoost - bergInteriorDry;
+            localMoisture = Math.max(0.04, Math.min(0.96, rawBergMoist));
             moistureGrid[idx] = localMoisture;
 
             if (crackVal > 0.28) {
               biomeGrid[idx] = 21; // Cryotectonic Ice Fissure (Linea)
+            } else if (iceAltRatio > 0.72 + topoVar * 0.5) {
+              biomeGrid[idx] = 13; // Pressure-Ridge Glacial Ice Peaks
+            } else if (hasBiosphere && iceAltRatio <= 0.54 + topoVar * 0.5 && Tlocal >= freezingPointK + 3) {
+              // Ammonia-world life biomes colonizing tholin-rich floating H2O-iceberg shelves!
+              if (Tlocal < freezingPointK + 14) {
+                biomeGrid[idx] = localMoisture >= 0.24 ? 6 : 18; // Cryo-Ammonia Boreal Forest or Tabular Iceberg Shelf
+              } else if (localMoisture < 0.20) {
+                biomeGrid[idx] = 18; // Arid Tabular Iceberg Shelf
+              } else if (iceAltRatio < 0.14 && localMoisture > 0.62) {
+                biomeGrid[idx] = 3; // Cryo-Ammonia Coastal Marsh
+              } else if (localMoisture >= 0.44) {
+                biomeGrid[idx] = 5; // Cryo-Ammonia Forest
+              } else {
+                biomeGrid[idx] = 4; // Cryo-Ammonia Grassland
+              }
             } else if (iceAltRatio < 0.26 + topoVar * 0.5) {
               biomeGrid[idx] = 18; // Lowland Tabular Iceberg Shelf
-            } else if (iceAltRatio > 0.74 + topoVar * 0.5) {
-              biomeGrid[idx] = 13; // Pressure-Ridge Glacial Ice Peaks
             } else {
               biomeGrid[idx] = 8; // Continent-Sized Precipitated H2O Iceberg Sheet
             }
@@ -2558,7 +2584,7 @@ export function generatePlanetarySurfaceModel(
             : 1.0 - bathyNorm; // Shoals smoothly toward floating H2O iceberg shelves!
           const waterDepthRatio = Math.max(
             0.02,
-            Math.min(0.98, coastalShoaling * (hasPrecipitatedNH3Icebergs ? seafloorDepth : 0.26 + 0.74 * seafloorDepth))
+            Math.min(0.98, coastalShoaling * (hasPrecipitatedNH3Icebergs ? seafloorDepth : 0.14 + 0.86 * seafloorDepth))
           );
           hNorm = Math.max(0.01, 0.5 * (1.0 - waterDepthRatio));
           hypsometry[idx] = hNorm;
@@ -2568,7 +2594,7 @@ export function generatePlanetarySurfaceModel(
             : 0;
           if (waterDepthRatio > 0.62) {
             biomeGrid[idx] = 0; // Abyssal Trench
-          } else if (hasBiosphere && (waterDepthRatio <= 0.34 || (waterDepthRatio <= 0.56 && algalBloom > 0.47))) {
+          } else if (hasBiosphere && (waterDepthRatio <= 0.36 || (waterDepthRatio <= 0.58 && algalBloom > 0.45))) {
             biomeGrid[idx] = 23; // Algal Sea (Photic Bloom & Kelp Reefs)
           } else if (waterDepthRatio > 0.24) {
             biomeGrid[idx] = 1; // Deep Ocean
@@ -4359,9 +4385,12 @@ export function sampleSurfacePoint(
   } else if (isOcean) {
     const pal = model.seaPalette;
     const fp = model.floraPalette;
+    const isAmmoniaLife = pal.solventKey === 'NH3-H2O' && fp.hasAnyLife;
     const isElevatedMeltPond = model.isIcyWorld && hNorm >= model.seaLevelNormalized;
     if (biomeId === 23 && fp.hasAnyLife) {
-      biomeName = `Algal Sea (${fp.pigmentName})`;
+      biomeName = isAmmoniaLife
+        ? `Ammoniated Algal Sea (${fp.pigmentName})`
+        : `Algal Sea (${fp.pigmentName})`;
       biomeColor = rgbToHex([
         Math.round(pal.shallowRgb[0] * 0.42 + fp.lowRgb[0] * 0.58),
         Math.round(pal.shallowRgb[1] * 0.42 + fp.lowRgb[1] * 0.58),
@@ -4411,18 +4440,27 @@ export function sampleSurfacePoint(
   } else if (biomeId >= 3 && biomeId <= 6) {
     // Dynamic flora or sterile regolith biome naming & coloring
     const fp = model.floraPalette;
+    const isAmmoniaLife = model.seaPalette.solventKey === 'NH3-H2O' && fp.hasAnyLife;
     if (fp.hasAnyLife) {
       if (biomeId === 3) {
-        biomeName = `Coastal Marsh & Mangrove Forest (${fp.pigmentName})`;
+        biomeName = isAmmoniaLife
+          ? `Cryo-Ammonia Coastal Marsh (${fp.pigmentName})`
+          : `Coastal Marsh & Mangrove Forest (${fp.pigmentName})`;
         biomeColor = fp.marshHex;
       } else if (biomeId === 4) {
-        biomeName = `Grassland (${fp.pigmentName})`;
+        biomeName = isAmmoniaLife
+          ? `Cryo-Ammonia Grassland (${fp.pigmentName})`
+          : `Grassland (${fp.pigmentName})`;
         biomeColor = fp.plainsHex;
       } else if (biomeId === 5) {
-        biomeName = `Forest (${fp.pigmentName})`;
+        biomeName = isAmmoniaLife
+          ? `Cryo-Ammonia Forest (${fp.pigmentName})`
+          : `Forest (${fp.pigmentName})`;
         biomeColor = fp.woodlandHex;
       } else {
-        biomeName = `Boreal Forest (${fp.pigmentName})`;
+        biomeName = isAmmoniaLife
+          ? `Cryo-Ammonia Boreal Forest (${fp.pigmentName})`
+          : `Boreal Forest (${fp.pigmentName})`;
         biomeColor = fp.taigaHex;
       }
     } else {

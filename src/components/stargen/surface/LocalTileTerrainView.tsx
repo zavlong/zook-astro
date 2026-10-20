@@ -363,6 +363,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const marshRgb = hexToRgb(surfaceModel.floraPalette.marshHex);
     const plainsRgb = hexToRgb(surfaceModel.floraPalette.plainsHex);
     const forestRgb = hexToRgb(surfaceModel.floraPalette.woodlandHex);
+    const taigaRgb = hexToRgb(surfaceModel.floraPalette.taigaHex);
 
     // Cloud field parameters for 3D clouds + ground shadows
     const effCloudCover = surfaceModel.isNoSurface
@@ -779,6 +780,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         );
         const cell = cellularFeature2D(px * 26.0, pz * 26.0, tileSeed + 809);
         const crownRadius = (isForestBiome ? 0.32 : 0.22) + canopyDensity * 0.26;
+        const treeRgb = targetBiomeId === 6 ? taigaRgb : isForestBiome ? forestRgb : plainsRgb;
 
         if (cell.dist < crownRadius && slope < 0.52 && hLocal > 0.018 && hLocal < 0.29) {
           const uCrown = cell.dist / crownRadius;
@@ -788,20 +790,21 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
 
           const speciesShade =
             (cell.cellHash - 0.5) * 26 + crownHeightProfile * 18 - (1 - crownHeightProfile) * 22;
-          const cRgb = isForestBiome ? forestRgb : plainsRgb;
-          r = Math.round(cRgb[0] + speciesShade + fine2 * 14);
-          g = Math.round(cRgb[1] + speciesShade * 1.15 + fine2 * 18);
-          b = Math.round(cRgb[2] + speciesShade * 0.7 + fine2 * 10);
+          r = Math.round(treeRgb[0] + speciesShade + fine2 * 14);
+          g = Math.round(treeRgb[1] + speciesShade * 1.15 + fine2 * 18);
+          b = Math.round(treeRgb[2] + speciesShade * 0.7 + fine2 * 10);
         } else {
           // Lush Grassland / Savanna meadow waves & wetland undergrowth
           const wetlandT = hLocal < 0.055 ? Math.max(0, Math.min(1, (0.055 - hLocal) / 0.055)) : 0;
           const grassWave = Math.sin(px * 48 + pz * 32 + fine1 * 6) * 10 + grain * 14;
           const meadowRgb = isForestBiome
             ? [
-                Math.round(plainsRgb[0] * 0.55 + forestRgb[0] * 0.45),
-                Math.round(plainsRgb[1] * 0.55 + forestRgb[1] * 0.45),
-                Math.round(plainsRgb[2] * 0.55 + forestRgb[2] * 0.45),
+                Math.round(plainsRgb[0] * 0.52 + treeRgb[0] * 0.48),
+                Math.round(plainsRgb[1] * 0.52 + treeRgb[1] * 0.48),
+                Math.round(plainsRgb[2] * 0.52 + treeRgb[2] * 0.48),
               ]
+            : targetBiomeId === 3
+            ? marshRgb
             : plainsRgb;
           r = Math.round(meadowRgb[0] * (1 - wetlandT * 0.7) + marshRgb[0] * (wetlandT * 0.7) + grassWave);
           g = Math.round(
