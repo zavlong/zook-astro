@@ -120,3 +120,37 @@ input[type=range]::-webkit-slider-thumb:hover {
     filter: none !important;
   }
 }
+
+/* ============================================================================ */
+/* SPA VIEW STATE CACHING & COMPLEX LAYOUT CONTAINMENT                          */
+/* ============================================================================ */
+.spa-view-cached {
+  width: 100%;
+  height: 100%;
+  content-visibility: visible;
+}
+
+.spa-view-cached.spa-view-inactive {
+  content-visibility: hidden;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+@supports not (content-visibility: hidden) {
+  .spa-view-cached.spa-view-inactive {
+    display: none;
+  }
+}
+
+.contain-layout-panel {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px auto 800px;
+}
+
+@supports not (content-visibility: auto) {
+  .contain-layout-panel {
+    contain: layout style paint;
+  }
+}
+

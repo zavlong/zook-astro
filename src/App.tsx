@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import {
   FilterCategory,
@@ -12,19 +12,33 @@ import { calculateStellarEvolution } from './core/astrophysics/evolution';
 import { getStarColorRGB } from './core/astrophysics/colors';
 import { Header } from './components/ui/Header';
 import { SectorControls } from './components/ui/SectorControls';
-import { SectorView3D } from './components/canvas/SectorView3D';
 import { StellarInspector } from './components/ui/StellarInspector';
 import { useResizableColumns } from './hooks/useResizableColumns';
 import { ShowcaseHome } from './components/home/ShowcaseHome';
-import { AstroArchitectApp } from './components/architect/AstroArchitectApp';
-import { RealisticStarGenApp } from './components/stargen/RealisticStarGenApp';
-import { SectorHexApp } from './components/sector/SectorHexApp';
-import { GalaxyGenApp } from './components/galaxy/GalaxyGenApp';
-import { StarGenParams } from './core/generation/realisticStarGen';
-import { GalaxySectorHex } from './core/generation/galaxyGen';
-import { SectorHexConfig } from './core/generation/sectorHex';
-import { PlanetarySurfaceApp, PlanetarySurfaceTarget } from './components/surface/PlanetarySurfaceApp';
+import type { StarGenParams } from './core/generation/realisticStarGen';
+import type { GalaxySectorHex } from './core/generation/galaxyGen';
+import type { SectorHexConfig } from './core/generation/sectorHex';
+import type { PlanetarySurfaceTarget } from './components/surface/PlanetarySurfaceApp';
 import { GenerationLoadingOverlay, yieldToMainThread } from './components/ui/GenerationLoadingOverlay';
+
+const SectorView3D = lazy(() =>
+  import('./components/canvas/SectorView3D').then((m) => ({ default: m.SectorView3D }))
+);
+const AstroArchitectApp = lazy(() =>
+  import('./components/architect/AstroArchitectApp').then((m) => ({ default: m.AstroArchitectApp }))
+);
+const RealisticStarGenApp = lazy(() =>
+  import('./components/stargen/RealisticStarGenApp').then((m) => ({ default: m.RealisticStarGenApp }))
+);
+const SectorHexApp = lazy(() =>
+  import('./components/sector/SectorHexApp').then((m) => ({ default: m.SectorHexApp }))
+);
+const GalaxyGenApp = lazy(() =>
+  import('./components/galaxy/GalaxyGenApp').then((m) => ({ default: m.GalaxyGenApp }))
+);
+const PlanetarySurfaceApp = lazy(() =>
+  import('./components/surface/PlanetarySurfaceApp').then((m) => ({ default: m.PlanetarySurfaceApp }))
+);
 
 export const App: React.FC = () => {
   // Global HUD UI toggle state (Off by default for full-screen edge-to-edge immersion)
@@ -251,10 +265,12 @@ export const App: React.FC = () => {
     setIsGenerating3DSector(false);
   }, [config]);
 
-  // Initial load
+  // Synthesize the 1,000-star 3D sector on demand when entering the 3D Sector view
   useEffect(() => {
-    void handleRegenerate(config);
-  }, []);
+    if (activeApp === 'sector-3d' && stars.length === 0) {
+      void handleRegenerate(config);
+    }
+  }, [activeApp, stars.length, config, handleRegenerate]);
 
   // Update seed
   const handleNewSeed = () => {
@@ -357,159 +373,175 @@ export const App: React.FC = () => {
       )}
 
       {/* Main Multi-App Viewport */}
-      {activeApp === 'home' ? (
-        <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
-          <ShowcaseHome onSelectApp={setActiveApp} />
-        </main>
-      ) : activeApp === 'galaxy-gen' ? (
-        <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
-          <GalaxyGenApp
-            onSelectSector={handleSelectGalaxySector}
-            onGoHome={() => setActiveApp('home')}
-            initialSelectedCoord={lastGalaxySector?.coord}
-            returnTransition={returnToGalaxyTransition}
-            showUI={showUI}
-          />
-        </main>
-      ) : activeApp === 'sector-hex' ? (
-        <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
-          <SectorHexApp
-            initialConfig={sectorInitialConfig}
-            initialSelectedCoord={lastSectorSystemCoord}
-            returnTransition={returnToSectorTransition}
-            onBackToGalaxy={handleBackToGalaxy}
-            onLaunchStarGen={handleLaunchStarGenFromSector}
-            showUI={showUI}
-          />
-        </main>
-      ) : activeApp === 'sector-3d' ? (
-        <main
-          ref={mainContainerRef}
-          className="w-full flex-1 flex flex-row gap-0 min-h-0 relative overflow-hidden select-none"
-        >
-          {isGenerating3DSector && (
+      <Suspense
+        fallback={
+          <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
             <GenerationLoadingOverlay
-              title={`Synthesizing 3D Sector (${morphologyLabels[config.morphology] || 'Sector'})`}
-              subtitle={`${config.starCount.toLocaleString()} Stellar Systems • Radius ${config.radiusLy} ly • Seed #${config.seed}`}
-              detail="Computing 3D spatial distribution, stellar evolution tracks, and habitable zones..."
+              title="Loading Simulation Module..."
+              subtitle="Initializing Astrophysics & Rendering Pipeline"
+              detail="Preparing interactive viewport..."
               accentColor="#38bdf8"
             />
-          )}
-          {/* SEC-02: LEFT PANEL - Sector Controls */}
-          {showUI && (
-            <div
-              style={{ width: `${colWidths.left}%` }}
-              className="h-full flex flex-col min-w-[210px] flex-shrink-0"
-            >
-              <SectorControls
-                config={config}
-                onChangeConfig={(newCfg) => {
-                  setConfig(newCfg);
-                  handleRegenerate(newCfg);
-                }}
-                onRegenerate={() => handleRegenerate(config)}
-                onNewSeed={handleNewSeed}
-              />
-            </div>
-          )}
-
-          {/* DRAGGABLE RESIZE DIVIDER 1 */}
-          {showUI && (
-            <div
-              onMouseDown={() => startDrag('left')}
-              onDoubleClick={resetColWidths}
-              title="Drag horizontally to resize Left & Center panels • Double-click to reset"
-              className="w-2 hover:w-2.5 h-full cursor-col-resize flex items-center justify-center group z-30 transition-all flex-shrink-0 px-0.5"
-            >
-              <div className="w-1 h-12 bg-slate-700/80 group-hover:bg-cyan-400 group-hover:h-20 group-hover:w-1.5 rounded-full transition-all shadow-sm" />
-            </div>
-          )}
-
-          {/* SEC-03: CENTER PANEL - 3D Three.js Interactive Sector Canvas */}
-          <section
-            style={{ width: showUI ? `${colWidths.center}%` : '100%' }}
-            className={`h-full flex-1 ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'} flex flex-col relative overflow-hidden min-w-[240px]`}
-          >
-            <SectorView3D
-              stars={stars}
-              selectedStar={selectedStar}
-              onSelectStar={(s) => {
-                setSelectedStar(s);
-                setSelectedPlanetIndex(0);
-              }}
-              activeFilter={activeFilter}
-              radiusLy={config.radiusLy}
-            />
-          </section>
-
-          {/* DRAGGABLE RESIZE DIVIDER 2 */}
-          {showUI && (
-            <div
-              onMouseDown={() => startDrag('right')}
-              onDoubleClick={resetColWidths}
-              title="Drag horizontally to resize Center & Right panels • Double-click to reset"
-              className="w-2 hover:w-2.5 h-full cursor-col-resize flex items-center justify-center group z-30 transition-all flex-shrink-0 px-0.5"
-            >
-              <div className="w-1 h-12 bg-slate-700/80 group-hover:bg-cyan-400 group-hover:h-20 group-hover:w-1.5 rounded-full transition-all shadow-sm" />
-            </div>
-          )}
-
-          {/* SEC-04 through SEC-09: RIGHT PANEL - Deep Stellar & Planetary System Inspector */}
-          {showUI && (
-            <div
-              style={{ width: `${colWidths.right}%` }}
-              className="h-full flex flex-col min-w-[280px] flex-shrink-0"
-            >
-              <StellarInspector
-                selectedStar={selectedStar}
-                onScrubProgress={handleScrubProgress}
-                selectedPlanetIndex={selectedPlanetIndex}
-                onSelectPlanet={setSelectedPlanetIndex}
-              />
-            </div>
-          )}
-        </main>
-      ) : activeApp === 'stargen-lab' || activeApp === 'surface-gen' ? (
-        <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
-          <div className={activeApp === 'stargen-lab' ? 'w-full h-full' : 'hidden'}>
-            <RealisticStarGenApp
-              initialParams={starGenInitialParams}
-              onBackToSectorHex={handleBackToSectorHex}
-              onOpenInArchitect={(archSys) => {
-                setArchitectInitialSystem(archSys);
-                setActiveApp('astro-architect');
-              }}
-              onInspectInSector3D={(starSys) => {
-                setStars((prev) => [starSys, ...prev.filter((s) => s.id !== starSys.id)]);
-                setSelectedStar(starSys);
-                setSelectedPlanetIndex(0);
-                setActiveApp('sector-3d');
-              }}
+          </main>
+        }
+      >
+        {activeApp === 'home' ? (
+          <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
+            <ShowcaseHome onSelectApp={setActiveApp} />
+          </main>
+        ) : activeApp === 'galaxy-gen' ? (
+          <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
+            <GalaxyGenApp
+              onSelectSector={handleSelectGalaxySector}
+              onGoHome={() => setActiveApp('home')}
+              initialSelectedCoord={lastGalaxySector?.coord}
+              returnTransition={returnToGalaxyTransition}
               showUI={showUI}
-              onOpenSurfaceGen={handleLaunchSurfaceGen}
-              isActive={activeApp === 'stargen-lab'}
             />
-          </div>
-          {activeApp === 'surface-gen' && (
-            <div className="w-full h-full overflow-y-auto custom-scrollbar">
-              <PlanetarySurfaceApp
-                initialTarget={surfaceInitialTarget}
-                onBackToStarGen={handleBackToStarGen}
+          </main>
+        ) : activeApp === 'sector-hex' ? (
+          <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
+            <SectorHexApp
+              initialConfig={sectorInitialConfig}
+              initialSelectedCoord={lastSectorSystemCoord}
+              returnTransition={returnToSectorTransition}
+              onBackToGalaxy={handleBackToGalaxy}
+              onLaunchStarGen={handleLaunchStarGenFromSector}
+              showUI={showUI}
+            />
+          </main>
+        ) : activeApp === 'sector-3d' ? (
+          <main
+            ref={mainContainerRef}
+            className="w-full flex-1 flex flex-row gap-0 min-h-0 relative overflow-hidden select-none"
+          >
+            {isGenerating3DSector && (
+              <GenerationLoadingOverlay
+                title={`Synthesizing 3D Sector (${morphologyLabels[config.morphology] || 'Sector'})`}
+                subtitle={`${config.starCount.toLocaleString()} Stellar Systems • Radius ${config.radiusLy} ly • Seed #${config.seed}`}
+                detail="Computing 3D spatial distribution, stellar evolution tracks, and habitable zones..."
+                accentColor="#38bdf8"
+              />
+            )}
+            {/* SEC-02: LEFT PANEL - Sector Controls */}
+            {showUI && (
+              <div
+                style={{ width: `${colWidths.left}%` }}
+                className="h-full flex flex-col min-w-[210px] flex-shrink-0"
+              >
+                <SectorControls
+                  config={config}
+                  onChangeConfig={(newCfg) => {
+                    setConfig(newCfg);
+                    handleRegenerate(newCfg);
+                  }}
+                  onRegenerate={() => handleRegenerate(config)}
+                  onNewSeed={handleNewSeed}
+                />
+              </div>
+            )}
+
+            {/* DRAGGABLE RESIZE DIVIDER 1 */}
+            {showUI && (
+              <div
+                onMouseDown={() => startDrag('left')}
+                onDoubleClick={resetColWidths}
+                title="Drag horizontally to resize Left & Center panels • Double-click to reset"
+                className="w-2 hover:w-2.5 h-full cursor-col-resize flex items-center justify-center group z-30 transition-all flex-shrink-0 px-0.5"
+              >
+                <div className="w-1 h-12 bg-slate-700/80 group-hover:bg-cyan-400 group-hover:h-20 group-hover:w-1.5 rounded-full transition-all shadow-sm" />
+              </div>
+            )}
+
+            {/* SEC-03: CENTER PANEL - 3D Three.js Interactive Sector Canvas */}
+            <section
+              style={{ width: showUI ? `${colWidths.center}%` : '100%' }}
+              className={`h-full flex-1 ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'} flex flex-col relative overflow-hidden min-w-[240px]`}
+            >
+              <SectorView3D
+                stars={stars}
+                selectedStar={selectedStar}
+                onSelectStar={(s) => {
+                  setSelectedStar(s);
+                  setSelectedPlanetIndex(0);
+                }}
+                activeFilter={activeFilter}
+                radiusLy={config.radiusLy}
+              />
+            </section>
+
+            {/* DRAGGABLE RESIZE DIVIDER 2 */}
+            {showUI && (
+              <div
+                onMouseDown={() => startDrag('right')}
+                onDoubleClick={resetColWidths}
+                title="Drag horizontally to resize Center & Right panels • Double-click to reset"
+                className="w-2 hover:w-2.5 h-full cursor-col-resize flex items-center justify-center group z-30 transition-all flex-shrink-0 px-0.5"
+              >
+                <div className="w-1 h-12 bg-slate-700/80 group-hover:bg-cyan-400 group-hover:h-20 group-hover:w-1.5 rounded-full transition-all shadow-sm" />
+              </div>
+            )}
+
+            {/* SEC-04 through SEC-09: RIGHT PANEL - Deep Stellar & Planetary System Inspector */}
+            {showUI && (
+              <div
+                style={{ width: `${colWidths.right}%` }}
+                className="h-full flex flex-col min-w-[280px] flex-shrink-0"
+              >
+                <StellarInspector
+                  selectedStar={selectedStar}
+                  onScrubProgress={handleScrubProgress}
+                  selectedPlanetIndex={selectedPlanetIndex}
+                  onSelectPlanet={setSelectedPlanetIndex}
+                />
+              </div>
+            )}
+          </main>
+        ) : activeApp === 'stargen-lab' || activeApp === 'surface-gen' ? (
+          <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
+            <div
+              className={`spa-view-cached ${activeApp === 'stargen-lab' ? '' : 'spa-view-inactive'}`}
+              aria-hidden={activeApp !== 'stargen-lab'}
+            >
+              <RealisticStarGenApp
+                initialParams={starGenInitialParams}
+                onBackToSectorHex={handleBackToSectorHex}
+                onOpenInArchitect={(archSys) => {
+                  setArchitectInitialSystem(archSys);
+                  setActiveApp('astro-architect');
+                }}
+                onInspectInSector3D={(starSys) => {
+                  setStars((prev) => [starSys, ...prev.filter((s) => s.id !== starSys.id)]);
+                  setSelectedStar(starSys);
+                  setSelectedPlanetIndex(0);
+                  setActiveApp('sector-3d');
+                }}
+                showUI={showUI}
+                onOpenSurfaceGen={handleLaunchSurfaceGen}
+                isActive={activeApp === 'stargen-lab'}
               />
             </div>
-          )}
-        </main>
-      ) : (
-        <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
-          <AstroArchitectApp
-            onBackToSectorSim={() => setActiveApp('sector-3d')}
-            onGoHome={() => setActiveApp('home')}
-            initialSystem={architectInitialSystem}
-            onOpenStarGenLab={() => setActiveApp('stargen-lab')}
-            showUI={showUI}
-          />
-        </main>
-      )}
+            {activeApp === 'surface-gen' && (
+              <div className="w-full h-full overflow-y-auto custom-scrollbar">
+                <PlanetarySurfaceApp
+                  initialTarget={surfaceInitialTarget}
+                  onBackToStarGen={handleBackToStarGen}
+                />
+              </div>
+            )}
+          </main>
+        ) : (
+          <main className={`w-full flex-1 min-h-0 relative ${showUI ? 'rounded-xl glass-hud border border-slate-800/80' : 'rounded-none border-0'}`}>
+            <AstroArchitectApp
+              onBackToSectorSim={() => setActiveApp('sector-3d')}
+              onGoHome={() => setActiveApp('home')}
+              initialSystem={architectInitialSystem}
+              onOpenStarGenLab={() => setActiveApp('stargen-lab')}
+              showUI={showUI}
+            />
+          </main>
+        )}
+      </Suspense>
     </div>
   );
 };

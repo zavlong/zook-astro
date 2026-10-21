@@ -422,15 +422,40 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     }
   }, [gridData]);
 
+  // Pre-indexed O(1) lookup table for planetary filter flags & biosphere summary per system
+  const systemTraitsMap = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        hasWater: boolean;
+        hasAmmonia: boolean;
+        hasMulti: boolean;
+        isNonMs: boolean;
+        biosphereDisplay: string;
+      }
+    >();
+    for (const sys of gridData.systems) {
+      map.set(sys.id, {
+        hasWater: hasWaterWorld(sys),
+        hasAmmonia: hasAmmoniaWorld(sys),
+        hasMulti: hasMulticellularLife(sys),
+        isNonMs: isNonMainSequenceSystem(sys),
+        biosphereDisplay: getBiosphereDisplay(sys),
+      });
+    }
+    return map;
+  }, [gridData.systems]);
+
   // Dynamic filter matching count
   const matchingStarsCount = useMemo(() => {
     return gridData.systems.filter((system) => {
       if (filterCat === 'all') return true;
       if (filterCat === 'habitable') return system.candidateHabitable;
-      if (filterCat === 'water-world') return hasWaterWorld(system);
-      if (filterCat === 'ammonia-world') return hasAmmoniaWorld(system);
-      if (filterCat === 'multicellular') return hasMulticellularLife(system);
-      if (filterCat === 'non-ms') return isNonMainSequenceSystem(system);
+      const traits = systemTraitsMap.get(system.id);
+      if (filterCat === 'water-world') return traits ? traits.hasWater : hasWaterWorld(system);
+      if (filterCat === 'ammonia-world') return traits ? traits.hasAmmonia : hasAmmoniaWorld(system);
+      if (filterCat === 'multicellular') return traits ? traits.hasMulti : hasMulticellularLife(system);
+      if (filterCat === 'non-ms') return traits ? traits.isNonMs : isNonMainSequenceSystem(system);
       if (filterCat === 'mass') {
         if (massBracket === 'low') return system.mass < 0.8;
         if (massBracket === 'solar') return system.mass >= 0.8 && system.mass <= 2.0;
@@ -447,7 +472,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       }
       return system.spectralCat === filterCat;
     }).length;
-  }, [gridData.systems, filterCat, massBracket, customMinMass, customMaxMass]);
+  }, [gridData.systems, systemTraitsMap, filterCat, massBracket, customMinMass, customMaxMass]);
 
   const getMassFilterButtonLabel = () => {
     if (filterCat !== 'mass') return 'Mass ▾';
@@ -2219,19 +2244,19 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 const systemEmpire = empireMap.get(system.id);
                 const isCapital = systemEmpire != null && systemEmpire.homeworldSystemId === system.id;
 
-                // Filter check
+                // Filter check (O(1) pre-indexed traits lookup)
                 let matchesFilter = true;
                 if (filterCat !== 'all') {
                   if (filterCat === 'habitable') {
                     matchesFilter = system.candidateHabitable;
                   } else if (filterCat === 'water-world') {
-                    matchesFilter = hasWaterWorld(system);
+                    matchesFilter = systemTraitsMap.get(system.id)?.hasWater ?? hasWaterWorld(system);
                   } else if (filterCat === 'ammonia-world') {
-                    matchesFilter = hasAmmoniaWorld(system);
+                    matchesFilter = systemTraitsMap.get(system.id)?.hasAmmonia ?? hasAmmoniaWorld(system);
                   } else if (filterCat === 'multicellular') {
-                    matchesFilter = hasMulticellularLife(system);
+                    matchesFilter = systemTraitsMap.get(system.id)?.hasMulti ?? hasMulticellularLife(system);
                   } else if (filterCat === 'non-ms') {
-                    matchesFilter = isNonMainSequenceSystem(system);
+                    matchesFilter = systemTraitsMap.get(system.id)?.isNonMs ?? isNonMainSequenceSystem(system);
                   } else if (filterCat === 'mass') {
                     if (massBracket === 'low') {
                       matchesFilter = system.mass < 0.8;
@@ -3110,8 +3135,8 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
         {/* ============================================================================ */}
         {showUI && (
           <div
-            className="w-[380px] h-full flex flex-col bg-slate-950/95 border-l border-slate-800 flex-shrink-0 z-10 overflow-y-auto"
-            style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 380px auto 800px' }}
+            className="w-[380px] h-full flex flex-col bg-slate-950/95 border-l border-slate-800 flex-shrink-0 z-10 overflow-y-auto contain-layout-panel"
+            style={{ containIntrinsicSize: 'auto 380px auto 800px' }}
           >
           {selectedSystem ? (
             <div className="p-4 flex flex-col gap-4">
@@ -3559,12 +3584,19 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       </div>
 
                       {/* Planetary Biospheres */}
-                      <div className="flex items-center justify-between py-1">
-                        <span className="text-slate-400">Planetary Biospheres:</span>
-                        <span className={getBiosphereDisplay(selectedSystem) !== '<none>' ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                          {getBiosphereDisplay(selectedSystem)}
-                        </span>
-                      </div>
+                      {(() => {
+                        const bioLabel =
+                          systemTraitsMap.get(selectedSystem.id)?.biosphereDisplay ??
+                          getBiosphereDisplay(selectedSystem);
+                        return (
+                          <div className="flex items-center justify-between py-1">
+                            <span className="text-slate-400">Planetary Biospheres:</span>
+                            <span className={bioLabel !== '<none>' ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                              {bioLabel}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </>
                   );
                 })()}

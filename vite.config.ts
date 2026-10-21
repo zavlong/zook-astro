@@ -24,6 +24,20 @@ export default defineConfig({
           if (id.includes('lucide-react')) {
             return 'vendor-icons';
           }
+          if (
+            id.includes('/components/stargen/surface/') ||
+            id.includes('\\components\\stargen\\surface\\')
+          ) {
+            return 'surface-engine';
+          }
+          if (
+            id.includes('/core/generation/') ||
+            id.includes('\\core\\generation\\') ||
+            id.includes('/core/export/') ||
+            id.includes('\\core\\export\\')
+          ) {
+            return 'astro-core';
+          }
         },
       },
     },
