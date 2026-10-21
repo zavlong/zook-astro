@@ -131,14 +131,21 @@ function renderPlanetGlobeToCanvas(
   _interactiveFast = false,
   includeSpriteRings = true
 ): void {
-  const surfaceModel = generatePlanetarySurfaceModel(planet, moon, null, [
-    {
-      Teff: starTeff || 5778,
-      colorHex: starColorHex || '#fff4e6',
-      radius: 1.0,
-      lumNum: 1.0,
-    } as RealisticStarNode,
-  ]);
+  const isSmallIcon = _interactiveFast || gCanvas.width <= 72;
+  const surfaceModel = generatePlanetarySurfaceModel(
+    planet,
+    moon,
+    null,
+    [
+      {
+        Teff: starTeff || 5778,
+        colorHex: starColorHex || '#fff4e6',
+        radius: 1.0,
+        lumNum: 1.0,
+      } as RealisticStarNode,
+    ],
+    isSmallIcon
+  );
 
   renderSurfaceProjectedGlobeToCanvas(gCanvas, surfaceModel, planet, moon, {
     activeLayer: 'satellite',
@@ -202,7 +209,7 @@ export function getProceduralPlanetIconDataUrl(
     true,
     qYaw,
     qPitch,
-    false,
+    true,
     includeSpriteRings
   );
   const url = canvas.toDataURL('image/png');

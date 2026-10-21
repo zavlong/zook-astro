@@ -1467,16 +1467,20 @@ export type SurfaceMapLayerType =
   | 'plates';
 
 const surfaceModelCache = new Map<string, PlanetarySurfaceModel>();
+const iconSurfaceModelCache = new Map<string, PlanetarySurfaceModel>();
 
 /**
  * Builds (or retrieves from cache) the complete planetary surface model including topography,
  * biomes, climate grid, volcanoes, cloud/atmosphere layer, and sky horizon parameters.
+ * When `iconFastMode` is true, low-frequency spherical FBM fields are evaluated on a 4x4 degree
+ * grid and bilinearly interpolated, accelerating generation by ~15-20x for small overview icons.
  */
 export function generatePlanetarySurfaceModel(
   planet: RealisticPlanetBody,
   moon?: RealisticMoon | null,
   zone?: RealisticPlanetaryZone | null,
-  stars?: RealisticStarNode[] | null
+  stars?: RealisticStarNode[] | null,
+  iconFastMode = false
 ): PlanetarySurfaceModel {
   const isMoon = Boolean(moon);
   const activeBody = moon || planet;
@@ -1487,6 +1491,10 @@ export function generatePlanetarySurfaceModel(
 
   const cached = surfaceModelCache.get(cacheKey);
   if (cached) return cached;
+  if (iconFastMode) {
+    const cachedIcon = iconSurfaceModelCache.get(cacheKey);
+    if (cachedIcon) return cachedIcon;
+  }
 
   const bodyClass = isMoon ? (moon?.moonClass || '') : planet.planetClass;
   const bodyClassLower = bodyClass.toLowerCase();
@@ -1957,15 +1965,21 @@ export function generatePlanetarySurfaceModel(
   // Pass 1: Generate continuous base terrain, tectonic plate interactions, craters, cracks, volcanoes, & clouds
   let rawBaseMin = Infinity;
   let rawBaseMax = -Infinity;
+  const pass1Step = iconFastMode ? 4 : 1;
+  const fbmOct = (n: number) => (iconFastMode ? Math.max(2, n - 1) : n);
 
-  for (let y = 0; y < height; y++) {
+  for (
+    let y = 0;
+    y < height;
+    y = y < height - 1 && y + pass1Step >= height ? height - 1 : y + pass1Step
+  ) {
     const lat = 90 - y; // 90 to -90
     const latRad = (lat * Math.PI) / 180;
     const phi = ((90 - lat) * Math.PI) / 180;
     const sinPhi = Math.sin(phi);
     const cosPhi = Math.cos(phi);
 
-    for (let x = 0; x < width; x++) {
+    for (let x = 0; x < width; x += pass1Step) {
       const lon = x - 180; // -180 to 180
       const idx = y * width + x;
 
@@ -1973,8 +1987,8 @@ export function generatePlanetarySurfaceModel(
       if (isNoSurface) {
         // Zonal banded jet streams + multi-vortex storm systems for Gas Giants, Ice Giants, & Supercritical Worlds
         const bandFreq = (isSupercritical ? 9 : isIceGiant ? 8 : 14) * ggBandFreqScale;
-        const swirl = sphericalFbm(lat * 1.4, lon * 0.9, seed + 701, 4);
-        const fineSwirl = sphericalFbm(lat * 3.2, lon * 2.4, seed + 1103, 3);
+        const swirl = sphericalFbm(lat * 1.4, lon * 0.9, seed + 701, fbmOct(4));
+        const fineSwirl = sphericalFbm(lat * 3.2, lon * 2.4, seed + 1103, fbmOct(3));
 
         let deflectedLatRad = latRad;
         let bestStormInt = 0;
@@ -2089,8 +2103,10 @@ export function generatePlanetarySurfaceModel(
       // 2. Tectonic plates & multi-scale spherical topography
       let tectonicOffset = 0;
       if (platesCount > 0) {
-        const boundaryWarpA = (sphericalFbm(lat * 1.15, lon * 1.15, seed + 211, 3) - 0.5) * 0.18;
-        const boundaryWarpB = (sphericalFbm(lat * 2.4, lon * 2.4, seed + 263, 2) - 0.5) * 0.05;
+        const boundaryWarpA = (sphericalFbm(lat * 1.15, lon * 1.15, seed + 211, fbmOct(3)) - 0.5) * 0.18;
+        const boundaryWarpB = iconFastMode
+          ? 0
+          : (sphericalFbm(lat * 2.4, lon * 2.4, seed + 263, 2) - 0.5) * 0.05;
         let bestPlate = 0;
         let secondPlate = 0;
         let bestScore = -1e9;
@@ -2100,7 +2116,7 @@ export function generatePlanetarySurfaceModel(
         for (let p = 0; p < platesCount; p++) {
           const pc = plateCenters[p];
           const pJitter =
-            (sphericalFbm(lat * 1.05 + p * 19, lon * 1.05 - p * 23, seed + 101 + p * 37, 3) - 0.5) * 0.13;
+            (sphericalFbm(lat * 1.05 + p * 19, lon * 1.05 - p * 23, seed + 101 + p * 37, fbmOct(3)) - 0.5) * 0.13;
           const score = nx * pc.cx + ny * pc.cy + nz * pc.cz + pJitter + boundaryWarpA * 0.35 + boundaryWarpB * 0.2;
           plateScores[p] = score;
           if (score > bestScore) {
@@ -2140,7 +2156,10 @@ export function generatePlanetarySurfaceModel(
             const dvy = p1.vy - p2.vy;
             const dvz = p1.vz - p2.vz;
             const convergence = Math.max(-1, Math.min(1, dx * dvx + dy * dvy + dz * dvz));
-            const rawFold = Math.max(0, 1.0 - Math.abs(sphericalFbm(lat * 1.9, lon * 1.9, seed + 499, 4) - 0.5) * 3.2);
+            const rawFold = Math.max(
+              0,
+              1.0 - Math.abs(sphericalFbm(lat * 1.9, lon * 1.9, seed + 499, fbmOct(4)) - 0.5) * 3.2
+            );
             const orogenyFold = rawFold * rawFold * (3.0 - 2.0 * rawFold);
             // Smooth signed cross-boundary factor that equals 0 at borderDist = 0 and peaks softly inside each plate
             const signedSide = Math.tanh(borderDist / 0.075) * Math.tanh((p1.baseBuoyancy - p2.baseBuoyancy) * 8.0);
@@ -2163,13 +2182,16 @@ export function generatePlanetarySurfaceModel(
       let baseElev = 0;
       if (isDeepWaterOrIceShell) {
         // Smooth, long-wavelength glacial dome & sub-ice basin bathymetry (no jagged silicate mountain ridges!)
-        const macroGlacial = sphericalFbm(lat * 0.75, lon * 0.75, seed + 19, 4);
-        const mesoGlacial = sphericalFbm(lat * 1.85, lon * 1.85, seed + 83, 3);
+        const macroGlacial = sphericalFbm(lat * 0.75, lon * 0.75, seed + 19, fbmOct(4));
+        const mesoGlacial = sphericalFbm(lat * 1.85, lon * 1.85, seed + 83, fbmOct(3));
         baseElev = macroGlacial * 0.72 + mesoGlacial * 0.28;
       } else {
-        const macroContinents = sphericalFbm(lat * 0.85, lon * 0.85, seed, 5);
-        const mesoHills = sphericalFbm(lat * 2.3, lon * 2.3, seed + 73, 4);
-        const rawRidge = Math.max(0, 1.0 - Math.abs(sphericalFbm(lat * 1.65, lon * 1.65, seed + 499, 4) - 0.5) * 3.4);
+        const macroContinents = sphericalFbm(lat * 0.85, lon * 0.85, seed, fbmOct(5));
+        const mesoHills = sphericalFbm(lat * 2.3, lon * 2.3, seed + 73, fbmOct(4));
+        const rawRidge = Math.max(
+          0,
+          1.0 - Math.abs(sphericalFbm(lat * 1.65, lon * 1.65, seed + 499, fbmOct(4)) - 0.5) * 3.4
+        );
         const ridgeChains = rawRidge * rawRidge * (3.0 - 2.0 * rawRidge);
         baseElev = macroContinents * 0.64 + mesoHills * 0.24 + ridgeChains * 0.12 + tectonicOffset * 0.30;
         if (craters.length > 0) {
@@ -2269,11 +2291,13 @@ export function generatePlanetarySurfaceModel(
         }
 
         // Fine secondary branching fissure network across the shell
-        const crevasseField = Math.abs(sphericalFbm(lat * 2.4, lon * 2.4, seed + 1319, 3) - 0.5);
-        if (crevasseField < 0.018) {
-          const fineIntensity = (1.0 - crevasseField / 0.018) * 0.65;
-          crackDelta -= 0.065 * fineIntensity;
-          crackIntensity = Math.max(crackIntensity, fineIntensity);
+        if (!iconFastMode) {
+          const crevasseField = Math.abs(sphericalFbm(lat * 2.4, lon * 2.4, seed + 1319, 3) - 0.5);
+          if (crevasseField < 0.018) {
+            const fineIntensity = (1.0 - crevasseField / 0.018) * 0.65;
+            crackDelta -= 0.065 * fineIntensity;
+            crackIntensity = Math.max(crackIntensity, fineIntensity);
+          }
         }
 
         crackDeltaGrid[idx] = crackDelta;
@@ -2311,6 +2335,83 @@ export function generatePlanetarySurfaceModel(
         if (volcVal > 0) {
           volcDeltaGrid[idx] = volcDelta;
           volcanoGrid[idx] = volcVal;
+        }
+      }
+    }
+  }
+
+  // In iconFastMode, bilinearly interpolate the 4x4 anchor cells across the 360x180 grids
+  if (pass1Step > 1) {
+    for (let y0 = 0; y0 < height - 1; y0 += pass1Step) {
+      const y1 = Math.min(height - 1, y0 + pass1Step);
+      const ySpan = y1 - y0;
+      for (let x0 = 0; x0 < width; x0 += pass1Step) {
+        const x1 = (x0 + pass1Step) % width;
+        const i00 = y0 * width + x0;
+        const i10 = y0 * width + x1;
+        const i01 = y1 * width + x0;
+        const i11 = y1 * width + x1;
+
+        for (let dy = 0; dy <= ySpan; dy++) {
+          const fy = dy / ySpan;
+          const yRow = (y0 + dy) * width;
+          for (let dx = 0; dx < pass1Step; dx++) {
+            if (dy === 0 && dx === 0) continue;
+            if (dy === ySpan && dx === 0) continue;
+            const fx = dx / pass1Step;
+            const w00 = (1 - fx) * (1 - fy);
+            const w10 = fx * (1 - fy);
+            const w01 = (1 - fx) * fy;
+            const w11 = fx * fy;
+            const idx = yRow + x0 + dx;
+
+            if (isNoSurface) {
+              cloudGrid[idx] =
+                cloudGrid[i00] * w00 + cloudGrid[i10] * w10 + cloudGrid[i01] * w01 + cloudGrid[i11] * w11;
+              fractureGrid[idx] =
+                fractureGrid[i00] * w00 +
+                fractureGrid[i10] * w10 +
+                fractureGrid[i01] * w01 +
+                fractureGrid[i11] * w11;
+              craterGrid[idx] =
+                craterGrid[i00] * w00 + craterGrid[i10] * w10 + craterGrid[i01] * w01 + craterGrid[i11] * w11;
+              hypsometry[idx] = 0.5;
+            } else {
+              rawBaseElevGrid[idx] =
+                rawBaseElevGrid[i00] * w00 +
+                rawBaseElevGrid[i10] * w10 +
+                rawBaseElevGrid[i01] * w01 +
+                rawBaseElevGrid[i11] * w11;
+              craterDeltaGrid[idx] =
+                craterDeltaGrid[i00] * w00 +
+                craterDeltaGrid[i10] * w10 +
+                craterDeltaGrid[i01] * w01 +
+                craterDeltaGrid[i11] * w11;
+              crackDeltaGrid[idx] =
+                crackDeltaGrid[i00] * w00 +
+                crackDeltaGrid[i10] * w10 +
+                crackDeltaGrid[i01] * w01 +
+                crackDeltaGrid[i11] * w11;
+              volcDeltaGrid[idx] =
+                volcDeltaGrid[i00] * w00 +
+                volcDeltaGrid[i10] * w10 +
+                volcDeltaGrid[i01] * w01 +
+                volcDeltaGrid[i11] * w11;
+              craterGrid[idx] =
+                craterGrid[i00] * w00 + craterGrid[i10] * w10 + craterGrid[i01] * w01 + craterGrid[i11] * w11;
+              fractureGrid[idx] =
+                fractureGrid[i00] * w00 +
+                fractureGrid[i10] * w10 +
+                fractureGrid[i01] * w01 +
+                fractureGrid[i11] * w11;
+              volcanoGrid[idx] =
+                volcanoGrid[i00] * w00 +
+                volcanoGrid[i10] * w10 +
+                volcanoGrid[i01] * w01 +
+                volcanoGrid[i11] * w11;
+              tectonicPlateGrid[idx] = tectonicPlateGrid[i00];
+            }
+          }
         }
       }
     }
@@ -2450,11 +2551,92 @@ export function generatePlanetarySurfaceModel(
     { lat: -(51 + ((seed >> 5) % 9)), lon: (((seed * 53) + 255) % 360) - 180, radius: 17 + ((seed >> 4) % 6), spin: -1 },
   ];
 
+  // In iconFastMode, pre-evaluate smooth climate & moisture FBM fields on the 4x4 grid and bilinearly interpolate
+  let fastWarpLatGrid: Float32Array | null = null;
+  let fastWarpLonGrid: Float32Array | null = null;
+  let fastClimateWaveGrid: Float32Array | null = null;
+  let fastMoistNoiseGrid: Float32Array | null = null;
+
+  if (iconFastMode) {
+    fastWarpLatGrid = new Float32Array(width * height);
+    fastWarpLonGrid = new Float32Array(width * height);
+    fastClimateWaveGrid = new Float32Array(width * height);
+    fastMoistNoiseGrid = new Float32Array(width * height);
+
+    for (
+      let y = 0;
+      y < height;
+      y = y < height - 1 && y + pass1Step >= height ? height - 1 : y + pass1Step
+    ) {
+      const lat = 90 - y;
+      for (let x = 0; x < width; x += pass1Step) {
+        const lon = x - 180;
+        const idx = y * width + x;
+        const wLat = (sphericalFbm(lat * 1.15, lon * 1.15, seed + 401, 3) - 0.5) * 32.0;
+        const wLon = (sphericalFbm(lat * 1.15 + 37, lon * 1.15 - 53, seed + 419, 3) - 0.5) * 44.0;
+        const cWave = (sphericalFbm(lat * 1.25, lon * 1.25, seed + 313, 3) - 0.5) * 8.0 * waveAtmoScale;
+        const mNoise =
+          sphericalFbm(lat * 1.05 + wLat * 0.38, lon * 1.05 + wLon * 0.38, seed + 509, 3) * 0.74 +
+          sphericalFbm(lat * 2.35, lon * 2.35, seed + 547, 2) * 0.26;
+        fastWarpLatGrid[idx] = wLat;
+        fastWarpLonGrid[idx] = wLon;
+        fastClimateWaveGrid[idx] = cWave;
+        fastMoistNoiseGrid[idx] = mNoise;
+      }
+    }
+
+    for (let y0 = 0; y0 < height - 1; y0 += pass1Step) {
+      const y1 = Math.min(height - 1, y0 + pass1Step);
+      const ySpan = y1 - y0;
+      for (let x0 = 0; x0 < width; x0 += pass1Step) {
+        const x1 = (x0 + pass1Step) % width;
+        const i00 = y0 * width + x0;
+        const i10 = y0 * width + x1;
+        const i01 = y1 * width + x0;
+        const i11 = y1 * width + x1;
+        for (let dy = 0; dy <= ySpan; dy++) {
+          const fy = dy / ySpan;
+          const yRow = (y0 + dy) * width;
+          for (let dx = 0; dx < pass1Step; dx++) {
+            if ((dy === 0 || dy === ySpan) && dx === 0) continue;
+            const fx = dx / pass1Step;
+            const w00 = (1 - fx) * (1 - fy);
+            const w10 = fx * (1 - fy);
+            const w01 = (1 - fx) * fy;
+            const w11 = fx * fy;
+            const idx = yRow + x0 + dx;
+            fastWarpLatGrid[idx] =
+              fastWarpLatGrid[i00] * w00 +
+              fastWarpLatGrid[i10] * w10 +
+              fastWarpLatGrid[i01] * w01 +
+              fastWarpLatGrid[i11] * w11;
+            fastWarpLonGrid[idx] =
+              fastWarpLonGrid[i00] * w00 +
+              fastWarpLonGrid[i10] * w10 +
+              fastWarpLonGrid[i01] * w01 +
+              fastWarpLonGrid[i11] * w11;
+            fastClimateWaveGrid[idx] =
+              fastClimateWaveGrid[i00] * w00 +
+              fastClimateWaveGrid[i10] * w10 +
+              fastClimateWaveGrid[i01] * w01 +
+              fastClimateWaveGrid[i11] * w11;
+            fastMoistNoiseGrid[idx] =
+              fastMoistNoiseGrid[i00] * w00 +
+              fastMoistNoiseGrid[i10] * w10 +
+              fastMoistNoiseGrid[i01] * w01 +
+              fastMoistNoiseGrid[i11] * w11;
+          }
+        }
+      }
+    }
+  }
+
   for (let y = 0; y < height; y++) {
     const lat = 90 - y;
     const absLat = Math.abs(lat);
     const latRad = (lat * Math.PI) / 180;
     const latCos = Math.cos((absLat * Math.PI) / 180);
+    const isAnchorRow = !iconFastMode || y % pass1Step === 0 || y === height - 1;
 
     for (let x = 0; x < width; x++) {
       const lon = x - 180;
@@ -2468,18 +2650,23 @@ export function generatePlanetarySurfaceModel(
           (!isWaterIceDominated && hasLiquid && hNorm <= seaLevelNormalized && (volcVal < 0.35 || coverageFrac >= 0.98)));
 
       // 3D Spherical Domain Warping for organic, contiguous climate & biome zones (no boxy latitude/sine cutoffs!)
-      const warpLat = (sphericalFbm(lat * 1.15, lon * 1.15, seed + 401, 4) - 0.5) * 32.0;
-      const warpLon = (sphericalFbm(lat * 1.15 + 37, lon * 1.15 - 53, seed + 419, 4) - 0.5) * 44.0;
+      const warpLat = fastWarpLatGrid
+        ? fastWarpLatGrid[idx]
+        : (sphericalFbm(lat * 1.15, lon * 1.15, seed + 401, 4) - 0.5) * 32.0;
+      const warpLon = fastWarpLonGrid
+        ? fastWarpLonGrid[idx]
+        : (sphericalFbm(lat * 1.15 + 37, lon * 1.15 - 53, seed + 419, 4) - 0.5) * 44.0;
       const effLat = Math.max(-90, Math.min(90, lat + warpLat));
       const effAbsLat = Math.abs(effLat);
       const effLatCos = Math.cos((effAbsLat * Math.PI) / 180);
       const blendedLatCos = latCos * 0.62 + effLatCos * 0.38;
 
       // Solar insolation & atmospheric heat transport gradient + pressure-damped climatic wave
-      const climateWave =
-        ((sphericalFbm(lat * 1.25, lon * 1.25, seed + 313, 4) - 0.5) * 8.0 +
-          (sphericalFbm(lat * 2.6, lon * 2.6, seed + 353, 3) - 0.5) * 3.0) *
-        waveAtmoScale;
+      const climateWave = fastClimateWaveGrid
+        ? fastClimateWaveGrid[idx]
+        : ((sphericalFbm(lat * 1.25, lon * 1.25, seed + 313, 4) - 0.5) * 8.0 +
+            (sphericalFbm(lat * 2.6, lon * 2.6, seed + 353, 3) - 0.5) * 3.0) *
+          waveAtmoScale;
       let Tlocal = Tbase;
       let distFromSubstellar = 0.5;
       if (isTidallyLocked) {
@@ -2526,9 +2713,10 @@ export function generatePlanetarySurfaceModel(
         : Math.max(0, (hNorm - seaLevelNormalized) / Math.max(0.001, 1 - seaLevelNormalized));
 
       // Continuous, circulation-coupled 3D spherical moisture field (0..1)
-      const moistNoise =
-        sphericalFbm(lat * 1.05 + warpLat * 0.38, lon * 1.05 + warpLon * 0.38, seed + 509, 4) * 0.74 +
-        sphericalFbm(lat * 2.35, lon * 2.35, seed + 547, 3) * 0.26;
+      const moistNoise = fastMoistNoiseGrid
+        ? fastMoistNoiseGrid[idx]
+        : sphericalFbm(lat * 1.05 + warpLat * 0.38, lon * 1.05 + warpLon * 0.38, seed + 509, 4) * 0.74 +
+          sphericalFbm(lat * 2.35, lon * 2.35, seed + 547, 3) * 0.26;
       let circulationMoistTerm = 0;
       if (isTidallyLocked) {
         // Substellar convective convergence updraft brings torrential dayside storm moisture + eastward Matsuno-Gill jet plume
@@ -2770,7 +2958,9 @@ export function generatePlanetarySurfaceModel(
           hypsometry[idx] = hNorm;
 
           const algalBloom = hasBiosphere
-            ? sphericalFbm(lat * 2.5 + warpLat * 0.4, lon * 2.5 + warpLon * 0.4, seed + 1483, 4)
+            ? iconFastMode
+              ? moistNoise
+              : sphericalFbm(lat * 2.5 + warpLat * 0.4, lon * 2.5 + warpLon * 0.4, seed + 1483, 4)
             : 0;
           if (waterDepthRatio > 0.62) {
             biomeGrid[idx] = 0; // Abyssal Trench
@@ -2820,9 +3010,10 @@ export function generatePlanetarySurfaceModel(
           // Check for small patches of liquid water where Tlocal > ~273 K and there is a sufficient atmosphere (>= 0.0061 bar triple point)
           const hasSufficientAtmosphere = pBarAtmo >= 0.0061 && localPressureBar >= 0.0061;
           if (Tlocal >= 273.0 && hasSufficientAtmosphere) {
-            const pondField =
-              sphericalFbm(lat * 3.2 + warpLat * 0.25, lon * 3.2 + warpLon * 0.25, seed + 677, 3) * 0.64 +
-              moistNoise * 0.36;
+            const pondField = iconFastMode
+              ? moistNoise
+              : sphericalFbm(lat * 3.2 + warpLat * 0.25, lon * 3.2 + warpLon * 0.25, seed + 677, 3) * 0.64 +
+                moistNoise * 0.36;
             const basinFavor =
               Math.max(0, 0.62 - hNorm) * 0.42 + (craterGrid[idx] > 0.15 && hNorm < 0.52 ? 0.14 : 0);
             const meltFavor = Math.min(0.1, (Tlocal - 273.0) * 0.0045);
@@ -2858,7 +3049,9 @@ export function generatePlanetarySurfaceModel(
         // Unfrozen liquid sea/ocean (freezingPointK <= Tlocal <= localBoilingPointK)
         const waterDepthRatio = (seaLevelNormalized - hNorm) / Math.max(0.001, seaLevelNormalized);
         const algalBloom = hasBiosphere
-          ? sphericalFbm(lat * 2.5 + warpLat * 0.4, lon * 2.5 + warpLon * 0.4, seed + 1483, 4)
+          ? iconFastMode
+            ? moistNoise
+            : sphericalFbm(lat * 2.5 + warpLat * 0.4, lon * 2.5 + warpLon * 0.4, seed + 1483, 4)
           : 0;
         if (waterDepthRatio > 0.6) {
           biomeGrid[idx] = 0; // Abyssal Trench (colored by seaPalette)
@@ -2950,7 +3143,7 @@ export function generatePlanetarySurfaceModel(
       }
 
       // 3. Physical Tropospheric Weather & Circulation Cloud Modeling (for all solid-surface worlds with atmosphere)
-      if (!isNoSurface && cloudOpacity > 0) {
+      if (!isNoSurface && cloudOpacity > 0 && (isAnchorRow && (!iconFastMode || x % pass1Step === 0))) {
         const isLiquidOceanCell = (biomeGrid[idx] <= 2 || biomeGrid[idx] === 23) && !isMoltenLavaPool;
         const evapBoost = isLiquidOceanCell ? 1.18 : hasLiquid ? 0.74 + 0.38 * localMoisture : 0.88;
         const baseDeck = cloudOpacity > 0.78 ? 0.54 : 0.0;
@@ -2967,7 +3160,7 @@ export function generatePlanetarySurfaceModel(
 
           // Twin hemisphere Coriolis spiral rainbands converging into the substellar convective chimney
           const hemiSpin = lat >= 0 ? 1 : -1;
-          const spiralTurb = sphericalFbm(lat * 2.1, lon * 1.9, seed + 887, 3);
+          const spiralTurb = sphericalFbm(lat * 2.1, lon * 1.9, seed + 887, fbmOct(3));
           const spiralPhase = az * 2.0 * hemiSpin + rDeg * 0.088 + spiralTurb * 2.8;
           const spiralRainbands = Math.pow(0.5 + 0.5 * Math.cos(spiralPhase), 1.55);
 
@@ -2986,7 +3179,7 @@ export function generatePlanetarySurfaceModel(
             lat * 3.0 - absLat * 0.35,
             lon * 1.2 - absLat * 1.35,
             seed + 991,
-            4
+            fbmOct(4)
           );
           const eastJetClouds = eastJetEnv * (0.36 + 0.64 * jetStreaks);
 
@@ -2999,7 +3192,7 @@ export function generatePlanetarySurfaceModel(
                   Math.exp(-Math.pow((distFromSubstellar - 0.52) / 0.22, 2))
                 );
           const bgWisps =
-            sphericalFbm(lat * 1.8 + warpLat * 0.35, lon * 1.5 + warpLon * 0.35, seed + 937, 4) *
+            sphericalFbm(lat * 1.8 + warpLat * 0.35, lon * 1.5 + warpLon * 0.35, seed + 937, fbmOct(4)) *
             0.34 *
             daysideConvectiveEnv;
 
@@ -3009,7 +3202,7 @@ export function generatePlanetarySurfaceModel(
           cloudGrid[idx] = Math.max(0, Math.min(1, baseDeck + scaledStorm * (1 - baseDeck * 0.46)));
         } else {
           // Diurnal Rotating World Circulation scaled by rotation period (rotHours):
-          const atmoSwirl = sphericalFbm(lat * 1.6, lon * 1.2, seed + 887, 4);
+          const atmoSwirl = sphericalFbm(lat * 1.6, lon * 1.2, seed + 887, fbmOct(4));
           let rawRotCloud = 0;
 
           if (rotHours < 16) {
@@ -3018,14 +3211,14 @@ export function generatePlanetarySurfaceModel(
               lat * 3.2 + (atmoSwirl - 0.5) * 18,
               lon * 0.85 + Math.cos(latRad * 6) * 38,
               seed + 991,
-              5
+              fbmOct(5)
             );
             const multiBandBelt = 0.78 + 0.28 * Math.cos(latRad * 6.5 + (atmoSwirl - 0.5) * 1.4);
             rawRotCloud = Math.max(0, (zonalShear * multiBandBelt * evapBoost - 0.34) / 0.66);
           } else if (rotHours > 96) {
             // Slow rotator (> 96h, e.g. Venus/Titan-like): global Hadley cell with planetary superrotating chevron waves
             const chevronShift = lon * 1.15 - absLat * 1.65 + (atmoSwirl - 0.5) * 32;
-            const globalHadleyWave = sphericalFbm(lat * 1.45 + warpLat * 0.25, chevronShift, seed + 991, 5);
+            const globalHadleyWave = sphericalFbm(lat * 1.45 + warpLat * 0.25, chevronShift, seed + 991, fbmOct(5));
             const eqAndPolarHood =
               0.82 + 0.22 * Math.exp(-Math.pow(absLat / 28.0, 2)) + 0.18 * Math.exp(-Math.pow((absLat - 78.0) / 14.0, 2));
             rawRotCloud = Math.max(0, (globalHadleyWave * eqAndPolarHood * evapBoost - 0.32) / 0.68);
@@ -3038,7 +3231,7 @@ export function generatePlanetarySurfaceModel(
               lat * 2.1 + (atmoSwirl - 0.5) * 28,
               lon * 1.65 + Math.cos(latRad * 3) * 26,
               seed + 991,
-              5
+              fbmOct(5)
             );
             const itczSquall = Math.exp(-Math.pow(effAbsLat / 11.5, 2)) * 0.34;
             const subtropClear = Math.exp(-Math.pow((effAbsLat - 25.5) / 10.5, 2)) * 0.26;
@@ -3076,6 +3269,35 @@ export function generatePlanetarySurfaceModel(
     }
   }
 
+  // In iconFastMode, bilinearly interpolate the 4x4 tropospheric cloudGrid anchors for solid-surface worlds
+  if (iconFastMode && !isNoSurface && cloudOpacity > 0) {
+    for (let y0 = 0; y0 < height - 1; y0 += pass1Step) {
+      const y1 = Math.min(height - 1, y0 + pass1Step);
+      const ySpan = y1 - y0;
+      for (let x0 = 0; x0 < width; x0 += pass1Step) {
+        const x1 = (x0 + pass1Step) % width;
+        const i00 = y0 * width + x0;
+        const i10 = y0 * width + x1;
+        const i01 = y1 * width + x0;
+        const i11 = y1 * width + x1;
+        for (let dy = 0; dy <= ySpan; dy++) {
+          const fy = dy / ySpan;
+          const yRow = (y0 + dy) * width;
+          for (let dx = 0; dx < pass1Step; dx++) {
+            if ((dy === 0 || dy === ySpan) && dx === 0) continue;
+            const fx = dx / pass1Step;
+            const idx = yRow + x0 + dx;
+            cloudGrid[idx] =
+              cloudGrid[i00] * (1 - fx) * (1 - fy) +
+              cloudGrid[i10] * fx * (1 - fy) +
+              cloudGrid[i01] * (1 - fx) * fy +
+              cloudGrid[i11] * fx * fy;
+          }
+        }
+      }
+    }
+  }
+
   // Ensure that on ice-dominated worlds with sufficient atmosphere and Tlocal > ~273 K,
   // liquid water always forms small patches (~16% to ~30% of the >273K zone, never 0% and never a giant ocean)
   if (isWaterIceDominated && warmMeltCandidates.length >= 4) {
@@ -3107,7 +3329,7 @@ export function generatePlanetarySurfaceModel(
   const effectiveHasLiquid = hasLiquid || meltwaterPatchCount > 0;
 
   // 2-Pass Cellular Majority-Vote Smoothing Filter over land biomes so regions are contiguous without isolated speckle
-  if (!isNoSurface) {
+  if (!isNoSurface && !iconFastMode) {
     const tempBiomes = new Uint8Array(width * height);
     const counts = new Uint8Array(25);
     for (let pass = 0; pass < 2; pass++) {
@@ -3178,22 +3400,29 @@ export function generatePlanetarySurfaceModel(
           const baseR = parseInt(hex.slice(1, 3), 16);
           const baseG = parseInt(hex.slice(3, 5), 16);
           const baseB = parseInt(hex.slice(5, 7), 16);
-          // Subtle regional mineral/albedo color variation across solid surfaces
-          const regTint = sphericalFbm(lat * 2.1, lon * 2.1, seed + 947, 3) - 0.5;
-          const fineTint = sphericalFbm(lat * 5.2, lon * 5.2, seed + 1319, 2) - 0.5;
-          const isIceBiome = bId === 8 || bId === 13 || bId === 18 || bId === 21;
-          const varMult = isIceBiome ? 0.55 : 1.0;
-          const lScale = 1.0 + (regTint * 0.085 + fineTint * 0.045) * varMult;
-          const warmShift = (regTint * 5.5 - fineTint * 3.0) * varMult;
-          rawRgb[i * 3] = Math.max(0, Math.min(255, baseR * lScale + warmShift));
-          rawRgb[i * 3 + 1] = Math.max(0, Math.min(255, baseG * lScale + warmShift * 0.2));
-          rawRgb[i * 3 + 2] = Math.max(0, Math.min(255, baseB * lScale - warmShift * 0.75));
+          if (iconFastMode) {
+            rawRgb[i * 3] = baseR;
+            rawRgb[i * 3 + 1] = baseG;
+            rawRgb[i * 3 + 2] = baseB;
+          } else {
+            // Subtle regional mineral/albedo color variation across solid surfaces
+            const regTint = sphericalFbm(lat * 2.1, lon * 2.1, seed + 947, 3) - 0.5;
+            const fineTint = sphericalFbm(lat * 5.2, lon * 5.2, seed + 1319, 2) - 0.5;
+            const isIceBiome = bId === 8 || bId === 13 || bId === 18 || bId === 21;
+            const varMult = isIceBiome ? 0.55 : 1.0;
+            const lScale = 1.0 + (regTint * 0.085 + fineTint * 0.045) * varMult;
+            const warmShift = (regTint * 5.5 - fineTint * 3.0) * varMult;
+            rawRgb[i * 3] = Math.max(0, Math.min(255, baseR * lScale + warmShift));
+            rawRgb[i * 3 + 1] = Math.max(0, Math.min(255, baseG * lScale + warmShift * 0.2));
+            rawRgb[i * 3 + 2] = Math.max(0, Math.min(255, baseB * lScale - warmShift * 0.75));
+          }
         }
       }
     }
 
-    // 3 passes of spherical 3x3 Gaussian smoothing across non-water cells so all biome edges blend seamlessly
-    for (let pass = 0; pass < 3; pass++) {
+    // Spherical 3x3 Gaussian smoothing across non-water cells so all biome edges blend seamlessly
+    const blurPasses = iconFastMode ? 1 : 3;
+    for (let pass = 0; pass < blurPasses; pass++) {
       const src = pass % 2 === 0 ? rawRgb : pingRgb;
       const dst = pass % 2 === 0 ? pingRgb : rawRgb;
       for (let y = 0; y < height; y++) {
@@ -3241,7 +3470,7 @@ export function generatePlanetarySurfaceModel(
       }
     }
 
-    // After 3 passes (0: raw->ping, 1: ping->raw, 2: raw->ping), result is in pingRgb
+    // Both 1 pass and 3 passes leave the final output in pingRgb
     for (let i = 0; i < width * height * 3; i++) {
       blendedLandRgb[i] = Math.max(0, Math.min(255, Math.round(pingRgb[i])));
     }
@@ -3333,10 +3562,17 @@ export function generatePlanetarySurfaceModel(
     moonsInSky,
   };
 
-  if (surfaceModelCache.size > 120) {
-    surfaceModelCache.clear();
+  if (iconFastMode) {
+    if (iconSurfaceModelCache.size > 240) {
+      iconSurfaceModelCache.clear();
+    }
+    iconSurfaceModelCache.set(cacheKey, model);
+  } else {
+    if (surfaceModelCache.size > 120) {
+      surfaceModelCache.clear();
+    }
+    surfaceModelCache.set(cacheKey, model);
   }
-  surfaceModelCache.set(cacheKey, model);
   return model;
 }
 
@@ -4340,16 +4576,26 @@ export function renderSurfaceProjectedGlobeToCanvas(
       const mapX = (((lonDeg + 180) % 360) + 360) % 360;
       const mapY = Math.max(0, Math.min(179.0, 90 - latDeg));
 
-      // Bilinearly sample the surface generator texel so the 3D globe has zero blocky pixelation!
+      // Sample the surface generator texel (use fast single-tap lookup for small overview icons where 1px > 3.5 deg)
       // For 'satellite' on the 3D globe, we apply 3D normal-map bump relief directly in 3D sphere lighting below
-      const texel = evaluateSurfaceMapBilinear(
-        surfaceModel,
-        mapX,
-        mapY,
-        activeLayer,
-        showCloudsOverlay,
-        activeLayer !== 'satellite'
-      );
+      const texel =
+        W <= 72
+          ? evaluateSurfaceMapTexel(
+              surfaceModel,
+              Math.floor(mapX),
+              Math.floor(mapY),
+              activeLayer,
+              showCloudsOverlay,
+              activeLayer !== 'satellite'
+            )
+          : evaluateSurfaceMapBilinear(
+              surfaceModel,
+              mapX,
+              mapY,
+              activeLayer,
+              showCloudsOverlay,
+              activeLayer !== 'satellite'
+            );
 
       if (isBlankSurfaceLayer) {
         data[pIdx] = texel.r;
