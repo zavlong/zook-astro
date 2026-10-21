@@ -16,6 +16,12 @@ To maximize model efficiency across all chats, coordinate tasks by routing work 
      - Handle the core mathematical/physical equations or algorithm design on **Gemini 4 Argon (`pro`)**.
      - Delegate the accompanying UI controls, badges, modals, and codebase lookups to a **Flash 3.8 (`flash`)** subagent.
 
+## Modular Architecture & Efficiency Guidelines
+- Keep files focused and maintainable; avoid monolithic multi-thousand-line files.
+- Pure math, physics, noise algorithms, and static palettes belong in pure `.ts` modules under `src/core/` or dedicated utility files, decoupled from React `.tsx` components.
+- Sub-panels, complex modals, and distinct UI tools should be extracted into dedicated components in `panels/` or `modals/`.
+- Reusable routines used across multiple views must be placed in shared library files rather than duplicated inline. (See `.agents/rules/modular-architecture.md`).
+
 ## Automatic Git Commits & Pushes
 - Upon completing every user request, refactor, or feature update:
   1. Ensure the code compiles cleanly (`npm.cmd run build`).

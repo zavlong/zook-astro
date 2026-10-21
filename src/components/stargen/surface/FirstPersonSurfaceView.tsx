@@ -23,6 +23,17 @@ import {
   createNeighborAwareTileEvaluator,
 } from './goldbergTileGrid';
 import { getStarSpectralPalette } from '../../../core/generation/starAssets';
+import {
+  FLAG_WATER,
+  FLAG_LAVA,
+  FLAG_ICE_SPEC,
+  hexToRgb,
+  hash2,
+  isotropicNoise2D,
+  fbm2D,
+  ridgedFbm2D,
+  cellularFeature2D,
+} from './terrainNoise';
 
 interface FirstPersonSurfaceViewProps {
   surfaceModel: PlanetarySurfaceModel;
@@ -38,126 +49,6 @@ interface FirstPersonSurfaceViewProps {
 
 type CameraHeightMode = 'walk' | 'skim' | 'flight';
 
-const FLAG_WATER = 1;
-const FLAG_LAVA = 2;
-const FLAG_ICE_SPEC = 4;
-
-function hexToRgb(hex: string): [number, number, number] {
-  const clean = (hex || '#888888').replace('#', '');
-  const num = parseInt(clean, 16) || 0x888888;
-  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
-}
-
-function hash2(x: number, y: number, seed: number): number {
-  const h = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453123;
-  return h - Math.floor(h);
-}
-
-function valueNoise2D(x: number, y: number, seed: number): number {
-  const ix = Math.floor(x);
-  const iy = Math.floor(y);
-  const fx = x - ix;
-  const fy = y - iy;
-  // Quintic C2 interpolation (6t^5 - 15t^4 + 10t^3) eliminates C1 second-derivative creases along grid lines
-  const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
-  const uy = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
-
-  const n00 = hash2(ix, iy, seed);
-  const n10 = hash2(ix + 1, iy, seed);
-  const n01 = hash2(ix, iy + 1, seed);
-  const n11 = hash2(ix + 1, iy + 1, seed);
-
-  const nx0 = n00 + (n10 - n00) * ux;
-  const nx1 = n01 + (n11 - n01) * ux;
-  return nx0 + (nx1 - nx0) * uy;
-}
-
-// Isotropic 2D noise: blends two incommensurately rotated value-noise lattices to eliminate axis-aligned square artifacts
-function isotropicNoise2D(x: number, y: number, seed: number): number {
-  const n1 = valueNoise2D(x, y, seed);
-  const rx = x * 0.8 - y * 0.6 + 17.3;
-  const ry = x * 0.6 + y * 0.8 + 31.7;
-  const n2 = valueNoise2D(rx, ry, seed + 193);
-  return (n1 + n2) * 0.5;
-}
-
-function fbm2D(x: number, y: number, seed: number, octaves = 5): number {
-  let val = 0;
-  let amp = 0.5;
-  let norm = 0;
-  let cx = x;
-  let cy = y;
-  for (let i = 0; i < octaves; i++) {
-    val += amp * valueNoise2D(cx, cy, seed + i * 31);
-    norm += amp;
-    // Rotate domain by ~37 degrees and scale by 2.04 per octave so square lattices never align
-    const nx = (cx * 0.8 - cy * 0.6) * 2.04 + 13.7;
-    const ny = (cx * 0.6 + cy * 0.8) * 2.04 + 29.3;
-    cx = nx;
-    cy = ny;
-    amp *= 0.5;
-  }
-  return val / (norm || 1);
-}
-
-function ridgedFbm2D(x: number, y: number, seed: number, octaves = 5): number {
-  let val = 0;
-  let amp = 0.5;
-  let norm = 0;
-  let cx = x;
-  let cy = y;
-  for (let i = 0; i < octaves; i++) {
-    const n = valueNoise2D(cx, cy, seed + i * 47);
-    const ridge = 1.0 - Math.abs(n * 2.0 - 1.0);
-    val += amp * ridge * ridge;
-    norm += amp;
-    const nx = (cx * 0.8 - cy * 0.6) * 2.12 + 19.1;
-    const ny = (cx * 0.6 + cy * 0.8) * 2.12 + 41.7;
-    cx = nx;
-    cy = ny;
-    amp *= 0.5;
-  }
-  return val / (norm || 1);
-}
-
-function cellularFeature2D(
-  x: number,
-  y: number,
-  seed: number
-): { dist: number; dx: number; dy: number; cellHash: number } {
-  const ix = Math.floor(x);
-  const iy = Math.floor(y);
-  let bestDistSq = 99.0;
-  let bestDx = 0;
-  let bestDy = 0;
-  let bestHash = 0.5;
-
-  for (let oy = -1; oy <= 1; oy++) {
-    for (let ox = -1; ox <= 1; ox++) {
-      const cx = ix + ox;
-      const cy = iy + oy;
-      const h1 = hash2(cx, cy, seed);
-      const h2 = hash2(cx, cy, seed + 137);
-      const px = cx + 0.18 + h1 * 0.64;
-      const py = cy + 0.18 + h2 * 0.64;
-      const dx = x - px;
-      const dy = y - py;
-      const dSq = dx * dx + dy * dy;
-      if (dSq < bestDistSq) {
-        bestDistSq = dSq;
-        bestDx = dx;
-        bestDy = dy;
-        bestHash = h1;
-      }
-    }
-  }
-  return {
-    dist: Math.sqrt(bestDistSq),
-    dx: bestDx,
-    dy: bestDy,
-    cellHash: bestHash,
-  };
-}
 
 function compassLabelFromAzimuth(azDeg: number): string {
   const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
