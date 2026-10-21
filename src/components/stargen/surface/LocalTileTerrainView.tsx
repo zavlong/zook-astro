@@ -66,6 +66,31 @@ interface CloudPuff3D {
   baseB?: number;
 }
 
+interface TileMeshData {
+  sides: number;
+  corners: [number, number][];
+  vertices: LocalVertex[];
+  triangles: LocalTri[];
+  perimeterIndices: { vIdx: number; wedgeIdx: number }[];
+  cloudPuffs: CloudPuff3D[];
+  effCloudCover: number;
+  TEX_RES: number;
+  texR: Uint8Array;
+  texG: Uint8Array;
+  texB: Uint8Array;
+  texBumpX: Int8Array;
+  texBumpZ: Int8Array;
+  texFlags: Uint8Array;
+  texCloudShadow: Uint8Array;
+  MIP_RES: number;
+  mipR: Uint8Array;
+  mipG: Uint8Array;
+  mipB: Uint8Array;
+  mipBumpX: Int8Array;
+  mipBumpZ: Int8Array;
+  tileSeed: number;
+}
+
 function hexToRgb(hex: string): [number, number, number] {
   const clean = (hex || '#888888').replace('#', '');
   const num = parseInt(clean, 16) || 0x888888;
@@ -196,6 +221,9 @@ const FLAG_WATER = 1;
 const FLAG_LAVA = 2;
 const FLAG_ICE_SPEC = 4;
 
+// Module-level LRU cache for 3D hexagonal tile meshes and procedural textures
+const tileMeshCache = new Map<string, TileMeshData>();
+
 export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
   surfaceModel,
   goldbergGrid,
@@ -220,6 +248,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
   const [showGeologyPanel, setShowGeologyPanel] = useState<boolean>(false);
   const [showClouds3D, setShowClouds3D] = useState<boolean>(true);
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const dragRafRef = useRef<number | null>(null);
   const dragRef = useRef<{
     startX: number;
     startY: number;
@@ -239,10 +268,14 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     }));
   }, [activeTile, goldbergGrid]);
 
-  // Build High-Resolution 3D Hexagonal/Pentagonal Mesh + 768x768 Procedural Biome Texture & Micro-Bump Normal Map
-  const meshData = useMemo(() => {
+  // Build High-Resolution 3D Hexagonal/Pentagonal Mesh + Procedural Biome Texture & Micro-Bump Normal Map
+  const meshData = useMemo<TileMeshData>(() => {
+    const cacheKey = `${surfaceModel.seed}_${activeTile.tileId}_${activeTile.biomeId}_${activeTile.secondaryBiomeId}_${activeTile.craterIntensity}_${surfaceModel.hasLiquid}_${pBarAtmo}`;
+    const cached = tileMeshCache.get(cacheKey);
+    if (cached) return cached;
+
     const sides = activeTile.isPentagon ? 5 : 6;
-    const rings = 54; // High-density rings strictly inside the active Goldberg tile border (3.24x higher triangle density)
+    const rings = 36; // 36 rings provide crisp 3D relief with ~2.2x fewer polygons for fast hydration
     const tileSeed = (surfaceModel.seed * 1664525 + activeTile.tileId * 1013904223) & 0x7fffffff;
 
     // Corner angles in local (x, z) plane aligned with neighbor compass directions
@@ -716,9 +749,9 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     }
 
     // ============================================================================
-    // GENERATE 768x768 HIGH-RESOLUTION PROCEDURAL BIOME TEXTURE & BUMP NORMAL MAP
+    // GENERATE 384x384 HIGH-RESOLUTION PROCEDURAL BIOME TEXTURE & BUMP NORMAL MAP
     // ============================================================================
-    const TEX_RES = 768;
+    const TEX_RES = 384;
     const texR = new Uint8Array(TEX_RES * TEX_RES);
     const texG = new Uint8Array(TEX_RES * TEX_RES);
     const texB = new Uint8Array(TEX_RES * TEX_RES);
@@ -727,8 +760,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const texFlags = new Uint8Array(TEX_RES * TEX_RES);
     const texCloudShadow = new Uint8Array(TEX_RES * TEX_RES);
 
-    // Precompute a 193x193 macro terrain grid across [-1, +1] (1:1 unstretched tile coordinates)
-    const MACRO_N = 193;
+    // Precompute a 97x97 macro terrain grid across [-1, +1] (1:1 unstretched tile coordinates)
+    const MACRO_N = 97;
     const macroHGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroFbmGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroRidgeGrid = new Float32Array(MACRO_N * MACRO_N);
@@ -1060,13 +1093,11 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         const fine3 = isotropicNoise2D(px * 96.0, pz * 96.0, tileSeed + 521);
         const grain = (fine3 - 0.5) * 0.34 + (fine2 - 0.5) * 0.24;
 
-        // Micro-normal gradient evaluated symmetrically so no directional bias or grid embosses
-        const fineRight = isotropicNoise2D((px + 0.006) * 24.0, pz * 24.0, tileSeed + 313);
-        const fineLeft = isotropicNoise2D((px - 0.006) * 24.0, pz * 24.0, tileSeed + 313);
-        const fineDown = isotropicNoise2D(px * 24.0, (pz + 0.006) * 24.0, tileSeed + 313);
-        const fineUp = isotropicNoise2D(px * 24.0, (pz - 0.006) * 24.0, tileSeed + 313);
-        let bumpX = -dhx * 1.32 + (fineLeft - fineRight) * 1.05;
-        let bumpZ = -dhz * 1.32 + (fineUp - fineDown) * 1.05;
+        // Micro-normal gradient evaluated efficiently by reusing fine1 sample
+        const fineStepX = isotropicNoise2D((px + 0.008) * 24.0, pz * 24.0, tileSeed + 313);
+        const fineStepZ = isotropicNoise2D(px * 24.0, (pz + 0.008) * 24.0, tileSeed + 313);
+        let bumpX = -dhx * 1.32 + (fine1 - fineStepX) * 1.85;
+        let bumpZ = -dhz * 1.32 + (fine1 - fineStepZ) * 1.85;
 
         let r = baseRgb1[0];
         let g = baseRgb1[1];
@@ -1557,7 +1588,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       }
     }
 
-    return {
+    const result = {
       sides,
       corners,
       vertices,
@@ -1581,6 +1612,14 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       mipBumpZ,
       tileSeed,
     };
+
+    if (tileMeshCache.size >= 16) {
+      const oldestKey = tileMeshCache.keys().next().value;
+      if (oldestKey) tileMeshCache.delete(oldestKey);
+    }
+    tileMeshCache.set(cacheKey, result);
+
+    return result;
   }, [surfaceModel, activeTile, neighborTiles, pBarAtmo, hasAtmosphere]);
 
   // Render the Per-Pixel Textured & Bump-Mapped 3D Hexagonal Biome Block + Infinite Perspective Plane to Canvas
@@ -2811,14 +2850,29 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             if (!isDragging || !dragRef.current) return;
             const dx = e.clientX - dragRef.current.startX;
             const dy = e.clientY - dragRef.current.startY;
-            setRotYaw(dragRef.current.startYaw - dx * 0.0085);
-            setRotPitch(Math.max(0.18, Math.min(1.28, dragRef.current.startPitch + dy * 0.0065)));
+            if (dragRafRef.current !== null) {
+              cancelAnimationFrame(dragRafRef.current);
+            }
+            dragRafRef.current = requestAnimationFrame(() => {
+              if (!dragRef.current) return;
+              setRotYaw(dragRef.current.startYaw - dx * 0.0085);
+              setRotPitch(Math.max(0.18, Math.min(1.28, dragRef.current.startPitch + dy * 0.0065)));
+              dragRafRef.current = null;
+            });
           }}
           onMouseUp={() => {
+            if (dragRafRef.current !== null) {
+              cancelAnimationFrame(dragRafRef.current);
+              dragRafRef.current = null;
+            }
             setIsDragging(false);
             dragRef.current = null;
           }}
           onMouseLeave={() => {
+            if (dragRafRef.current !== null) {
+              cancelAnimationFrame(dragRafRef.current);
+              dragRafRef.current = null;
+            }
             setIsDragging(false);
             dragRef.current = null;
           }}
@@ -2843,7 +2897,11 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                 <button
                   key={nb.tile.tileId}
                   type="button"
-                  onClick={() => onSelectTile(nb.tile)}
+                  onClick={() => {
+                    React.startTransition(() => {
+                      onSelectTile(nb.tile);
+                    });
+                  }}
                   className="w-full text-left px-2.5 py-1.5 rounded-md bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-sky-500/50 transition flex items-center justify-between cursor-pointer group"
                 >
                   <div className="flex items-center gap-2 min-w-0">

@@ -731,9 +731,11 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             timeOfDayDeg={timeOfDayDeg}
             onChangeTimeOfDay={setTimeOfDayDeg}
             onSelectTile={(nextTile) =>
-              setSelectedCoords({
-                lat: Math.round(nextTile.centerLat),
-                lon: Math.round(nextTile.centerLon),
+              React.startTransition(() => {
+                setSelectedCoords({
+                  lat: Math.round(nextTile.centerLat),
+                  lon: Math.round(nextTile.centerLon),
+                });
               })
             }
             onBackToGlobe={() => setDisplayMode('globe')}
@@ -748,9 +750,11 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             timeOfDayDeg={timeOfDayDeg}
             onChangeTimeOfDay={setTimeOfDayDeg}
             onSelectTile={(nextTile) =>
-              setSelectedCoords({
-                lat: Math.round(nextTile.centerLat),
-                lon: Math.round(nextTile.centerLon),
+              React.startTransition(() => {
+                setSelectedCoords({
+                  lat: Math.round(nextTile.centerLat),
+                  lon: Math.round(nextTile.centerLon),
+                });
               })
             }
             onSwitchToBlockView={() => setDisplayMode('terrain')}
