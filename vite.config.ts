@@ -25,16 +25,14 @@ export default defineConfig({
             return 'vendor-icons';
           }
           if (
-            id.includes('/components/stargen/surface/') ||
-            id.includes('\\components\\stargen\\surface\\')
+            id.includes('surfaceGenMath') ||
+            id.includes('goldbergTileGrid')
           ) {
-            return 'surface-engine';
+            return 'surface-math';
           }
           if (
             id.includes('/core/generation/') ||
-            id.includes('\\core\\generation\\') ||
-            id.includes('/core/export/') ||
-            id.includes('\\core\\export\\')
+            id.includes('\\core\\generation\\')
           ) {
             return 'astro-core';
           }
