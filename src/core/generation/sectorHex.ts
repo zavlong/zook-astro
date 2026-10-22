@@ -1137,6 +1137,63 @@ export function hasMulticellularBiosphere(hydro?: RealisticHydrosphere | null): 
 }
 
 /**
+ * Evaluates whether a planet or moon harbors active terrestrial life (land-based / continental / subaerial biosphere).
+ */
+export function hasTerrestrialBiosphere(
+  planetOrMoonClass?: string,
+  hydro?: RealisticHydrosphere | null
+): boolean {
+  if (!hydro?.biosphere || hydro.biosphere === 'none') return false;
+  const bio = hydro.biosphere.toLowerCase();
+
+  // 1. Explicit terrestrial / continental / land / crust markers
+  if (
+    bio.includes('terrestrial') ||
+    bio.includes('continental') ||
+    bio.includes('land') ||
+    bio.includes('crust') ||
+    bio.includes('algal mat')
+  ) {
+    return true;
+  }
+
+  // 2. Disqualify pure pelagic / deep-water / ocean-only biospheres
+  if (
+    bio.includes('deep-water') ||
+    bio.includes('deep-pelagic') ||
+    bio.includes('sub-iceberg') ||
+    bio.includes('cosmic ray attenuation')
+  ) {
+    return false;
+  }
+
+  // 3. Planet/moon class and hydrosphere checks for emergent land
+  const pClass = (planetOrMoonClass || '').toLowerCase();
+  const state = (hydro.state || '').toLowerCase();
+  const isPureOcean =
+    pClass.includes('ocean') ||
+    pClass.includes('pelagic') ||
+    pClass.includes('gas') ||
+    pClass.includes('supercritical') ||
+    pClass.includes('steam') ||
+    pClass.includes('water giant') ||
+    hydro.coveragePct === 100 ||
+    state.includes('global') ||
+    state.includes('100%');
+
+  if (isPureOcean) return false;
+
+  // Has continents, landmasses, or emergent crust
+  const hasLand =
+    state.includes('continent') ||
+    state.includes('crust') ||
+    state.includes('land') ||
+    (hydro.coveragePct !== undefined && hydro.coveragePct > 0 && hydro.coveragePct < 100);
+
+  return hasLand;
+}
+
+/**
  * Returns true if the system contains at least one liquid-water world or moon.
  */
 export function hasWaterWorld(system: SectorHexSystem): boolean {
@@ -1216,6 +1273,37 @@ export function hasMulticellularLife(system: SectorHexSystem): boolean {
     }
   }
   return Boolean(system.habitableTypes?.some((t) => t.toLowerCase().includes('multicellular')));
+}
+
+/**
+ * Returns true if the system contains at least one world or moon with active terrestrial life.
+ */
+export function hasTerrestrialLife(system: SectorHexSystem): boolean {
+  const zones = system.sysResult?.zones;
+  if (zones && zones.length > 0) {
+    for (const zone of zones) {
+      for (const body of zone.bodies) {
+        if (body.kind === 'planet') {
+          if (hasTerrestrialBiosphere(body.planetClass, body.hydrosphere)) {
+            return true;
+          }
+          if (body.moons) {
+            for (const moon of body.moons) {
+              if (hasTerrestrialBiosphere(moon.moonClass, moon.hydrosphere)) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return Boolean(
+    system.habitableTypes?.some((t) => {
+      const lower = t.toLowerCase();
+      return lower.includes('terrestrial') || lower.includes('continental');
+    })
+  );
 }
 
 /**

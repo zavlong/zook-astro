@@ -41,6 +41,8 @@ import {
   hasWaterWorld,
   hasAmmoniaWorld,
   hasMulticellularLife,
+  hasTerrestrialLife,
+  hasTerrestrialBiosphere,
 } from '../../core/generation/sectorHex';
 import {
   getProceduralStarSpriteDataUrl,
@@ -82,6 +84,7 @@ export type SectorFilterCategory =
   | 'water-world'
   | 'ammonia-world'
   | 'multicellular'
+  | 'terrestrial-life'
   | 'non-ms'
   | 'mass';
 
@@ -170,6 +173,7 @@ const getBiosphereDisplay = (sys: SectorHexSystem): string => {
     let hasWaterBio = false;
     let hasAmmoniaBio = false;
     let hasMultiBio = false;
+    let hasTerrestrialBio = false;
 
     for (const zone of zones) {
       for (const body of zone.bodies) {
@@ -186,6 +190,9 @@ const getBiosphereDisplay = (sys: SectorHexSystem): string => {
             if (bio.includes('multicellular')) {
               hasMultiBio = true;
             }
+            if (hasTerrestrialBiosphere(body.planetClass, body.hydrosphere)) {
+              hasTerrestrialBio = true;
+            }
           }
           if (body.moons) {
             for (const moon of body.moons) {
@@ -200,6 +207,9 @@ const getBiosphereDisplay = (sys: SectorHexSystem): string => {
                 }
                 if (bio.includes('multicellular')) {
                   hasMultiBio = true;
+                }
+                if (hasTerrestrialBiosphere(moon.moonClass, moon.hydrosphere)) {
+                  hasTerrestrialBio = true;
                 }
               }
             }
@@ -217,7 +227,9 @@ const getBiosphereDisplay = (sys: SectorHexSystem): string => {
         : hasAmmoniaBio
         ? 'ammonia'
         : 'water';
-    return `${bioCount} ${kindLabel} (${hasMultiBio ? 'multicellular' : 'unicellular'})`;
+    const complexity = hasMultiBio ? 'multicellular' : 'unicellular';
+    const terrestrialNote = hasTerrestrialBio ? ', terrestrial' : '';
+    return `${bioCount} ${kindLabel} (${complexity}${terrestrialNote})`;
   }
 
   return '<none>';
@@ -430,6 +442,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
         hasWater: boolean;
         hasAmmonia: boolean;
         hasMulti: boolean;
+        hasTerrestrial: boolean;
         isNonMs: boolean;
         biosphereDisplay: string;
       }
@@ -439,6 +452,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
         hasWater: hasWaterWorld(sys),
         hasAmmonia: hasAmmoniaWorld(sys),
         hasMulti: hasMulticellularLife(sys),
+        hasTerrestrial: hasTerrestrialLife(sys),
         isNonMs: isNonMainSequenceSystem(sys),
         biosphereDisplay: getBiosphereDisplay(sys),
       });
@@ -455,6 +469,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       if (filterCat === 'water-world') return traits ? traits.hasWater : hasWaterWorld(system);
       if (filterCat === 'ammonia-world') return traits ? traits.hasAmmonia : hasAmmoniaWorld(system);
       if (filterCat === 'multicellular') return traits ? traits.hasMulti : hasMulticellularLife(system);
+      if (filterCat === 'terrestrial-life') return traits ? traits.hasTerrestrial : hasTerrestrialLife(system);
       if (filterCat === 'non-ms') return traits ? traits.isNonMs : isNonMainSequenceSystem(system);
       if (filterCat === 'mass') {
         if (massBracket === 'low') return system.mass < 0.8;
@@ -2255,6 +2270,8 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     matchesFilter = systemTraitsMap.get(system.id)?.hasAmmonia ?? hasAmmoniaWorld(system);
                   } else if (filterCat === 'multicellular') {
                     matchesFilter = systemTraitsMap.get(system.id)?.hasMulti ?? hasMulticellularLife(system);
+                  } else if (filterCat === 'terrestrial-life') {
+                    matchesFilter = systemTraitsMap.get(system.id)?.hasTerrestrial ?? hasTerrestrialLife(system);
                   } else if (filterCat === 'non-ms') {
                     matchesFilter = systemTraitsMap.get(system.id)?.isNonMs ?? isNonMainSequenceSystem(system);
                   } else if (filterCat === 'mass') {
@@ -2600,6 +2617,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   { id: 'water-world', label: 'Water Worlds', color: 'text-sky-400', title: 'Systems with liquid-water (H2O / aqueous brine) worlds or moons' },
                   { id: 'ammonia-world', label: 'Ammonia Worlds', color: 'text-teal-300', title: 'Systems with Cryo-Ammonia (NH3-H2O) worlds or moons' },
                   { id: 'multicellular', label: 'Multicellular Life', color: 'text-emerald-400', title: 'Systems harboring worlds or moons with active multicellular biospheres' },
+                  { id: 'terrestrial-life', label: 'Terrestrial Life', color: 'text-lime-400', title: 'Systems harboring worlds or moons with active land-based / continental terrestrial life' },
                 ] as const
               ).map((f) => (
                 <button
