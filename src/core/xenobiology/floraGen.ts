@@ -586,7 +586,14 @@ export function calculateWeightedSpeciesCount(params: {
   // Balanced weighting: 50% evolutionary age, 50% environmental habitability
   const combinedFactor = clamp(0.5 * ageScore + 0.5 * habScore, 0.05, 1.0);
 
-  // Map to [5, 20] range with gentle stochastic variation
+  if (isMulticellular === false) {
+    // Unicellular / microbial worlds have lower taxonomic speciation
+    const baseTarget = 2 + combinedFactor * 6;
+    const jitter = (rng() - 0.5) * 2.0;
+    return clamp(Math.round(baseTarget + jitter), 2, 8);
+  }
+
+  // Multicellular biospheres: Map to [5, 20] range with gentle stochastic variation
   const baseTarget = 5 + combinedFactor * 15;
   const jitter = (rng() - 0.5) * 3.0;
   return clamp(Math.round(baseTarget + jitter), 5, 20);
@@ -959,6 +966,125 @@ export function generatePlantEcosystem(params: {
         'Chemosynthetic sulfur oxidation generating metabolic energy in total darkness',
         'Piezophilic cell membranes functioning under thousands of atmospheres of pressure',
         'Metallic ion precipitation binding volcanic minerals into protective biofilms',
+      ],
+    },
+    // 11. Pelagic Noctilucent Dinoflagellate Swarm (Aquatic: 1, 23)
+    {
+      formCategory: 'Spire',
+      growthForm: 'Pelagic Noctilucent Dinoflagellate Swarm',
+      habitatType: 'aquatic',
+      baseHeightM: 0.001,
+      baseSpreadM: 20.0,
+      nativeBiomes: [
+        { id: 23, name: 'Algal Sea' },
+        { id: 1, name: 'Deep Ocean' },
+      ],
+      compatibleBiomeIds: [1, 2, 23],
+      reproductionMethod: 'Diurnal vertical migration and binary fission blooms in warm epipelagic currents',
+      fieldNote: (biomes) => `Bioluminescent micro-flagellates flashing under tidal turbulence across ${biomes}.`,
+      adaptations: [
+        'Luciferin flash deterrence startling nocturnal planktivorous micro-grazers',
+        'Positive phototaxis flagellar motors positioning cells at optimal light depths',
+        'Carotenoid-dense lipid stores protecting nuclear DNA from solar ultraviolet rays',
+      ],
+    },
+    // 12. Benthic Siliceous Diatomaceous Film (Aquatic: 1, 2, 23)
+    {
+      formCategory: 'Mat',
+      growthForm: 'Benthic Siliceous Diatomaceous Film',
+      habitatType: 'aquatic',
+      baseHeightM: 0.003,
+      baseSpreadM: 8.0,
+      nativeBiomes: [
+        { id: 2, name: 'Continental Shelf / Shallows' },
+        { id: 1, name: 'Deep Ocean' },
+      ],
+      compatibleBiomeIds: [1, 2, 23],
+      reproductionMethod: 'Auxospore enlargement and benthic siliceous frustule division',
+      fieldNote: (biomes) => `Golden-amber micro-algal film coating shallow seabed mineral sands in ${biomes}.`,
+      adaptations: [
+        'Nanostructured porous silica shells providing structural resilience under bottom currents',
+        'Gliding motility along secreted polysaccharide tracks to avoid burial by sediment',
+        'Broad-spectrum antenna pigments maximizing photon capture in murky water',
+      ],
+    },
+    // 13. Sub-Ice Cryophilic Phytoplankton Plume (Polar/Sub-Ice: 1, 8, 23)
+    {
+      formCategory: 'Mat',
+      growthForm: 'Sub-Ice Cryophilic Phytoplankton Plume',
+      habitatType: 'aquatic',
+      baseHeightM: 0.002,
+      baseSpreadM: 14.0,
+      nativeBiomes: [
+        { id: 8, name: 'Polar Glacial Ice' },
+        { id: 1, name: 'Deep Ocean' },
+      ],
+      compatibleBiomeIds: [1, 8, 23],
+      reproductionMethod: 'Cryo-dormant spore plumes liberated along melting ice shelf margins',
+      fieldNote: (biomes) => `Cold-hardy algal sheets adhering to submerged pack ice and polar ocean currents in ${biomes}.`,
+      adaptations: [
+        'Thermal hysteresis antifreeze proteins preventing ice crystallization inside cell walls',
+        'Polyunsaturated fatty-acid membrane adaptations maintaining fluidity at 265 Kelvin',
+        'Deep far-red harvesting pigments capturing faint light penetrating thick ice sheets',
+      ],
+    },
+    // 14. Deep Seafloor Hydrothermal Vent Biofilm (Abyssal/Volcanic: 0, 1, 14, 15)
+    {
+      formCategory: 'Cushion',
+      growthForm: 'Deep Seafloor Hydrothermal Vent Biofilm',
+      habitatType: 'aquatic',
+      baseHeightM: 0.012,
+      baseSpreadM: 2.2,
+      nativeBiomes: [
+        { id: 0, name: 'Abyssal Trench' },
+        { id: 14, name: 'Active Volcanic Caldera' },
+      ],
+      compatibleBiomeIds: [0, 1, 14, 15],
+      reproductionMethod: 'Thermal buoyant plume dispersal along seafloor hydrothermal circulation',
+      fieldNote: (biomes) => `Chemosynthetic microbial carpets encrusting superheated mineral chimneys in ${biomes}.`,
+      adaptations: [
+        'Thermostable sulfur-oxidizing enzymes active up to 390 Kelvin near hydrothermal orifices',
+        'Heavy metal precipitation into insoluble mineral matrices preventing cellular toxicity',
+        'Chemoautotrophic ATP generation powered by dissolved volcanic hydrogen-sulfide',
+      ],
+    },
+    // 15. Intertidal Halophilic Carotenoid Crust (Amphibious/Coast: 2, 3, 22)
+    {
+      formCategory: 'Mat',
+      growthForm: 'Intertidal Halophilic Carotenoid Crust',
+      habitatType: 'amphibious',
+      baseHeightM: 0.006,
+      baseSpreadM: 4.5,
+      nativeBiomes: [
+        { id: 3, name: 'Coastal Alluvial Basin' },
+        { id: 2, name: 'Continental Shelf / Shallows' },
+      ],
+      compatibleBiomeIds: [2, 3, 22],
+      reproductionMethod: 'Tidal wash spore dispersal and mucilage sheath expansion',
+      fieldNote: (biomes) => `Vibrant crimson-orange microbial crust binding hypersaline tidal flats and lagoons in ${biomes}.`,
+      adaptations: [
+        'High bacteriorhodopsin and carotenoid pigments shielding against solar ultraviolet glare',
+        'Osmolyte trehalose accumulation buffering cells against fluctuating marine salinity',
+        'Desiccation-resistant spore sheets surviving complete low-tide sun-baking',
+      ],
+    },
+    // 16. Cryogenic Liquid Methane Micro-Bloom (Hydrocarbon Seas: 17, 1, 23)
+    {
+      formCategory: 'Mat',
+      growthForm: 'Cryogenic Liquid Methane Micro-Bloom',
+      habitatType: 'aquatic',
+      baseHeightM: 0.002,
+      baseSpreadM: 10.0,
+      nativeBiomes: [
+        { id: 17, name: 'Hydrocarbon Methane Sea' },
+      ],
+      compatibleBiomeIds: [17, 1, 23],
+      reproductionMethod: 'Athermal hydrocarbon budding along methane sea thermoclines',
+      fieldNote: (biomes) => `Non-aqueous photosynthetic blooms drifting through supercooled hydrocarbon oceans in ${biomes}.`,
+      adaptations: [
+        'Non-polar hydrocarbon-stable liposomes resisting dissolution in liquid methane',
+        'Silica frustule buoyancy regulation keeping colonies in the photic epipelagic zone',
+        'Deep infrared absorption complexes tuned to dim far-red twilight illumination',
       ],
     },
   ];
@@ -1513,23 +1639,28 @@ export function generatePlantEcosystem(params: {
     });
   }
 
-  // Pick diverse archetypes deterministically for this seed (supports up to 20 species)
-  const selectedArchetypes: ArchetypeConfig[] = [];
-  if (candidatePool.length > 0) {
-    for (let i = 0; i < speciesCount; i++) {
-      const arch = candidatePool[(i + Math.floor(rng() * candidatePool.length)) % candidatePool.length];
-      selectedArchetypes.push(arch);
-    }
+  // Pick strictly unique archetypes deterministically for this seed using Fisher-Yates shuffle without replacement
+  const shuffledPool = [...candidatePool];
+  for (let i = shuffledPool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [shuffledPool[i], shuffledPool[j]] = [shuffledPool[j], shuffledPool[i]];
   }
+  const targetCount = Math.min(speciesCount, shuffledPool.length);
+  const selectedArchetypes: ArchetypeConfig[] = shuffledPool.slice(0, targetCount);
 
   let minCanopyH = 999;
   let maxCanopyH = 0;
 
   const usedScientificNames = new Set<string>();
   const usedCommonNames = new Set<string>();
+  const seenGrowthForms = new Set<string>();
 
   for (let i = 0; i < selectedArchetypes.length; i++) {
     const arch = selectedArchetypes[i];
+    if (seenGrowthForms.has(arch.growthForm)) {
+      continue;
+    }
+    seenGrowthForms.add(arch.growthForm);
     const specRng = createSeedRng((seed * 73 + i * 1993) >>> 0);
 
     // Height & spread scaled by gravity (unicellular soil crusts remain micro-scale)

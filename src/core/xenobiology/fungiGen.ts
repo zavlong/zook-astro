@@ -704,6 +704,131 @@ export function generateFungiEcosystem(params: {
         'Rapid metabolic restart within minutes of atmospheric dew condensation or rare rain events',
       ],
     },
+    // 11. Pelagic Bioluminescent Mucilage-Yeast (Aquatic: 1, 23)
+    {
+      formCategory: 'Yeast',
+      growthForm: 'Pelagic Bioluminescent Mucilage-Yeast',
+      habitatType: 'aquatic',
+      baseHeightM: 0.003,
+      baseSpreadM: 4.5,
+      trophicType: 'Bioluminescent Marine Planktonic Saprobe',
+      nativeBiomes: [
+        { id: 23, name: 'Algal Sea' },
+        { id: 1, name: 'Deep Ocean' },
+      ],
+      compatibleBiomeIds: [1, 2, 23],
+      reproductionMethod: 'Bioluminescent colonial budding drifting along oceanic convergence zones',
+      fieldNote: (biomes) => `Bioluminescent yeast forming glowing pelagic mucilage veils in ${biomes}, consuming dying micro-algae.`,
+      adaptations: [
+        'Luciferin-luciferase flashes startling filter-feeding microfauna',
+        'Mucilaginous envelope binding suspended marine snow into digestive aggregates',
+        'Buoyancy-regulating lipid vacuoles maintaining station within the photic zone',
+      ],
+    },
+    // 12. Sub-Ice Cryophilic Chytrid (Aquatic: 1, 8, 21, 23)
+    {
+      formCategory: 'MicroMold',
+      growthForm: 'Sub-Ice Cryophilic Anchor-Chytrid',
+      habitatType: 'aquatic',
+      baseHeightM: 0.002,
+      baseSpreadM: 3.0,
+      trophicType: 'Sub-Ice Cryophilic Detrital Saprobe',
+      nativeBiomes: [
+        { id: 8, name: 'Polar Glacial Ice' },
+        { id: 1, name: 'Deep Ocean' },
+      ],
+      compatibleBiomeIds: [1, 8, 21, 23],
+      reproductionMethod: 'Brine-channel zoospore drift beneath polar ice sheets',
+      fieldNote: (biomes) => `Cryophilic micro-fungus anchoring into submerged polar ice matrices in ${biomes}, breaking down cryo-algal detritus.`,
+      adaptations: [
+        'High polyol and trehalose antifreeze preventing cytoplasmic freezing down to 255 Kelvin',
+        'Chitinous micro-rhizoids anchoring into interstitial sub-ice brine channels',
+        'Psychrophilic proteases active at sub-zero temperatures',
+      ],
+    },
+    // 13. Abyssal Trench Mineral Micro-Mold (Aquatic: 0, 1)
+    {
+      formCategory: 'MicroMold',
+      growthForm: 'Abyssal Trench Mineral-Boring Micro-Mold',
+      habitatType: 'aquatic',
+      baseHeightM: 0.0015,
+      baseSpreadM: 1.8,
+      trophicType: 'Chemotrophic Sulfide-Oxidizing Vent Mycota',
+      nativeBiomes: [
+        { id: 0, name: 'Abyssal Trench' },
+        { id: 1, name: 'Deep Ocean' },
+      ],
+      compatibleBiomeIds: [0, 1, 17],
+      reproductionMethod: 'Hydrothermal convection spore plumes circulating through deep ocean trenches',
+      fieldNote: (biomes) => `Endolithic micro-fungus boring into basalt and mineral chimneys across ${biomes}.`,
+      adaptations: [
+        'Enzymatic sulfide oxidation harvesting energy in total aphotic darkness',
+        'Barophilic cellular membranes withstanding over 1,000 atmospheres of hydrostatic pressure',
+        'Acid-secreting hyphal tips boring into mineral basalt to harvest iron and sulfur',
+      ],
+    },
+    // 14. Cryogenic Hydrocarbon Lipophilic Yeast (Aquatic: 17, 1, 23)
+    {
+      formCategory: 'Yeast',
+      growthForm: 'Cryogenic Hydrocarbon Lipophilic Yeast',
+      habitatType: 'aquatic',
+      baseHeightM: 0.002,
+      baseSpreadM: 5.0,
+      trophicType: 'Cryotrophic Hydrocarbon Detrital Saprobe',
+      nativeBiomes: [
+        { id: 17, name: 'Hydrocarbon Methane Sea' },
+      ],
+      compatibleBiomeIds: [17, 1, 23],
+      reproductionMethod: 'Cryogenic budding along liquid methane thermoclines',
+      fieldNote: (biomes) => `Thrives in non-aqueous cryogenic seas in ${biomes}, degrading organic tholins and hydrocarbon precipitates.`,
+      adaptations: [
+        'Non-polar lipid bilayers retaining structural flexibility in liquid methane and ethane at 95 Kelvin',
+        'Lipophilic extracellular enzymes solubilizing atmospheric tholin particulates',
+        'Athermal budding pathways functional under extreme planetary cold',
+      ],
+    },
+    // 15. Thermophilic Caldera Fumarole Micro-Yeast (Aquatic/Volcanic: 0, 1, 14, 15)
+    {
+      formCategory: 'Yeast',
+      growthForm: 'Thermophilic Caldera Fumarole Micro-Yeast',
+      habitatType: 'aquatic',
+      baseHeightM: 0.003,
+      baseSpreadM: 1.2,
+      trophicType: 'Barophilic Chemosynthetic Sulfur-Saprobe',
+      nativeBiomes: [
+        { id: 15, name: 'Active Lava Caldera & Fissure' },
+        { id: 14, name: 'Active Volcanic Caldera' },
+      ],
+      compatibleBiomeIds: [0, 1, 14, 15],
+      reproductionMethod: 'Superheated steam jet spore dispersal along active caldera vents',
+      fieldNote: (biomes) => `Hyperthermophilic yeast encrusting hydrothermal fissures and active volcanic vents in ${biomes}.`,
+      adaptations: [
+        'Thermostable shock proteins preventing enzyme denaturing up to 400 Kelvin',
+        'Sulfur-reducing metabolic pathways operating independent of light and oxygen',
+        'Heavy pyritic biomineralized cell walls buffering against caustic sulfuric acid',
+      ],
+    },
+    // 16. Intertidal Biofilm Parasitoid Pin-Mold (Amphibious: 2, 3, 22)
+    {
+      formCategory: 'MicroMold',
+      growthForm: 'Intertidal Biofilm Parasitoid Pin-Mold',
+      habitatType: 'amphibious',
+      baseHeightM: 0.0025,
+      baseSpreadM: 2.4,
+      trophicType: 'Halophilic Mucilage Fermenter',
+      nativeBiomes: [
+        { id: 3, name: 'Coastal Alluvial Basin' },
+        { id: 2, name: 'Continental Shelf / Shallows' },
+      ],
+      compatibleBiomeIds: [2, 3, 22],
+      reproductionMethod: 'Tidal surge spore scattering across intertidal algal mats',
+      fieldNote: (biomes) => `Forms delicate micro-mold networks across intertidal cyanobacterial mats in ${biomes}.`,
+      adaptations: [
+        'Euryhaline osmoregulation adjusting to dramatic salinity fluctuations between tides',
+        'Hydrophobic sporangial stalks elevating spores above receding tidal wash',
+        'Chitinous micro-rhizoids penetrating host microbial sheath polymers',
+      ],
+    },
   ];
 
   // Multicellular Macro-Fungi Archetypes (Only available when planetary flora is multicellular)
@@ -1195,21 +1320,26 @@ export function generateFungiEcosystem(params: {
     });
   }
 
-  // Pick diverse archetypes deterministically for this seed (supports up to 20 species)
-  const selectedArchetypes: FungiArchetypeConfig[] = [];
-  if (candidatePool.length > 0) {
-    for (let i = 0; i < speciesCount; i++) {
-      const arch = candidatePool[(i + Math.floor(rng() * candidatePool.length)) % candidatePool.length];
-      selectedArchetypes.push(arch);
-    }
+  // Pick strictly unique archetypes deterministically for this seed using Fisher-Yates shuffle without replacement
+  const shuffledPool = [...candidatePool];
+  for (let i = shuffledPool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [shuffledPool[i], shuffledPool[j]] = [shuffledPool[j], shuffledPool[i]];
   }
+  const targetCount = Math.min(speciesCount, shuffledPool.length);
+  const selectedArchetypes: FungiArchetypeConfig[] = shuffledPool.slice(0, targetCount);
 
   const speciesList: XenofungiSpecies[] = [];
   const usedScientificNames = new Set<string>();
   const usedCommonNames = new Set<string>();
+  const seenGrowthForms = new Set<string>();
 
   for (let i = 0; i < selectedArchetypes.length; i++) {
     const arch = selectedArchetypes[i];
+    if (seenGrowthForms.has(arch.growthForm)) {
+      continue;
+    }
+    seenGrowthForms.add(arch.growthForm);
     const specRng = createSeedRng((seed * 109 + i * 2677) >>> 0);
 
     const scaledHeight = isMulticellular
