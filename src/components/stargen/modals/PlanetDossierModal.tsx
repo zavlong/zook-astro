@@ -873,9 +873,13 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                     </b>
                   </div>
                   <div>
-                    <span className="text-slate-500 block text-[9px]">CANOPY HEIGHT</span>
+                    <span className="text-slate-500 block text-[9px]">
+                      {planetEcosystem.isMulticellular ? 'CANOPY HEIGHT' : 'FLORA PROFILE'}
+                    </span>
                     <b className="text-sky-300 block mt-0.5">
-                      Up to {planetEcosystem.canopyHeightRangeM.max}m
+                      {planetEcosystem.isMulticellular
+                        ? `Up to ${planetEcosystem.canopyHeightRangeM.max}m`
+                        : 'Colored Soil Crust (<5cm)'}
                     </b>
                   </div>
                   <div>
@@ -888,7 +892,9 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
 
                 <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[10px]">
                   <span className="text-slate-400">
-                    Gravity-scaled morphology ({(isMoon && activeMoon ? activeMoon.gravityG : hostPlanet.gravityG).toFixed(2)}g)
+                    {planetEcosystem.isMulticellular
+                      ? `Gravity-scaled morphology (${(isMoon && activeMoon ? activeMoon.gravityG : hostPlanet.gravityG).toFixed(2)}g)`
+                      : 'Unicellular autotrophs forming colored algal plains & soil biofilms'}
                   </span>
                   <button
                     type="button"

@@ -604,7 +604,9 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           ? 0.16 + canopyDensity * 0.16
           : 0.25 + canopyDensity * 0.22;
 
+        const isUnicellular = surfaceModel.isUnicellularOnly;
         const hasTreeHere =
+          !isUnicellular &&
           cell.dist < crownRadius &&
           slope < 0.55 &&
           hLocal > 0.015 &&

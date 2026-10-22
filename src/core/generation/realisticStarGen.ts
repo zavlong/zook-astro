@@ -1171,7 +1171,7 @@ export function computePlanetaryMagneticField(params: {
       radiationLevel = 'Extreme';
       auroraDescription = 'None (Crustal Remnants)';
       biosphereImplication =
-        'Unshielded surface; stellar wind strips light gases and radiation limits life to oceans or subsurface.';
+        'Unshielded surface; stellar wind strips light gases, though radiotolerant unicellular microbial crusts and algal mats can thrive across landmasses.';
     }
   }
 
@@ -2208,12 +2208,12 @@ export function generateZoneSystem(
                 biosphereDesc =
                   z.age >= 3.0
                     ? 'Active Multicellular Aerobic (O2-N2) Continental & Marine Biosphere'
-                    : 'Active Unicellular Microbial (Archaean/Prokaryotic) Marine Biosphere';
+                    : 'Active Unicellular Microbial (Archaean/Prokaryotic) Continental & Marine Biosphere';
               } else {
                 biosphereDesc =
                   z.age >= 3.0
-                    ? 'Active Multicellular Pelagic & Benthic Marine Biosphere (Unshielded Radiation-Sterilized Landmasses)'
-                    : 'Active Unicellular Radiotolerant Marine Microbial Biosphere (Unshielded Surface)';
+                    ? 'Active Multicellular Pelagic & Benthic Marine Biosphere (Radiotolerant Terrestrial Algal Mats)'
+                    : 'Active Unicellular Radiotolerant Terrestrial & Marine Microbial Biosphere (High Radiation Crusts)';
               }
             }
             pO = bio ? pN * rand(0.18, 0.32) : 0;
@@ -2297,11 +2297,13 @@ export function generateZoneSystem(
               biosphereDesc = isContinentalNH3
                 ? isShielded
                   ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Cryo-Continental Biosphere`
-                  : `Active ${bioNH3Complex} Subsurface & Pelagic Ammoniated Biosphere (Radiation-Sterilized Cryo-Continents)`
+                  : bioNH3Complex === 'Multicellular'
+                  ? 'Active Multicellular Pelagic Marine Biosphere (Radiotolerant Cryo-Continental Algal Mats)'
+                  : 'Active Unicellular Radiotolerant Cryo-Continental & Marine Ammoniated Biosphere'
                 : hasIcebergContinents
                 ? isShielded
                   ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Floating H2O-Iceberg Shelf Biosphere`
-                  : `Active ${bioNH3Complex} Sub-Iceberg & Pelagic Ammoniated (NH3-H2O) Biosphere`
+                  : `Active ${bioNH3Complex} Sub-Iceberg & Radiotolerant Shelf-Algal Ammoniated Biosphere`
                 : isShielded
                 ? `Active ${bioNH3Complex} Pelagic Ammoniated (NH3-H2O) Marine Biosphere`
                 : `Active ${bioNH3Complex} Deep Pelagic Ammoniated (NH3-H2O) Biosphere (Cosmic Ray Attenuation)`;
@@ -2384,11 +2386,13 @@ export function generateZoneSystem(
               biosphereDesc = isContinentalNH3
                 ? isShielded
                   ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Cryo-Continental Biosphere`
-                  : `Active ${bioNH3Complex} Subsurface & Pelagic Ammoniated Biosphere (Radiation-Sterilized Cryo-Continents)`
+                  : bioNH3Complex === 'Multicellular'
+                  ? 'Active Multicellular Pelagic Marine Biosphere (Radiotolerant Cryo-Continental Algal Mats)'
+                  : 'Active Unicellular Radiotolerant Cryo-Continental & Marine Ammoniated Biosphere'
                 : hasIcebergContinents
                 ? isShielded
                   ? `Active ${bioNH3Complex} Ammoniated (NH3-H2O) Marine & Floating H2O-Iceberg Shelf Biosphere`
-                  : `Active ${bioNH3Complex} Sub-Iceberg & Pelagic Ammoniated (NH3-H2O) Biosphere`
+                  : `Active ${bioNH3Complex} Sub-Iceberg & Radiotolerant Shelf-Algal Ammoniated Biosphere`
                 : isShielded
                 ? `Active ${bioNH3Complex} Pelagic Ammoniated (NH3-H2O) Marine Biosphere`
                 : `Active ${bioNH3Complex} Deep Pelagic Ammoniated (NH3-H2O) Biosphere (Cosmic Ray Attenuation)`;

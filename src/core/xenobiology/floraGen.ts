@@ -202,7 +202,9 @@ export function generatePlantEcosystem(params: {
   }
 
   const rng = createSeedRng(seed ^ 0x4f19b7d2);
-  const isMulticellular = systemAgeGyr >= 2.8;
+  const bioDescLower = biosphereDescription.toLowerCase();
+  const isMulticellular = bioDescLower.includes('multicellular') || 
+    (!bioDescLower.includes('unicellular') && !bioDescLower.includes('microbial') && systemAgeGyr >= 2.8);
   const pBar = pressureBar ?? 1.0;
   const g = Math.max(0.15, gravityG);
 
@@ -211,13 +213,17 @@ export function generatePlantEcosystem(params: {
 
   const pigmentInfo = getPigmentRegime(starTeff, solventKey);
 
-  // Structural base polymer depending on solvent and gravity
-  let structuralBase = 'Lignified Cellulose';
+  // Structural base polymer depending on solvent, multicellularity, and gravity
+  let structuralBase = isMulticellular ? 'Lignified Cellulose' : 'Extracellular Biofilm Matrix & Polysaccharides';
   if (solventKey === 'NH3-H2O') {
-    structuralBase = 'Cryo-Proteoglycan & Glycerol-Cellulose Gel';
+    structuralBase = isMulticellular
+      ? 'Cryo-Proteoglycan & Glycerol-Cellulose Gel'
+      : 'Cryo-Proteoglycan Mucilaginous Biofilm';
   } else if (solventKey.toLowerCase().includes('methane')) {
-    structuralBase = 'Silica-Sclerotized Polyaromatic Frustules';
-  } else if (g > 1.6) {
+    structuralBase = isMulticellular
+      ? 'Silica-Sclerotized Polyaromatic Frustules'
+      : 'Silica-Frustule Hydrocarbon Biofilms';
+  } else if (isMulticellular && g > 1.6) {
     structuralBase = 'Silica-Reinforced Biomineralized Cellulose';
   }
 
@@ -232,7 +238,7 @@ export function generatePlantEcosystem(params: {
   }
 
   // Number of plant species to generate
-  const speciesCount = !isMulticellular ? 3 : clamp(Math.round(5 + rng() * 3), 5, 8);
+  const speciesCount = !isMulticellular ? clamp(Math.round(4 + rng() * 2), 4, 6) : clamp(Math.round(5 + rng() * 3), 5, 8);
 
   const speciesList: XenofloraSpecies[] = [];
 
@@ -248,7 +254,110 @@ export function generatePlantEcosystem(params: {
     isAquatic?: boolean;
   }
 
-  const archetypes: ArchetypeConfig[] = [
+  // Unicellular archetypes: no tree models, only colored soil, biological crusts, and algal plains
+  const unicellularArchetypes: ArchetypeConfig[] = [
+    {
+      formCategory: 'Mat',
+      growthForm: 'Terrestrial Biological Soil Crust & Algal Mat',
+      baseHeightM: 0.005,
+      baseSpreadM: 6.0,
+      nativeBiomes: [
+        { id: 5, name: 'Algal Plains' },
+        { id: 4, name: 'Lowland Silicate Plains' },
+      ],
+      reproductionMethod: 'Asexual binary fission and windborne desiccation-tolerant micro-cysts',
+      adaptations: [
+        'Radiotolerant DNA-repair enzymes allowing survival under unshielded cosmic radiation',
+        'Endolithic moisture retention within silicate regolith grains',
+        'Direct atmospheric nitrogen fixation into colored soil crusts',
+      ],
+    },
+    {
+      formCategory: 'Mat',
+      growthForm: 'Continental Stromatolitic Algal Mat',
+      baseHeightM: 0.035,
+      baseSpreadM: 4.5,
+      nativeBiomes: [
+        { id: 5, name: 'Algal Plains' },
+        { id: 3, name: 'Coastal Algal Mat Basin' },
+      ],
+      reproductionMethod: 'Colonial budding and benthic extracellular slime accretion',
+      adaptations: [
+        'Sediment-binding polysaccharide slime sheets forming terraced ground crusts',
+        'High-density pigment layers filtering harsh ultraviolet stellar flux',
+        'Direct mineral precipitation consolidating loose regolith into organic soil',
+      ],
+    },
+    {
+      formCategory: 'Cushion',
+      growthForm: 'Endolithic Radiotolerant Soil Biofilm',
+      baseHeightM: 0.002,
+      baseSpreadM: 2.8,
+      nativeBiomes: [
+        { id: 4, name: 'Lowland Silicate Plains' },
+        { id: 9, name: 'Arid Steppe / Scrub' },
+        { id: 11, name: 'High Plateau / Badlands' },
+      ],
+      reproductionMethod: 'Microbial fragmentation and dormant spore dusting',
+      adaptations: [
+        'Unshielded surface radiation tolerance via manganese-complex chaperone proteins',
+        'Mineral dissolution extracting phosphorus from basaltic silicate rock',
+        'Osmotic trehalose synthesis buffering extreme temperature swings',
+      ],
+    },
+    {
+      formCategory: 'Spire',
+      growthForm: 'Sub-Polar Cryophilic Algal Biofilm',
+      baseHeightM: 0.004,
+      baseSpreadM: 3.2,
+      nativeBiomes: [
+        { id: 6, name: 'Sub-Polar Algal Plains' },
+        { id: 7, name: 'Tundra / Permafrost' },
+      ],
+      reproductionMethod: 'Cryo-dormant spore encapsulation in permafrost pores',
+      adaptations: [
+        'Natural glycerol antifreeze preventing intra-cellular ice crystallization',
+        'Active sub-zero photosynthesis utilizing microscopic brine channels',
+        'Dark melanin and carotenoid pigments absorbing solar infrared heat',
+      ],
+    },
+    {
+      formCategory: 'Kelp',
+      growthForm: 'Pelagic Marine Micro-Algal Bloom',
+      baseHeightM: 0.001,
+      baseSpreadM: 18.0,
+      nativeBiomes: [
+        { id: 23, name: 'Algal Sea' },
+        { id: 2, name: 'Continental Shelf / Shallows' },
+      ],
+      reproductionMethod: 'Exponential asexual division in photic surface waters',
+      adaptations: [
+        'Gas vacuole buoyancy regulation keeping cells in optimal photic zone',
+        'Silica frustule protective shell resisting hydrodynamic shearing',
+        'Bioluminescent shock responses deterring micro-grazers',
+      ],
+      isAquatic: true,
+    },
+    {
+      formCategory: 'Mat',
+      growthForm: 'Estuarine Coastal Cyanobacterial Mat',
+      baseHeightM: 0.015,
+      baseSpreadM: 5.0,
+      nativeBiomes: [
+        { id: 3, name: 'Coastal Algal Mat Basin' },
+        { id: 2, name: 'Continental Shelf / Shallows' },
+      ],
+      reproductionMethod: 'Horizontal gliding trichome filaments across intertidal silt',
+      adaptations: [
+        'Extreme salinity and evaporation buffering via mucilage sheaths',
+        'Photosynthetic pigment shifting across changing tidal depths',
+        'Facultative anoxygenic photosynthesis when buried under storm silt',
+      ],
+    },
+  ];
+
+  // Multicellular complex plant archetypes
+  const multicellularArchetypes: ArchetypeConfig[] = [
     // 1. Dominant Arboreal / High Canopy
     {
       formCategory: 'Tree',
@@ -257,7 +366,7 @@ export function generatePlantEcosystem(params: {
       baseSpreadM: g < 0.6 ? 16.0 : g > 1.4 ? 7.5 : 9.0,
       nativeBiomes: [
         { id: 4, name: 'Lowland Silicate Plains' },
-        { id: 5, name: 'Temperate Continental Basin' },
+        { id: 5, name: 'Forest' },
       ],
       reproductionMethod: pBar > 2.5 
         ? 'Buoyant aeroplanktonic seed-balloons riding dense air currents' 
@@ -277,8 +386,8 @@ export function generatePlantEcosystem(params: {
       baseHeightM: 2.8,
       baseSpreadM: 2.2,
       nativeBiomes: [
-        { id: 5, name: 'Temperate Continental Basin' },
-        { id: 3, name: 'Coastal Alluvial Basin' },
+        { id: 5, name: 'Forest' },
+        { id: 3, name: 'Coastal Marsh & Mangrove Forest' },
       ],
       reproductionMethod: 'Hydraulic siphon-gametes released in riparian humidity',
       adaptations: [
@@ -312,7 +421,7 @@ export function generatePlantEcosystem(params: {
       baseHeightM: 11.0,
       baseSpreadM: 2.8,
       nativeBiomes: [
-        { id: 6, name: 'High-Latitude Rocky Steppe' },
+        { id: 6, name: 'Boreal Forest / Taiga' },
         { id: 7, name: 'Tundra / Permafrost' },
       ],
       reproductionMethod: 'Hardened cryo-dormant spore nodules buried in permafrost',
@@ -330,7 +439,7 @@ export function generatePlantEcosystem(params: {
       baseSpreadM: 3.5,
       nativeBiomes: [
         { id: 16, name: 'Regolith Impact Craterlands' },
-        { id: 6, name: 'High-Latitude Rocky Steppe' },
+        { id: 6, name: 'Boreal Forest / Taiga' },
         { id: 11, name: 'High Plateau / Badlands' },
       ],
       reproductionMethod: 'Direct fragmentation and desiccated windborne soredia dust',
@@ -349,7 +458,7 @@ export function generatePlantEcosystem(params: {
       nativeBiomes: [
         { id: 2, name: 'Continental Shelf / Shallows' },
         { id: 23, name: 'Algal Sea' },
-        { id: 3, name: 'Coastal Alluvial Basin' },
+        { id: 3, name: 'Coastal Marsh & Mangrove Forest' },
       ],
       reproductionMethod: 'Bioluminescent flagellated gametes released during planetary spring tides',
       adaptations: [
@@ -366,7 +475,7 @@ export function generatePlantEcosystem(params: {
       baseHeightM: 5.5,
       baseSpreadM: 4.0,
       nativeBiomes: [
-        { id: 3, name: 'Coastal Alluvial Basin' },
+        { id: 3, name: 'Coastal Marsh & Mangrove Forest' },
         { id: 2, name: 'Continental Shelf / Shallows' },
       ],
       reproductionMethod: 'Viviparous hydrochorous propagules drifting on estuary tides',
@@ -396,6 +505,8 @@ export function generatePlantEcosystem(params: {
     },
   ];
 
+  const archetypes = isMulticellular ? multicellularArchetypes : unicellularArchetypes;
+
   // Pick top N archetypes based on planetary attributes
   const candidatePool = archetypes.filter(arch => {
     if (arch.isAquatic && !hasLiquid) return false;
@@ -411,9 +522,11 @@ export function generatePlantEcosystem(params: {
     const arch = selectedArchetypes[i];
     const specRng = createSeedRng((seed * 73 + i * 1993) >>> 0);
 
-    // Height & spread scaled by gravity
-    const scaledHeight = +(arch.baseHeightM * heightMultiplier * (0.85 + specRng() * 0.3)).toFixed(1);
-    const scaledSpread = +(arch.baseSpreadM * heightMultiplier * (0.85 + specRng() * 0.3)).toFixed(1);
+    // Height & spread scaled by gravity (unicellular soil crusts remain micro-scale)
+    const scaledHeight = isMulticellular
+      ? +(arch.baseHeightM * heightMultiplier * (0.85 + specRng() * 0.3)).toFixed(1)
+      : +(arch.baseHeightM * (0.85 + specRng() * 0.3)).toFixed(3);
+    const scaledSpread = +(arch.baseSpreadM * (isMulticellular ? heightMultiplier : 1.0) * (0.85 + specRng() * 0.3)).toFixed(1);
 
     if (scaledHeight < minCanopyH) minCanopyH = scaledHeight;
     if (scaledHeight > maxCanopyH) maxCanopyH = scaledHeight;
@@ -429,13 +542,18 @@ export function generatePlantEcosystem(params: {
 
     // Common name
     const adjPalette = COMMON_ADJECTIVES_BY_SPECTRUM[pigmentInfo.regimeKey] || COMMON_ADJECTIVES_BY_SPECTRUM.Chlorophyll;
-    const nounPalette = COMMON_NOUNS_BY_FORM[arch.formCategory] || COMMON_NOUNS_BY_FORM.Tree;
+    const unicellularNouns = ['Algal-Mat', 'Soil-Crust', 'Biofilm-Weave', 'Turf-Colony', 'Stromatolite-Crust', 'Plains-Biofilm'];
+    const nounPalette = !isMulticellular
+      ? unicellularNouns
+      : COMMON_NOUNS_BY_FORM[arch.formCategory] || COMMON_NOUNS_BY_FORM.Tree;
     const commonName = `${pickRandom(adjPalette, specRng)} ${pickRandom(nounPalette, specRng)}`;
 
     // Canopy coverage %
     const coverage = Math.round(10 + specRng() * 25);
 
-    const descNote = `Indigenous ${arch.growthForm.toLowerCase()} adapted to ${g.toFixed(2)}g gravity and the ${starTeff}K host star spectrum. Features ${arch.adaptations[0].toLowerCase()} and thrives in ${arch.nativeBiomes.map(b => b.name).join(', ')}.`;
+    const descNote = isMulticellular
+      ? `Indigenous ${arch.growthForm.toLowerCase()} adapted to ${g.toFixed(2)}g gravity and the ${starTeff}K host star spectrum. Features ${arch.adaptations[0].toLowerCase()} and thrives in ${arch.nativeBiomes.map(b => b.name).join(', ')}.`
+      : `Indigenous ${arch.growthForm.toLowerCase()} colonizing land and shallow seas as colored soil crusts under the ${starTeff}K host star spectrum. Features ${arch.adaptations[0].toLowerCase()} across ${arch.nativeBiomes.map(b => b.name).join(', ')}.`;
 
     speciesList.push({
       id: `flora_${seed}_${i}`,
@@ -445,7 +563,7 @@ export function generatePlantEcosystem(params: {
       trophicType: pigmentInfo.trophicType,
       pigmentName: pigmentInfo.pigmentName,
       pigmentColorHex: baseColor,
-      averageHeightM: Math.max(0.05, scaledHeight),
+      averageHeightM: Math.max(0.001, scaledHeight),
       averageSpreadM: Math.max(0.1, scaledSpread),
       structuralPolymer: structuralBase,
       reproductionMethod: arch.reproductionMethod,
@@ -458,7 +576,9 @@ export function generatePlantEcosystem(params: {
   }
 
   // General summary text
-  const summaryText = `${diversityTier}: ${speciesList.length} distinct autotrophic taxa identified. Dominated by ${pigmentInfo.pigmentName} light harvesting under ${g.toFixed(2)}g surface gravity. Canopy heights reach up to ${maxCanopyH}m with ${structuralBase.toLowerCase()} cellular architecture.`;
+  const summaryText = !isMulticellular
+    ? `${diversityTier}: ${speciesList.length} distinct unicellular autotrophic taxa identified. Autotrophs colonize land and seas as colored soil crusts and algal mats across Algal Plains (no tree models or arborescent canopies). Dominated by ${pigmentInfo.pigmentName} light harvesting under ${g.toFixed(2)}g surface gravity.`
+    : `${diversityTier}: ${speciesList.length} distinct autotrophic taxa identified. Dominated by ${pigmentInfo.pigmentName} light harvesting under ${g.toFixed(2)}g surface gravity. Canopy heights reach up to ${maxCanopyH}m with ${structuralBase.toLowerCase()} cellular architecture.`;
 
   return {
     hasPlantLife: true,

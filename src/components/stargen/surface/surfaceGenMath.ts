@@ -80,6 +80,8 @@ export interface PlanetarySurfaceModel {
   isMoltenWorld: boolean;
   hasActiveGeology: boolean;
   hasBiosphere: boolean;
+  isMulticellularLife: boolean;
+  isUnicellularOnly: boolean;
   hasWaterLife: boolean;
   floraPalette: FloraPigmentPalette;
   compositionPalette: CrustCompositionPalette;
@@ -1624,6 +1626,15 @@ export function generatePlanetarySurfaceModel(
 
   // Biosphere & planetary composition palette
   const hasBiosphere = Boolean(!isNoSurface && hydro?.biosphere);
+  const bioDesc = (hydro?.biosphere || '').toLowerCase();
+  const isMulticellularLife = Boolean(
+    hasBiosphere &&
+      (bioDesc.includes('multicellular') ||
+        (!bioDesc.includes('unicellular') &&
+          !bioDesc.includes('microbial') &&
+          ((zone as { age?: number } | null | undefined)?.age ?? 4.5) >= 3.0))
+  );
+  const isUnicellularOnly = Boolean(hasBiosphere && !isMulticellularLife);
   const tidalW = (activeBody as { tidalW?: number }).tidalW ?? 0;
 
   const rawCompositionPalette = deriveCrustCompositionPalette({
@@ -3517,6 +3528,8 @@ export function generatePlanetarySurfaceModel(
     isMoltenWorld,
     hasActiveGeology,
     hasBiosphere,
+    isMulticellularLife,
+    isUnicellularOnly,
     hasWaterLife,
     floraPalette,
     compositionPalette,
@@ -5031,18 +5044,27 @@ export function sampleSurfacePoint(
     // Dynamic flora or sterile regolith biome naming & coloring
     const fp = model.floraPalette;
     const isAmmoniaLife = model.seaPalette.solventKey === 'NH3-H2O' && fp.hasAnyLife;
+    const isUnicellular = model.isUnicellularOnly;
     if (fp.hasAnyLife) {
       if (biomeId === 3) {
-        biomeName = isAmmoniaLife ? 'Cryo-Ammonia Coastal Marsh' : 'Coastal Marsh & Mangrove Forest';
+        biomeName = isUnicellular
+          ? (isAmmoniaLife ? 'Cryo-Ammonia Coastal Algal Mat Basin' : 'Coastal Algal Mat Basin')
+          : (isAmmoniaLife ? 'Cryo-Ammonia Coastal Marsh' : 'Coastal Marsh & Mangrove Forest');
         biomeColor = fp.marshHex;
       } else if (biomeId === 4) {
-        biomeName = isAmmoniaLife ? 'Cryo-Ammonia Grassland' : 'Grassland';
+        biomeName = isUnicellular
+          ? (isAmmoniaLife ? 'Cryo-Ammonia Microbial Soil Crust' : 'Microbial Soil Crust / Algal Steppe')
+          : (isAmmoniaLife ? 'Cryo-Ammonia Grassland' : 'Grassland');
         biomeColor = fp.plainsHex;
       } else if (biomeId === 5) {
-        biomeName = isAmmoniaLife ? 'Cryo-Ammonia Forest' : 'Forest';
+        biomeName = isUnicellular
+          ? (isAmmoniaLife ? 'Cryo-Ammonia Algal Plains' : 'Algal Plains')
+          : (isAmmoniaLife ? 'Cryo-Ammonia Forest' : 'Forest');
         biomeColor = fp.woodlandHex;
       } else {
-        biomeName = isAmmoniaLife ? 'Cryo-Ammonia Boreal Forest' : 'Boreal Forest';
+        biomeName = isUnicellular
+          ? (isAmmoniaLife ? 'Cryo-Ammonia Sub-Polar Algal Plains' : 'Sub-Polar Algal Plains')
+          : (isAmmoniaLife ? 'Cryo-Ammonia Boreal Forest' : 'Boreal Forest');
         biomeColor = fp.taigaHex;
       }
     } else {

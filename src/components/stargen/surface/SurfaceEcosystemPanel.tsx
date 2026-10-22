@@ -155,9 +155,13 @@ export const SurfaceEcosystemPanel: React.FC<SurfaceEcosystemPanelProps> = ({
         </div>
 
         <div>
-          <span className="text-slate-500 block text-[9px] uppercase tracking-wider">Canopy Height Range</span>
+          <span className="text-slate-500 block text-[9px] uppercase tracking-wider">
+            {ecosystem.isMulticellular ? 'Canopy Height Range' : 'Flora Profile'}
+          </span>
           <b className="text-sky-300 block mt-0.5">
-            {ecosystem.canopyHeightRangeM.min}m – {ecosystem.canopyHeightRangeM.max}m
+            {ecosystem.isMulticellular
+              ? `${ecosystem.canopyHeightRangeM.min}m – ${ecosystem.canopyHeightRangeM.max}m`
+              : 'Flat Soil Crust (<5cm)'}
           </b>
         </div>
 
@@ -270,7 +274,10 @@ export const SurfaceEcosystemPanel: React.FC<SurfaceEcosystemPanelProps> = ({
                       {/* Height & Structure */}
                       <td className="py-2.5 px-3">
                         <div className="font-bold text-sky-300">
-                          {species.averageHeightM}m tall <span className="text-slate-400 font-normal">× {species.averageSpreadM}m</span>
+                          {species.averageHeightM < 0.1
+                            ? `${(species.averageHeightM * 100).toFixed(1)}cm crust`
+                            : `${species.averageHeightM}m tall`}{' '}
+                          <span className="text-slate-400 font-normal">× {species.averageSpreadM}m</span>
                         </div>
                         <span className="text-[9px] text-slate-400 block truncate max-w-[140px]" title={species.structuralPolymer}>
                           {species.structuralPolymer}

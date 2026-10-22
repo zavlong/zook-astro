@@ -753,6 +753,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         }
       } else if (hasBioB) {
         const isForestBiome = targetBiomeId === 5 || targetBiomeId === 6;
+        const isUnicellular = surfaceModel.isUnicellularOnly;
         const canopyDensity = Math.max(
           0,
           Math.min(1, baseFbm * 1.18 + (targetBiomeId === 5 ? 0.34 : targetBiomeId === 6 ? 0.22 : -0.14))
@@ -761,7 +762,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
         const crownRadius = (isForestBiome ? 0.32 : 0.22) + canopyDensity * 0.26;
         const treeRgb = targetBiomeId === 6 ? taigaRgb : isForestBiome ? forestRgb : plainsRgb;
 
-        if (cell.dist < crownRadius && slope < 0.52 && hLocal > 0.018 && hLocal < 0.29) {
+        // Tree models and canopies only spawn on multicellular worlds. Unicellular worlds are flat algal plains with colored soil!
+        if (!isUnicellular && cell.dist < crownRadius && slope < 0.52 && hLocal > 0.018 && hLocal < 0.29) {
           const uCrown = cell.dist / crownRadius;
           const crownHeightProfile = Math.sqrt(Math.max(0, 1.0 - uCrown * uCrown));
           bumpX = (cell.dx / crownRadius) * 1.45 + (fine2 - 0.5) * 0.45;
