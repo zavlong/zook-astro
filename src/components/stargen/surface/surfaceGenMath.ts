@@ -1,4 +1,4 @@
-import { RealisticPlanetBody, RealisticPlanetaryZone } from '../../../core/generation/realisticStarGen';
+import { RealisticPlanetBody, RealisticPlanetaryZone, resolveHostStarForBody } from '../../../core/generation/realisticStarGen';
 import { RealisticMoon, RealisticStarNode, RealisticHydrosphere } from '../../../types/astrophysics';
 
 export interface SurfacePointTelemetry {
@@ -1486,7 +1486,20 @@ export function generatePlanetarySurfaceModel(
 ): PlanetarySurfaceModel {
   const isMoon = Boolean(moon);
   const activeBody = moon || planet;
-  const star = stars?.[0] || { Teff: 5778, colorHex: '#fff4e6', radius: 1.0, lumNum: 1.0 };
+  const resolved = resolveHostStarForBody(planet, zone, stars);
+  const star = resolved.star || {
+    label: planet.hostStarLabel || 'A',
+    category: planet.hostStarCategory || 'Main Sequence',
+    mass: 1.0,
+    lum: resolved.starLum,
+    lumNum: resolved.starLum,
+    radius: resolved.starRadius,
+    Teff: resolved.starTeff,
+    logg: 4.4,
+    tau: 1.0,
+    spectralType: planet.hostStarSpectralType || 'G2V',
+    colorHex: resolved.starColorHex,
+  };
   const cacheKey = isMoon
     ? `moon_${moon?.id || moon?.name}_${moon?.moonClass}_${moon?.radiusKm}_${moon?.gravityG}_${moon?.rockFrac}_${moon?.iceFrac}_${moon?.densityGcm3}_${moon?.surfaceTempK}_${moon?.pressureBar}_${moon?.hydrosphere?.coveragePct}_${star.Teff}`
     : `planet_${planet.a}_${planet.massEarth}_${planet.radiusEarth}_${planet.gravityG}_${planet.planetClass}_${planet.rockFrac}_${planet.iceFrac}_${planet.densityGcm3}_${planet.surfaceTempK}_${planet.pressureBar}_${planet.hydrosphere?.coveragePct}_${star.Teff}`;

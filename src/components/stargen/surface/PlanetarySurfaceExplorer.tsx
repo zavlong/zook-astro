@@ -38,6 +38,7 @@ import { PlanetaryChemistrySection } from './PlanetaryChemistrySection';
 import { SurfaceEcosystemPanel } from './SurfaceEcosystemPanel';
 import { generatePlantEcosystem } from '../../../core/xenobiology/floraGen';
 import { generateFungiEcosystem } from '../../../core/xenobiology/fungiGen';
+import { resolveHostStarForBody } from '../../../core/generation/realisticStarGen';
 
 interface PlanetarySurfaceExplorerProps {
   planet: RealisticPlanetBody;
@@ -87,6 +88,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     return generatePlanetarySurfaceModel(planet, moon, zone, stars);
   }, [planet, moon, zone, stars]);
 
+  const hostStarTeff = useMemo(() => {
+    return surfaceModel.starTeff || resolveHostStarForBody(planet, zone, stars).starTeff;
+  }, [surfaceModel, planet, zone, stars]);
+
   // Procedural Plant Ecosystem & Xenoflora
   const ecosystem = useMemo(() => {
     const coveragePct = (moon ? moon.hydrosphere?.coveragePct : planet.hydrosphere?.coveragePct) ?? (surfaceModel.hasLiquid ? 70 : 0);
@@ -99,7 +104,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       seed: surfaceModel.seed,
       hasBiosphere: surfaceModel.hasBiosphere,
       biosphereDescription: (moon ? moon.hydrosphere?.biosphere : planet.hydrosphere?.biosphere) || undefined,
-      starTeff: stars?.[0]?.Teff,
+      starTeff: hostStarTeff,
       gravityG: moon ? moon.gravityG : planet.gravityG,
       pressureBar: moon ? moon.pressureBar : planet.pressureBar,
       solventKey: surfaceModel.seaPalette?.solventKey || (moon ? moon.hydrosphere?.solvent : planet.hydrosphere?.solvent) || 'H2O',
@@ -109,7 +114,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       biomeGrid: surfaceModel.biomeGrid,
       surfaceTempK,
     });
-  }, [surfaceModel, planet, moon, stars]);
+  }, [surfaceModel, planet, moon, hostStarTeff]);
 
   // Procedural Fungi & Mycota Ecosystem
   const fungiEcosystem = useMemo(() => {
@@ -123,7 +128,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       seed: surfaceModel.seed,
       hasBiosphere: surfaceModel.hasBiosphere,
       biosphereDescription: (moon ? moon.hydrosphere?.biosphere : planet.hydrosphere?.biosphere) || undefined,
-      starTeff: stars?.[0]?.Teff,
+      starTeff: hostStarTeff,
       gravityG: moon ? moon.gravityG : planet.gravityG,
       pressureBar: moon ? moon.pressureBar : planet.pressureBar,
       solventKey: surfaceModel.seaPalette?.solventKey || (moon ? moon.hydrosphere?.solvent : planet.hydrosphere?.solvent) || 'H2O',
@@ -133,7 +138,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       biomeGrid: surfaceModel.biomeGrid,
       surfaceTempK,
     });
-  }, [surfaceModel, planet, moon, stars]);
+  }, [surfaceModel, planet, moon, hostStarTeff]);
 
   // Generate Goldberg Polyhedron (480 Hexagons + 12 Pentagons) planetary tile grid
   const goldbergGrid = useMemo<PlanetaryGoldbergGrid>(() => {

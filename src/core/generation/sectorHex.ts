@@ -583,6 +583,26 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
         }
       }
     }
+
+    const isNeutronOrBHSystem =
+      categoryStr.toLowerCase().includes('neutron') ||
+      categoryStr.toLowerCase().includes('black hole') ||
+      typeStr.includes('Neutron') ||
+      typeStr.includes('PSR') ||
+      typeStr.includes('Black Hole') ||
+      typeStr.includes('BH') ||
+      sysResult.hierarchy.stars.some((s) => {
+        const c = (s.category || '').toLowerCase();
+        const sp = (s.spectralType || '').toLowerCase();
+        return c.includes('neutron') || sp.includes('psr') || c.includes('black hole') || sp.includes('bh');
+      });
+
+    if (isNeutronOrBHSystem) {
+      candidateHabitable = false;
+      habitableWorldCount = 0;
+      habitableTypesSet.clear();
+    }
+
     if (candidateHabitable) habitableCount++;
     const habitableTypes = Array.from(habitableTypesSet);
 

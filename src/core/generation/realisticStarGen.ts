@@ -82,6 +82,14 @@ export interface RealisticZoneInput {
   feh: number;
   a_in: number;
   a_out: number;
+  starTeff?: number;
+  starCategory?: string;
+  starSpectralType?: string;
+  starLabel?: string;
+  starColorHex?: string;
+  remnantType?: 'Neutron Star' | 'Black Hole' | 'White Dwarf' | null;
+  systemHasNeutronStar?: boolean;
+  systemHasWhiteDwarf?: boolean;
 }
 
 export interface RealisticBeltBody {
@@ -150,6 +158,12 @@ export interface RealisticPlanetBody {
   spinState: string;
   axialTiltDeg: number;
   magneticField: RealisticMagneticField;
+  hostStarTeff?: number;
+  hostStarCategory?: string;
+  hostStarSpectralType?: string;
+  hostStarLabel?: string;
+  hostStarColorHex?: string;
+  zoneIdx?: number;
 }
 
 export type RealisticPlanetOrBelt = RealisticBeltBody | RealisticPlanetBody;
@@ -165,6 +179,12 @@ export interface RealisticPlanetaryZone {
   probs: { A: number; B: number; C: number; D: number };
   diskMassEarth: number;
   bodies: RealisticPlanetOrBelt[];
+  starTeff?: number;
+  starCategory?: string;
+  starSpectralType?: string;
+  starLabel?: string;
+  starColorHex?: string;
+  remnantType?: 'Neutron Star' | 'Black Hole' | 'White Dwarf' | null;
 }
 
 export interface RealisticHierarchyResult {
@@ -467,6 +487,118 @@ export function getStarStats(
   };
 }
 
+export function getStarRemnantType(
+  cat?: string,
+  spec?: string
+): 'Neutron Star' | 'Black Hole' | 'White Dwarf' | null {
+  const c = (cat || '').toLowerCase();
+  const s = (spec || '').toLowerCase();
+  if (c.includes('neutron') || s.includes('psr') || s.includes('ns')) return 'Neutron Star';
+  if (c.includes('black hole') || s.includes('bh')) return 'Black Hole';
+  if (c.includes('white dwarf') || s.startsWith('da') || s.startsWith('dc') || s.startsWith('wd') || c.includes('wd')) return 'White Dwarf';
+  return null;
+}
+
+export function resolveHostStarForBody(
+  planet?: RealisticPlanetBody | null,
+  zone?: RealisticPlanetaryZone | RealisticZoneInput | null,
+  stars?: RealisticStarNode[] | null
+): {
+  starTeff: number;
+  starColorHex: string;
+  starRadius: number;
+  starLum: number;
+  star?: RealisticStarNode;
+} {
+  // 1. If planet explicitly has hostStarTeff
+  if (planet?.hostStarTeff) {
+    const matchingStar = stars?.find(
+      (s) => (planet.hostStarLabel && s.label === planet.hostStarLabel) || s.Teff === planet.hostStarTeff
+    );
+    return {
+      starTeff: planet.hostStarTeff,
+      starColorHex: matchingStar?.colorHex || planet.hostStarColorHex || '#fff4e6',
+      starRadius: matchingStar?.radius || 1.0,
+      starLum: matchingStar?.lumNum || 1.0,
+      star: matchingStar,
+    };
+  }
+
+  // 2. If zone has starTeff
+  if (zone?.starTeff) {
+    const matchingStar = stars?.find(
+      (s) => (zone.starLabel && s.label === zone.starLabel) || s.Teff === zone.starTeff
+    );
+    return {
+      starTeff: zone.starTeff,
+      starColorHex: matchingStar?.colorHex || zone.starColorHex || '#fff4e6',
+      starRadius: matchingStar?.radius || 1.0,
+      starLum: matchingStar?.lumNum || 1.0,
+      star: matchingStar,
+    };
+  }
+
+  // 3. If zone title indicates which star (e.g. "Star B (M4V)" or "Circumbinary AB")
+  if (zone?.title) {
+    const starMatch = zone.title.match(/^Star\s+([A-D])/);
+    if (starMatch && stars) {
+      const targetLabel = starMatch[1];
+      const found = stars.find((s) => s.label === targetLabel);
+      if (found) {
+        return {
+          starTeff: found.Teff,
+          starColorHex: found.colorHex,
+          starRadius: found.radius,
+          starLum: found.lumNum,
+          star: found,
+        };
+      }
+    }
+
+    const circMatch = zone.title.match(/^Circumbinary\s+([A-D]+)/);
+    if (circMatch && stars) {
+      const pairLabels = circMatch[1].split('');
+      const matchedStars = stars.filter((s) => pairLabels.includes(s.label));
+      if (matchedStars.length > 0) {
+        const totLum = matchedStars.reduce((acc, s) => acc + s.lumNum, 0);
+        const wTeff = Math.round(
+          matchedStars.reduce((acc, s) => acc + s.lumNum * s.Teff, 0) / Math.max(1e-6, totLum)
+        );
+        const leadStar = matchedStars.reduce((prev, curr) => (curr.lumNum > prev.lumNum ? curr : prev));
+        return {
+          starTeff: wTeff,
+          starColorHex: leadStar.colorHex,
+          starRadius: leadStar.radius,
+          starLum: totLum,
+          star: leadStar,
+        };
+      }
+    }
+  }
+
+  // 4. If planet has zoneIdx and stars[zoneIdx] exists
+  if (planet?.zoneIdx !== undefined && stars && stars[planet.zoneIdx]) {
+    const s = stars[planet.zoneIdx];
+    return {
+      starTeff: s.Teff,
+      starColorHex: s.colorHex,
+      starRadius: s.radius,
+      starLum: s.lumNum,
+      star: s,
+    };
+  }
+
+  // 5. Fallback to system primary star
+  const prim = stars?.[0];
+  return {
+    starTeff: prim?.Teff ?? 5778,
+    starColorHex: prim?.colorHex ?? '#fff4e6',
+    starRadius: prim?.radius ?? 1.0,
+    starLum: prim?.lumNum ?? 1.0,
+    star: prim,
+  };
+}
+
 export function buildHierarchy(
   sysMass: number,
   age: number,
@@ -478,6 +610,7 @@ export function buildHierarchy(
   const lbls = ['A', 'B', 'C', 'D'];
   if (nStars === 1) {
     const sA = getStarStats(sysMass, age, feh, 'A');
+    const rem = getStarRemnantType(sA.category, sA.spectralType);
     return {
       archName: 'Single Star',
       stars: [sA],
@@ -491,6 +624,14 @@ export function buildHierarchy(
           feh,
           a_in: +Math.max(0.015, 0.055 * Math.sqrt(sA.lumNum)).toFixed(4),
           a_out: +(50.0 * Math.pow(sA.mass, 0.55)).toFixed(2),
+          starTeff: sA.Teff,
+          starCategory: sA.category,
+          starSpectralType: sA.spectralType,
+          starLabel: sA.label,
+          starColorHex: sA.colorHex,
+          remnantType: rem,
+          systemHasNeutronStar: rem === 'Neutron Star' || rem === 'Black Hole',
+          systemHasWhiteDwarf: rem === 'White Dwarf',
         },
       ],
     };
@@ -558,13 +699,23 @@ export function buildHierarchy(
     stars.push(getStarStats(masses[s], age, feh, lbls[s]));
   }
 
+  const systemHasNeutronStar = stars.some(
+    (s) => {
+      const rem = getStarRemnantType(s.category, s.spectralType);
+      return rem === 'Neutron Star' || rem === 'Black Hole';
+    }
+  );
+  const systemHasWhiteDwarf = stars.some(
+    (s) => getStarRemnantType(s.category, s.spectralType) === 'White Dwarf'
+  );
+
   const splits: RealisticBinarySplit[] = [];
   const zones: RealisticZoneInput[] = [];
 
   function evalNode(
     name: string,
-    bA: { mass: number; lumNum: number },
-    bB: { mass: number; lumNum: number },
+    bA: { mass: number; lumNum: number; Teff?: number; colorHex?: string; category?: string; spectralType?: string },
+    bB: { mass: number; lumNum: number; Teff?: number; colorHex?: string; category?: string; spectralType?: string },
     aBin: number,
     capAU?: number
   ) {
@@ -621,6 +772,22 @@ export function buildHierarchy(
       pMin: +pM.toFixed(2),
     });
 
+    const teffA = bA.Teff ?? 5778;
+    const teffB = bB.Teff ?? 5778;
+    const lumA = bA.lumNum ?? 1;
+    const lumB = bB.lumNum ?? 1;
+    const combTeff = Math.round((lumA * teffA + lumB * teffB) / Math.max(1e-6, lumA + lumB));
+    const remA = getStarRemnantType(bA.category, bA.spectralType);
+    const remB = getStarRemnantType(bB.category, bB.spectralType);
+    const pRemType =
+      remA === 'Neutron Star' || remB === 'Neutron Star'
+        ? 'Neutron Star'
+        : remA === 'Black Hole' || remB === 'Black Hole'
+        ? 'Black Hole'
+        : remA === 'White Dwarf' || remB === 'White Dwarf'
+        ? 'White Dwarf'
+        : null;
+
     const pIn = Math.max(0.02, 0.055 * Math.sqrt(lTot), pM);
     const pOut = Math.min(capAU || 1e9, 50.0 * Math.pow(mTot, 0.55));
     const pZone: RealisticZoneInput | null =
@@ -633,6 +800,14 @@ export function buildHierarchy(
             feh,
             a_in: +pIn.toFixed(4),
             a_out: +pOut.toFixed(2),
+            starTeff: combTeff,
+            starCategory: `Circumbinary ${name}`,
+            starSpectralType: 'Circumbinary Pair',
+            starLabel: name,
+            starColorHex: bA.colorHex || '#fff4e6',
+            remnantType: pRemType,
+            systemHasNeutronStar,
+            systemHasWhiteDwarf,
           }
         : null;
     return { sA: Math.max(0, sA), sB: Math.max(0, sB), pZone };
@@ -642,6 +817,7 @@ export function buildHierarchy(
     const aIn = Math.max(0.015, 0.055 * Math.sqrt(st.lumNum));
     const nat = 50.0 * Math.pow(st.mass, 0.55);
     const aOut = Math.min(nat, cap);
+    const remType = getStarRemnantType(st.category, st.spectralType);
     if (aOut / aIn >= 2.2) {
       zones.push({
         title: `Star ${st.label} (${st.spectralType})`,
@@ -651,6 +827,14 @@ export function buildHierarchy(
         feh,
         a_in: +aIn.toFixed(4),
         a_out: +aOut.toFixed(2),
+        starTeff: st.Teff,
+        starCategory: st.category,
+        starSpectralType: st.spectralType,
+        starLabel: st.label,
+        starColorHex: st.colorHex,
+        remnantType: remType,
+        systemHasNeutronStar,
+        systemHasWhiteDwarf,
       });
     }
   }
@@ -785,6 +969,7 @@ export function buildCustomHierarchy(
 
   if (nStars === 1) {
     const sA = stars[0];
+    const rem = getStarRemnantType(sA.category, sA.spectralType);
     return {
       archName: 'Single Star (Pre-Programmed)',
       stars: [sA],
@@ -798,18 +983,34 @@ export function buildCustomHierarchy(
           feh,
           a_in: +Math.max(0.015, 0.055 * Math.sqrt(sA.lumNum)).toFixed(4),
           a_out: +(50.0 * Math.pow(sA.mass, 0.55)).toFixed(2),
+          starTeff: sA.Teff,
+          starCategory: sA.category,
+          starSpectralType: sA.spectralType,
+          starLabel: sA.label,
+          starColorHex: sA.colorHex,
+          remnantType: rem,
+          systemHasNeutronStar: rem === 'Neutron Star' || rem === 'Black Hole',
+          systemHasWhiteDwarf: rem === 'White Dwarf',
         },
       ],
     };
   }
+
+  const systemHasNeutronStar = stars.some((s) => {
+    const rem = getStarRemnantType(s.category, s.spectralType);
+    return rem === 'Neutron Star' || rem === 'Black Hole';
+  });
+  const systemHasWhiteDwarf = stars.some(
+    (s) => getStarRemnantType(s.category, s.spectralType) === 'White Dwarf'
+  );
 
   const splits: RealisticBinarySplit[] = [];
   const zones: RealisticZoneInput[] = [];
 
   function evalCustomNode(
     name: string,
-    bA: { mass: number; lumNum: number },
-    bB: { mass: number; lumNum: number },
+    bA: { mass: number; lumNum: number; Teff?: number; colorHex?: string; category?: string; spectralType?: string },
+    bB: { mass: number; lumNum: number; Teff?: number; colorHex?: string; category?: string; spectralType?: string },
     splitCfg?: CustomBinarySplitInput,
     defaultSep = 25.0,
     capAU?: number
@@ -867,6 +1068,22 @@ export function buildCustomHierarchy(
       pMin: +pM.toFixed(2),
     });
 
+    const teffA = bA.Teff ?? 5778;
+    const teffB = bB.Teff ?? 5778;
+    const lumA = bA.lumNum ?? 1;
+    const lumB = bB.lumNum ?? 1;
+    const combTeff = Math.round((lumA * teffA + lumB * teffB) / Math.max(1e-6, lumA + lumB));
+    const remA = getStarRemnantType(bA.category, bA.spectralType);
+    const remB = getStarRemnantType(bB.category, bB.spectralType);
+    const pRemType =
+      remA === 'Neutron Star' || remB === 'Neutron Star'
+        ? 'Neutron Star'
+        : remA === 'Black Hole' || remB === 'Black Hole'
+        ? 'Black Hole'
+        : remA === 'White Dwarf' || remB === 'White Dwarf'
+        ? 'White Dwarf'
+        : null;
+
     const pIn = Math.max(0.02, 0.055 * Math.sqrt(lTot), pM);
     const pOut = Math.min(capAU || 1e9, 50.0 * Math.pow(mTot, 0.55));
     const pZone: RealisticZoneInput | null =
@@ -879,6 +1096,14 @@ export function buildCustomHierarchy(
             feh,
             a_in: +pIn.toFixed(4),
             a_out: +pOut.toFixed(2),
+            starTeff: combTeff,
+            starCategory: `Circumbinary ${name}`,
+            starSpectralType: 'Circumbinary Pair',
+            starLabel: name,
+            starColorHex: bA.colorHex || '#fff4e6',
+            remnantType: pRemType,
+            systemHasNeutronStar,
+            systemHasWhiteDwarf,
           }
         : null;
     return { sA: Math.max(0, sA), sB: Math.max(0, sB), pZone };
@@ -888,6 +1113,7 @@ export function buildCustomHierarchy(
     const aIn = Math.max(0.015, 0.055 * Math.sqrt(st.lumNum));
     const nat = 50.0 * Math.pow(st.mass, 0.55);
     const aOut = Math.min(nat, cap);
+    const remType = getStarRemnantType(st.category, st.spectralType);
     if (aOut / aIn >= 2.2) {
       zones.push({
         title: `Star ${st.label} (${st.spectralType})`,
@@ -897,6 +1123,14 @@ export function buildCustomHierarchy(
         feh,
         a_in: +aIn.toFixed(4),
         a_out: +aOut.toFixed(2),
+        starTeff: st.Teff,
+        starCategory: st.category,
+        starSpectralType: st.spectralType,
+        starLabel: st.label,
+        starColorHex: st.colorHex,
+        remnantType: remType,
+        systemHasNeutronStar,
+        systemHasWhiteDwarf,
       });
     }
   }
@@ -962,6 +1196,7 @@ export function buildCustomHierarchy(
   // Fallback stability zone if custom binary separations destabilized all inner/outer zones
   if (zones.length === 0) {
     const sA = stars[0];
+    const rem = getStarRemnantType(sA.category, sA.spectralType);
     zones.push({
       title: `Star A (${sA.spectralType})`,
       mass: sA.mass,
@@ -970,6 +1205,14 @@ export function buildCustomHierarchy(
       feh,
       a_in: +Math.max(0.015, 0.055 * Math.sqrt(sA.lumNum)).toFixed(4),
       a_out: +(50.0 * Math.pow(sA.mass, 0.55)).toFixed(2),
+      starTeff: sA.Teff,
+      starCategory: sA.category,
+      starSpectralType: sA.spectralType,
+      starLabel: sA.label,
+      starColorHex: sA.colorHex,
+      remnantType: rem,
+      systemHasNeutronStar,
+      systemHasWhiteDwarf,
     });
   }
 
@@ -1239,6 +1482,21 @@ export function generateZoneSystem(
   rng?: PRNG
 ): RealisticPlanetaryZone {
   const { random, rand, randInt } = makeRngHelpers(rng);
+
+  const isNeutronOrBH =
+    Boolean(z.systemHasNeutronStar) ||
+    z.remnantType === 'Neutron Star' ||
+    z.remnantType === 'Black Hole' ||
+    Boolean(z.starCategory && (z.starCategory.includes('Neutron Star') || z.starCategory.includes('Black Hole'))) ||
+    Boolean(z.title && (z.title.includes('Neutron Star') || z.title.includes('PSR') || z.title.includes('Black Hole')));
+
+  const isWhiteDwarf =
+    !isNeutronOrBH &&
+    (Boolean(z.systemHasWhiteDwarf) ||
+      z.remnantType === 'White Dwarf' ||
+      Boolean(z.starCategory && z.starCategory.includes('White Dwarf')) ||
+      Boolean(z.title && (z.title.includes('White Dwarf') || z.title.includes('DA') || z.title.includes('DC'))));
+
   const a_snow = Math.max(0.04, 2.7 * Math.sqrt(z.lum));
   const M_sol = Math.pow(z.mass, 0.8) * Math.pow(10, z.feh);
   const lnM = Math.log(Math.max(1e-4, M_sol));
@@ -2201,19 +2459,24 @@ export function generateZoneSystem(
               0.0002,
               avCO2
             );
-            const bio = z.age >= 1.5 && pC < 1.5 && random() < 0.65;
+            const bioChance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.025 : 0.65;
+            const bio = z.age >= 1.5 && pC < 1.5 && random() < bioChance;
             if (bio) {
-              const isShielded = magField.shieldingEfficiencyPct >= 50;
-              if (isShielded) {
-                biosphereDesc =
-                  z.age >= 3.0
-                    ? 'Active Multicellular Aerobic (O2-N2) Continental & Marine Biosphere'
-                    : 'Active Unicellular Microbial (Archaean/Prokaryotic) Continental & Marine Biosphere';
+              if (isWhiteDwarf) {
+                biosphereDesc = 'Active Unicellular Radiotolerant Microbial Biosphere (White Dwarf Relic)';
               } else {
-                biosphereDesc =
-                  z.age >= 3.0
-                    ? 'Active Multicellular Pelagic & Benthic Marine Biosphere (Radiotolerant Terrestrial Algal Mats)'
-                    : 'Active Unicellular Radiotolerant Terrestrial & Marine Microbial Biosphere (High Radiation Crusts)';
+                const isShielded = magField.shieldingEfficiencyPct >= 50;
+                if (isShielded) {
+                  biosphereDesc =
+                    z.age >= 3.0
+                      ? 'Active Multicellular Aerobic (O2-N2) Continental & Marine Biosphere'
+                      : 'Active Unicellular Microbial (Archaean/Prokaryotic) Continental & Marine Biosphere';
+                } else {
+                  biosphereDesc =
+                    z.age >= 3.0
+                      ? 'Active Multicellular Pelagic & Benthic Marine Biosphere (Radiotolerant Terrestrial Algal Mats)'
+                      : 'Active Unicellular Radiotolerant Terrestrial & Marine Microbial Biosphere (High Radiation Crusts)';
+                }
               }
             }
             pO = bio ? pN * rand(0.18, 0.32) : 0;
@@ -2249,18 +2512,23 @@ export function generateZoneSystem(
             0.0005,
             Math.min(5.5, avCO2)
           );
-          const bioPelagic = z.age >= 1.5 && pC < 6.0 && random() < 0.58;
+          const bioPelagicChance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.02 : 0.58;
+          const bioPelagic = z.age >= 1.5 && pC < 6.0 && random() < bioPelagicChance;
           if (bioPelagic) {
             pO = pN * rand(0.1, 0.24);
-            const isShielded = magField.shieldingEfficiencyPct >= 50;
-            biosphereDesc =
-              z.age >= 3.0
-                ? isShielded
-                  ? 'Active Multicellular Pelagic Marine Biosphere'
-                  : 'Active Multicellular Deep-Pelagic Ocean Biosphere (Surface Unshielded / Radiation Filtered Below 30m)'
-                : isShielded
-                ? 'Active Unicellular Pelagic Microbial Biosphere'
-                : 'Active Unicellular Deep-Water Microbial Biosphere (Cosmic Ray Attenuation)';
+            if (isWhiteDwarf) {
+              biosphereDesc = 'Active Unicellular Deep-Water Microbial Biosphere (White Dwarf Relic)';
+            } else {
+              const isShielded = magField.shieldingEfficiencyPct >= 50;
+              biosphereDesc =
+                z.age >= 3.0
+                  ? isShielded
+                    ? 'Active Multicellular Pelagic Marine Biosphere'
+                    : 'Active Multicellular Deep-Pelagic Ocean Biosphere (Surface Unshielded / Radiation Filtered Below 30m)'
+                  : isShielded
+                  ? 'Active Unicellular Pelagic Microbial Biosphere'
+                  : 'Active Unicellular Deep-Water Microbial Biosphere (Cosmic Ray Attenuation)';
+            }
           }
           atmoType = bioPelagic
             ? 'Biogenic N2-O2-H2O Pelagic Sky (Marine Biosphere)'
@@ -2285,14 +2553,16 @@ export function generateZoneSystem(
             pC = pC_nh3;
             const isContinentalNH3 = b.iceFrac < 0.04;
             const hasIcebergContinents = !isContinentalNH3 && (Tsub < 242 || random() < 0.78);
-            const bioNH3 = z.age >= 2.0 && random() < 0.28;
+            const bioNH3Chance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.008 : 0.28;
+            const bioNH3 = z.age >= 2.0 && random() < bioNH3Chance;
             if (bioNH3) {
               const pM_bio = +clamp(pM * rand(1.3, 2.2), 0.006, 0.45).toFixed(4);
               if (Teq + ghDelta(pC, pN, pH, pM_bio, 0, pNH3, 0, Teq, grav) <= 265) {
                 pM = pM_bio;
               }
-              const bioNH3Complex =
-                z.age >= 3.5 && random() < 0.45 ? 'Multicellular' : 'Unicellular';
+              const bioNH3Complex = isWhiteDwarf
+                ? 'Unicellular'
+                : z.age >= 3.5 && random() < 0.45 ? 'Multicellular' : 'Unicellular';
               const isShielded = magField.shieldingEfficiencyPct >= 50;
               biosphereDesc = isContinentalNH3
                 ? isShielded
@@ -2378,10 +2648,12 @@ export function generateZoneSystem(
             pNH3 = Math.max(pNH3, +(pN * 0.025).toFixed(4));
             const isContinentalNH3 = b.iceFrac < 0.04;
             const hasIcebergContinents = !isContinentalNH3 && (Touter < 242 || random() < 0.78);
-            const bioNH3 = z.age >= 2.0 && random() < 0.25;
+            const bioNH3OuterChance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.008 : 0.25;
+            const bioNH3 = z.age >= 2.0 && random() < bioNH3OuterChance;
             if (bioNH3) {
-              const bioNH3Complex =
-                z.age >= 3.5 && random() < 0.42 ? 'Multicellular' : 'Unicellular';
+              const bioNH3Complex = isWhiteDwarf
+                ? 'Unicellular'
+                : z.age >= 3.5 && random() < 0.42 ? 'Multicellular' : 'Unicellular';
               const isShielded = magField.shieldingEfficiencyPct >= 50;
               biosphereDesc = isContinentalNH3
                 ? isShielded
@@ -3269,12 +3541,14 @@ export function generateZoneSystem(
           mPBar = +(pN + pNH3_m + pM).toFixed(3);
           mGhK = ghTest;
           mTsurf = tTest;
-          const mBioNH3 = z.age >= 2.0 && random() < 0.24;
+          const mBioNH3Chance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.008 : 0.24;
+          const mBioNH3 = z.age >= 2.0 && random() < mBioNH3Chance;
           if (mBioNH3) {
-            mBioDesc =
-              z.age >= 3.5 && random() < 0.40
-                ? 'Active Multicellular Exomoon Ammoniated (NH3-H2O) Cryo-Biosphere'
-                : 'Active Unicellular Exomoon Ammoniated Cryo-Microbial Biosphere';
+            mBioDesc = isWhiteDwarf
+              ? 'Active Unicellular Exomoon Ammoniated Cryo-Microbial Biosphere (White Dwarf Relic)'
+              : z.age >= 3.5 && random() < 0.40
+              ? 'Active Multicellular Exomoon Ammoniated (NH3-H2O) Cryo-Biosphere'
+              : 'Active Unicellular Exomoon Ammoniated Cryo-Microbial Biosphere';
             mAtmoType = 'N2-NH3-CH4 Exomoon Cryo-Biosphere Sky (Ammonia Life)';
             mc = 'Cryo-Ammonia Habitable Exomoon';
           } else {
@@ -3324,12 +3598,14 @@ export function generateZoneSystem(
           const pSatW = 1.013 * Math.exp(13.7 * (1 - 373.15 / targetT));
           const pW = +Math.max(pSatW, pN * (iceF >= 0.08 ? 0.05 : 0.025)).toFixed(3);
           const pC = solveCO2ForTargetTemp(targetT, mTatm, pN, 0, 0, pW, 0, 0, mGrav, 0.0005, 2.5);
-          const pO = z.age >= 1.5 && pC < 1.2 && random() < 0.65 ? +(pN * rand(0.15, 0.28)).toFixed(3) : 0;
+          const mBioWaterChance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.02 : 0.65;
+          const pO = z.age >= 1.5 && pC < 1.2 && random() < mBioWaterChance ? +(pN * rand(0.15, 0.28)).toFixed(3) : 0;
           if (pO > 0) {
-            mBioDesc =
-              z.age >= 3.0
-                ? 'Active Multicellular Exomoon Aerobic O2-N2 Biosphere'
-                : 'Active Unicellular Exomoon Microbial Biosphere';
+            mBioDesc = isWhiteDwarf
+              ? 'Active Unicellular Exomoon Microbial Relic Biosphere (Radiotolerant)'
+              : z.age >= 3.0
+              ? 'Active Multicellular Exomoon Aerobic O2-N2 Biosphere'
+              : 'Active Unicellular Exomoon Microbial Biosphere';
           }
           mPBar = +(pN + pC + pO + pW).toFixed(3);
           mGhK = +ghDelta(pC, pN, 0, 0, pW, 0, 0, mTatm, mGrav).toFixed(1);
@@ -3629,6 +3905,7 @@ export function generateZoneSystem(
         spinState: mSpinState,
         axialTiltDeg: +(orig === 'Captured' ? rand(12, 65) : rand(0.1, 2.5)).toFixed(1),
         magneticField: moonMagField,
+        hostStarTeff: z.starTeff,
       };
     }
 
@@ -3750,6 +4027,11 @@ export function generateZoneSystem(
       spinState: spinSt,
       axialTiltDeg: tilt,
       magneticField: magField,
+      hostStarTeff: z.starTeff,
+      hostStarCategory: z.starCategory,
+      hostStarSpectralType: z.starSpectralType,
+      hostStarLabel: z.starLabel,
+      hostStarColorHex: z.starColorHex,
     });
   }
 
@@ -3764,6 +4046,12 @@ export function generateZoneSystem(
     probs,
     diskMassEarth: Math.round(diskEarth),
     bodies: finalBodies,
+    starTeff: z.starTeff,
+    starCategory: z.starCategory,
+    starSpectralType: z.starSpectralType,
+    starLabel: z.starLabel,
+    starColorHex: z.starColorHex,
+    remnantType: z.remnantType,
   };
 }
 
@@ -3935,6 +4223,11 @@ export function runRealisticGenerator(
   const pZones: RealisticPlanetaryZone[] = [];
   for (let i = 0; i < h.zones.length; i++) {
     const gz = generateZoneSystem(h.zones[i], rng);
+    gz.bodies.forEach((b) => {
+      if (b.kind === 'planet') {
+        b.zoneIdx = i;
+      }
+    });
     pZones.push(gz);
   }
   return {

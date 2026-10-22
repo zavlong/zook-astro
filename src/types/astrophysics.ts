@@ -116,6 +116,7 @@ export interface RealisticMoon {
   spinState: string;
   axialTiltDeg: number;
   magneticField?: RealisticMagneticField;
+  hostStarTeff?: number;
 }
 
 export interface RealisticBinarySplit {

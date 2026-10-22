@@ -40,6 +40,7 @@ import {
   getMoonVisualColor,
   getPlanetVisualColor,
   sanitizeRealisticSystem,
+  resolveHostStarForBody,
 } from '../../../core/generation/realisticStarGen';
 import {
   resolvePlanetClass,
@@ -149,6 +150,10 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
   const magField = isMoon && activeMoon ? activeMoon.magneticField : hostPlanet.magneticField;
   const sysAge = systemResult?.step1?.age ?? 4.5;
 
+  const hostStarTeff = useMemo(() => {
+    return resolveHostStarForBody(hostPlanet, zone, systemResult?.hierarchy?.stars).starTeff;
+  }, [hostPlanet, zone, systemResult]);
+
   const planetEcosystem = useMemo(() => {
     const seed = isMoon && activeMoon
       ? Math.round(activeMoon.radiusKm * 31 + (activeMoon.surfaceTempK || 200))
@@ -162,7 +167,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
       hasBiosphere: Boolean(hydro?.biosphere),
       biosphereDescription: hydro?.biosphere || undefined,
       systemAgeGyr: sysAge,
-      starTeff: systemResult.hierarchy.stars[0]?.Teff,
+      starTeff: hostStarTeff,
       gravityG: isMoon && activeMoon ? activeMoon.gravityG : hostPlanet.gravityG,
       pressureBar: pBar,
       solventKey: hydro?.solvent || 'H2O',
@@ -171,7 +176,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
       coveragePct: covPct,
       surfaceTempK: Tsurf,
     });
-  }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, systemResult, pBar, Tsurf]);
+  }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, hostStarTeff, pBar, Tsurf]);
 
   const planetFungi = useMemo(() => {
     const seed = isMoon && activeMoon
@@ -186,7 +191,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
       hasBiosphere: Boolean(hydro?.biosphere),
       biosphereDescription: hydro?.biosphere || undefined,
       systemAgeGyr: sysAge,
-      starTeff: systemResult.hierarchy.stars[0]?.Teff,
+      starTeff: hostStarTeff,
       gravityG: isMoon && activeMoon ? activeMoon.gravityG : hostPlanet.gravityG,
       pressureBar: pBar,
       solventKey: hydro?.solvent || 'H2O',
@@ -195,7 +200,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
       coveragePct: covPct,
       surfaceTempK: Tsurf,
     });
-  }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, systemResult, pBar, Tsurf]);
+  }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, hostStarTeff, pBar, Tsurf]);
 
   const tauIR =
     ghK > 0 && Tatm > 10 ? Math.max(0.01, (4 / 3) * (Math.pow(Tsurf / Tatm, 4) - 1)) : 0;
