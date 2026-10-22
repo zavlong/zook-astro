@@ -1497,6 +1497,19 @@ export function generateZoneSystem(
       Boolean(z.starCategory && z.starCategory.includes('White Dwarf')) ||
       Boolean(z.title && (z.title.includes('White Dwarf') || z.title.includes('DA') || z.title.includes('DC'))));
 
+  // G-type (Solar analogs) and K-type (Orange dwarfs) provide optimal, superhabitable stellar environments
+  const specUpper = (z.starSpectralType || '').toUpperCase().trim();
+  const isGKStar =
+    !isNeutronOrBH &&
+    !isWhiteDwarf &&
+    (specUpper.startsWith('G') ||
+      specUpper.startsWith('K') ||
+      Boolean(z.title && (z.title.includes('(G') || z.title.includes('(K'))) ||
+      (specUpper.includes('CIRCUMBINARY') &&
+        z.starTeff !== undefined &&
+        z.starTeff >= 3700 &&
+        z.starTeff <= 6050));
+
   const a_snow = Math.max(0.04, 2.7 * Math.sqrt(z.lum));
   const M_sol = Math.pow(z.mass, 0.8) * Math.pow(10, z.feh);
   const lnM = Math.log(Math.max(1e-4, M_sol));
@@ -2392,7 +2405,7 @@ export function generateZoneSystem(
             tAtMinCO2 <= 301.0 &&
             tAtMaxCO2 >= 220.0;
 
-          const isDesiccatedSulfur = b.iceFrac < 0.003 && Teq >= 220 && random() < 0.22;
+          const isDesiccatedSulfur = b.iceFrac < 0.003 && Teq >= 220 && random() < (isGKStar ? 0.14 : 0.22);
           const isHighPressureCO2 = !isDesiccatedSulfur && canBeLiquidCO2 && random() < 0.38;
 
           if (isDesiccatedSulfur) {
@@ -2459,8 +2472,9 @@ export function generateZoneSystem(
               0.0002,
               avCO2
             );
-            const bioChance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.025 : 0.65;
-            const bio = z.age >= 1.5 && pC < 1.5 && random() < bioChance;
+            const bioChance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.025 : isGKStar ? 0.80 : 0.65;
+            const minBioAge = isGKStar ? 1.2 : 1.5;
+            const bio = z.age >= minBioAge && pC < 1.5 && random() < bioChance;
             if (bio) {
               if (isWhiteDwarf) {
                 biosphereDesc = 'Active Unicellular Radiotolerant Microbial Biosphere (White Dwarf Relic)';
@@ -2468,12 +2482,12 @@ export function generateZoneSystem(
                 const isShielded = magField.shieldingEfficiencyPct >= 50;
                 if (isShielded) {
                   biosphereDesc =
-                    z.age >= 3.0
+                    z.age >= (isGKStar ? 2.6 : 3.0)
                       ? 'Active Multicellular Aerobic (O2-N2) Continental & Marine Biosphere'
                       : 'Active Unicellular Microbial (Archaean/Prokaryotic) Continental & Marine Biosphere';
                 } else {
                   biosphereDesc =
-                    z.age >= 3.0
+                    z.age >= (isGKStar ? 3.0 : 3.4)
                       ? 'Active Multicellular Pelagic & Benthic Marine Biosphere (Radiotolerant Terrestrial Algal Mats)'
                       : 'Active Unicellular Radiotolerant Terrestrial & Marine Microbial Biosphere (High Radiation Crusts)';
                 }
@@ -2512,8 +2526,8 @@ export function generateZoneSystem(
             0.0005,
             Math.min(5.5, avCO2)
           );
-          const bioPelagicChance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.02 : 0.58;
-          const bioPelagic = z.age >= 1.5 && pC < 6.0 && random() < bioPelagicChance;
+          const bioPelagicChance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.02 : isGKStar ? 0.72 : 0.58;
+          const bioPelagic = z.age >= (isGKStar ? 1.2 : 1.5) && pC < 6.0 && random() < bioPelagicChance;
           if (bioPelagic) {
             pO = pN * rand(0.1, 0.24);
             if (isWhiteDwarf) {
@@ -2521,7 +2535,7 @@ export function generateZoneSystem(
             } else {
               const isShielded = magField.shieldingEfficiencyPct >= 50;
               biosphereDesc =
-                z.age >= 3.0
+                z.age >= (isGKStar ? 2.6 : 3.0)
                   ? isShielded
                     ? 'Active Multicellular Pelagic Marine Biosphere'
                     : 'Active Multicellular Deep-Pelagic Ocean Biosphere (Surface Unshielded / Radiation Filtered Below 30m)'
@@ -2553,8 +2567,8 @@ export function generateZoneSystem(
             pC = pC_nh3;
             const isContinentalNH3 = b.iceFrac < 0.04;
             const hasIcebergContinents = !isContinentalNH3 && (Tsub < 242 || random() < 0.78);
-            const bioNH3Chance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.008 : 0.28;
-            const bioNH3 = z.age >= 2.0 && random() < bioNH3Chance;
+            const bioNH3Chance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.008 : isGKStar ? 0.35 : 0.28;
+            const bioNH3 = z.age >= (isGKStar ? 1.7 : 2.0) && random() < bioNH3Chance;
             if (bioNH3) {
               const pM_bio = +clamp(pM * rand(1.3, 2.2), 0.006, 0.45).toFixed(4);
               if (Teq + ghDelta(pC, pN, pH, pM_bio, 0, pNH3, 0, Teq, grav) <= 265) {
@@ -2562,7 +2576,7 @@ export function generateZoneSystem(
               }
               const bioNH3Complex = isWhiteDwarf
                 ? 'Unicellular'
-                : z.age >= 3.5 && random() < 0.45 ? 'Multicellular' : 'Unicellular';
+                : z.age >= (isGKStar ? 3.0 : 3.5) && random() < (isGKStar ? 0.52 : 0.45) ? 'Multicellular' : 'Unicellular';
               const isShielded = magField.shieldingEfficiencyPct >= 50;
               biosphereDesc = isContinentalNH3
                 ? isShielded
@@ -2648,12 +2662,12 @@ export function generateZoneSystem(
             pNH3 = Math.max(pNH3, +(pN * 0.025).toFixed(4));
             const isContinentalNH3 = b.iceFrac < 0.04;
             const hasIcebergContinents = !isContinentalNH3 && (Touter < 242 || random() < 0.78);
-            const bioNH3OuterChance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.008 : 0.25;
-            const bioNH3 = z.age >= 2.0 && random() < bioNH3OuterChance;
+            const bioNH3OuterChance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.008 : isGKStar ? 0.32 : 0.25;
+            const bioNH3 = z.age >= (isGKStar ? 1.7 : 2.0) && random() < bioNH3OuterChance;
             if (bioNH3) {
               const bioNH3Complex = isWhiteDwarf
                 ? 'Unicellular'
-                : z.age >= 3.5 && random() < 0.42 ? 'Multicellular' : 'Unicellular';
+                : z.age >= (isGKStar ? 3.0 : 3.5) && random() < (isGKStar ? 0.50 : 0.42) ? 'Multicellular' : 'Unicellular';
               const isShielded = magField.shieldingEfficiencyPct >= 50;
               biosphereDesc = isContinentalNH3
                 ? isShielded
@@ -3541,12 +3555,12 @@ export function generateZoneSystem(
           mPBar = +(pN + pNH3_m + pM).toFixed(3);
           mGhK = ghTest;
           mTsurf = tTest;
-          const mBioNH3Chance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.008 : 0.24;
-          const mBioNH3 = z.age >= 2.0 && random() < mBioNH3Chance;
+          const mBioNH3Chance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.008 : isGKStar ? 0.30 : 0.24;
+          const mBioNH3 = z.age >= (isGKStar ? 1.7 : 2.0) && random() < mBioNH3Chance;
           if (mBioNH3) {
             mBioDesc = isWhiteDwarf
               ? 'Active Unicellular Exomoon Ammoniated Cryo-Microbial Biosphere (White Dwarf Relic)'
-              : z.age >= 3.5 && random() < 0.40
+              : z.age >= (isGKStar ? 3.0 : 3.5) && random() < (isGKStar ? 0.48 : 0.40)
               ? 'Active Multicellular Exomoon Ammoniated (NH3-H2O) Cryo-Biosphere'
               : 'Active Unicellular Exomoon Ammoniated Cryo-Microbial Biosphere';
             mAtmoType = 'N2-NH3-CH4 Exomoon Cryo-Biosphere Sky (Ammonia Life)';
@@ -3598,12 +3612,12 @@ export function generateZoneSystem(
           const pSatW = 1.013 * Math.exp(13.7 * (1 - 373.15 / targetT));
           const pW = +Math.max(pSatW, pN * (iceF >= 0.08 ? 0.05 : 0.025)).toFixed(3);
           const pC = solveCO2ForTargetTemp(targetT, mTatm, pN, 0, 0, pW, 0, 0, mGrav, 0.0005, 2.5);
-          const mBioWaterChance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.02 : 0.65;
-          const pO = z.age >= 1.5 && pC < 1.2 && random() < mBioWaterChance ? +(pN * rand(0.15, 0.28)).toFixed(3) : 0;
+          const mBioWaterChance = isNeutronOrBH ? 0 : isWhiteDwarf ? 0.02 : isGKStar ? 0.78 : 0.65;
+          const pO = z.age >= (isGKStar ? 1.2 : 1.5) && pC < 1.2 && random() < mBioWaterChance ? +(pN * rand(0.15, 0.28)).toFixed(3) : 0;
           if (pO > 0) {
             mBioDesc = isWhiteDwarf
               ? 'Active Unicellular Exomoon Microbial Relic Biosphere (Radiotolerant)'
-              : z.age >= 3.0
+              : z.age >= (isGKStar ? 2.6 : 3.0)
               ? 'Active Multicellular Exomoon Aerobic O2-N2 Biosphere'
               : 'Active Unicellular Exomoon Microbial Biosphere';
           }
