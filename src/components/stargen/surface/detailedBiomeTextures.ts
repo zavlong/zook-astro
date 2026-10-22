@@ -138,29 +138,29 @@ export function evaluateDetailedBiomeTexel(params: SurfaceTexelParams): Detailed
   const archetype = getBiomeTextureArchetype(biomeId, surfaceModel);
   const comp = surfaceModel.compositionPalette;
 
-  // Set appropriate tiling repetition frequencies for macro and close-up views
-  let tileFreq = isFirstPerson ? 52.0 : 32.0;
+  // Reduced tiling repetition so textures appear at natural, broad scale without tight grid-like repeating
+  let tileFreq = isFirstPerson ? 8.0 : 5.0;
   let mineralRgb: [number, number, number] | undefined = comp.lowlandRgb;
   let isCryoTholin = false;
 
   switch (archetype) {
     case 'DUNE_SAND':
-      tileFreq = isFirstPerson ? 64.0 : 36.0;
+      tileFreq = isFirstPerson ? 10.0 : 6.0;
       mineralRgb = comp.lowlandRgb;
       break;
 
     case 'BEDROCK_STRATA':
-      tileFreq = isFirstPerson ? 48.0 : 28.0;
+      tileFreq = isFirstPerson ? 7.0 : 4.5;
       mineralRgb = comp.mountainRgb;
       break;
 
     case 'VESICULAR_BASALT':
-      tileFreq = isFirstPerson ? 56.0 : 32.0;
+      tileFreq = isFirstPerson ? 8.0 : 5.0;
       mineralRgb = [75, 70, 78];
       break;
 
     case 'GLACIAL_PERMAFROST':
-      tileFreq = isFirstPerson ? 44.0 : 24.0;
+      tileFreq = isFirstPerson ? 7.0 : 4.5;
       mineralRgb = [220, 245, 255];
       flags |= FLAG_ICE_SPEC;
       isCryoTholin =
@@ -170,7 +170,7 @@ export function evaluateDetailedBiomeTexel(params: SurfaceTexelParams): Detailed
       break;
 
     case 'ORGANIC_VEGETATION':
-      tileFreq = isFirstPerson ? 52.0 : 30.0;
+      tileFreq = isFirstPerson ? 9.0 : 5.5;
       mineralRgb = [
         Math.min(255, Math.round(baseRgb[0] * 1.25)),
         Math.min(255, Math.round(baseRgb[1] * 1.35)),
@@ -179,12 +179,12 @@ export function evaluateDetailedBiomeTexel(params: SurfaceTexelParams): Detailed
       break;
 
     case 'ALLUVIAL_SILT':
-      tileFreq = isFirstPerson ? 48.0 : 26.0;
+      tileFreq = isFirstPerson ? 7.5 : 4.5;
       mineralRgb = comp.lowlandRgb;
       break;
 
     case 'REGOLITH_GRAVEL':
-      tileFreq = isFirstPerson ? 56.0 : 34.0;
+      tileFreq = isFirstPerson ? 9.0 : 5.5;
       mineralRgb = comp.plateauRgb;
       break;
   }
@@ -193,14 +193,14 @@ export function evaluateDetailedBiomeTexel(params: SurfaceTexelParams): Detailed
   const effPz = archetype === 'BEDROCK_STRATA' ? pz + hLocal * 2.2 : pz;
   const sample = sampleTiledBiomeTexel(archetype, px, effPz, tileFreq);
 
-  // In first-person mode, blend a micro-octave (3.5x frequency) for tactile sub-meter resolution
+  // In first-person mode, apply a very gentle sub-octave (1.8x) for crispness without miniature texture repetition
   if (isFirstPerson) {
-    const microSample = sampleTiledBiomeTexel(archetype, px, effPz, tileFreq * 3.5);
-    sample.lum = sample.lum * 0.72 + microSample.lum * 0.28;
-    sample.ao = sample.ao * 0.75 + microSample.ao * 0.25;
+    const microSample = sampleTiledBiomeTexel(archetype, px, effPz, tileFreq * 1.8);
+    sample.lum = sample.lum * 0.88 + microSample.lum * 0.12;
+    sample.ao = sample.ao * 0.90 + microSample.ao * 0.10;
     sample.fleck = Math.max(sample.fleck, microSample.fleck);
-    sample.bumpX = sample.bumpX * 0.70 + microSample.bumpX * 0.30;
-    sample.bumpZ = sample.bumpZ * 0.70 + microSample.bumpZ * 0.30;
+    sample.bumpX = sample.bumpX * 0.85 + microSample.bumpX * 0.15;
+    sample.bumpZ = sample.bumpZ * 0.85 + microSample.bumpZ * 0.15;
   }
 
   // Dynamically recolor the static texture using the planet's palette

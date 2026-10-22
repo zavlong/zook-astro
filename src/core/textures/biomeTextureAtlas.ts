@@ -232,7 +232,7 @@ export function sampleTiledBiomeTexel(
   archetype: BiomeTextureArchetype,
   worldX: number,
   worldZ: number,
-  tilingFreq: number = 32.0
+  tilingFreq: number = 6.0
 ): TiledTexelSample {
   const buf = textureBuffers.get(archetype)!;
 
