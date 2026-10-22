@@ -88,33 +88,39 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
   const mapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const globeCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const surfaceContainerRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      if (surfaceContainerRef.current?.requestFullscreen) {
-        surfaceContainerRef.current.requestFullscreen().catch(() => {
-          setIsFullscreen((prev) => !prev);
-        });
-      } else {
-        setIsFullscreen((prev) => !prev);
-      }
-    } else {
-      if (document.exitFullscreen) {
+    setIsFullscreen((prev) => {
+      const next = !prev;
+      if (!next && document.fullscreenElement) {
         document.exitFullscreen().catch(() => {});
       }
-      setIsFullscreen(false);
-    }
+      return next;
+    });
   };
 
   useEffect(() => {
     const onFullscreenChange = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement));
+      if (!document.fullscreenElement && isFullscreen) {
+        setIsFullscreen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        setIsFullscreen(false);
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+      }
     };
     document.addEventListener('fullscreenchange', onFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
-  }, []);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isFullscreen]);
 
   // Generate physics surface model
   const surfaceModel = useMemo<PlanetarySurfaceModel>(() => {
@@ -536,15 +542,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
   return (
     <div
-      ref={surfaceContainerRef}
-      className={`flex flex-col gap-4 font-mono text-xs select-none ${
-        isFullscreen
-          ? 'fixed inset-0 z-50 bg-[#070b12] p-4 overflow-y-auto h-screen w-screen'
-          : ''
-      }`}
+      className="flex flex-col gap-4 font-mono text-xs select-none"
       style={{
-        contentVisibility: isFullscreen ? 'visible' : 'auto',
-        containIntrinsicSize: isFullscreen ? 'none' : 'auto 720px',
+        contentVisibility: 'auto',
+        containIntrinsicSize: 'auto 720px',
       }}
     >
       {/* Surface Navigation Toolbar */}
@@ -732,14 +733,36 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       {/* Main Visual Display Area */}
       <div className="relative bg-[#0c121d] rounded-xl border border-slate-800 p-2 overflow-hidden flex flex-col items-center">
         {displayMode === 'map' ? (
-          <div className="w-full flex flex-col items-center relative">
+          <div
+            className={`w-full flex flex-col items-center relative ${
+              isFullscreen
+                ? 'fixed inset-0 z-[9999] w-screen h-screen bg-black flex items-center justify-center p-4 m-0 overflow-hidden'
+                : ''
+            }`}
+          >
+            {isFullscreen && (
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                className="absolute top-4 right-4 z-50 px-3 py-1.5 rounded-lg bg-slate-900/85 hover:bg-slate-800 text-white border border-slate-700/80 backdrop-blur-md font-bold flex items-center gap-2 cursor-pointer shadow-2xl transition hover:border-purple-400"
+                title="Exit Fullscreen (Esc)"
+              >
+                <Minimize2 className="w-4 h-4 text-purple-300" />
+                <span>Exit Fullscreen</span>
+                <kbd className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 border border-slate-700">ESC</kbd>
+              </button>
+            )}
             <canvas
               ref={mapCanvasRef}
               onClick={handleMapClick}
               onDoubleClick={handleMapDoubleClick}
               onMouseMove={handleMapMouseMove}
               onMouseLeave={() => setHoverCoords(null)}
-              className="w-full max-w-4xl h-auto rounded-lg border border-slate-800/80 shadow-inner cursor-crosshair transition"
+              className={
+                isFullscreen
+                  ? 'max-w-full max-h-full w-auto h-auto object-contain rounded-lg border border-slate-800 shadow-2xl cursor-crosshair'
+                  : 'w-full max-w-4xl h-auto rounded-lg border border-slate-800/80 shadow-inner cursor-crosshair transition'
+              }
             />
             {isBlankSurfaceLayer && (
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-4 text-center">
@@ -755,21 +778,41 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
                 </div>
               </div>
             )}
-            <div className="w-full flex justify-between items-center text-[10px] text-slate-500 px-2 mt-1 flex-wrap gap-2">
-              <span>
-                Equirectangular Projection (360° × 180°) •{' '}
-                {showTileGrid ? `Goldberg Grid (${goldbergGrid.tileCount} Tiles: 480 Hex, 12 Pent) • Double-click tile for 3D Terrain` : surfaceModel.isNoSurface
-                  ? `${surfaceModel.atmospherePalette.classLabel} (100% Cloud Envelope)`
-                  : `Crust: ${surfaceModel.compositionPalette.compositionLabel}`}
-              </span>
-              <span>
-                Weather: {surfaceModel.weatherRegime}
-                {surfaceModel.hasActiveGeology ? ` • Active Geology (${surfaceModel.volcanoCount} Cones)` : ''}
-              </span>
-            </div>
+            {!isFullscreen && (
+              <div className="w-full flex justify-between items-center text-[10px] text-slate-500 px-2 mt-1 flex-wrap gap-2">
+                <span>
+                  Equirectangular Projection (360° × 180°) •{' '}
+                  {showTileGrid ? `Goldberg Grid (${goldbergGrid.tileCount} Tiles: 480 Hex, 12 Pent) • Double-click tile for 3D Terrain` : surfaceModel.isNoSurface
+                    ? `${surfaceModel.atmospherePalette.classLabel} (100% Cloud Envelope)`
+                    : `Crust: ${surfaceModel.compositionPalette.compositionLabel}`}
+                </span>
+                <span>
+                  Weather: {surfaceModel.weatherRegime}
+                  {surfaceModel.hasActiveGeology ? ` • Active Geology (${surfaceModel.volcanoCount} Cones)` : ''}
+                </span>
+              </div>
+            )}
           </div>
         ) : displayMode === 'globe' ? (
-          <div className="w-full flex flex-col items-center relative">
+          <div
+            className={`w-full flex flex-col items-center relative ${
+              isFullscreen
+                ? 'fixed inset-0 z-[9999] w-screen h-screen bg-black flex items-center justify-center p-4 m-0 overflow-hidden'
+                : ''
+            }`}
+          >
+            {isFullscreen && (
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                className="absolute top-4 right-4 z-50 px-3 py-1.5 rounded-lg bg-slate-900/85 hover:bg-slate-800 text-white border border-slate-700/80 backdrop-blur-md font-bold flex items-center gap-2 cursor-pointer shadow-2xl transition hover:border-purple-400"
+                title="Exit Fullscreen (Esc)"
+              >
+                <Minimize2 className="w-4 h-4 text-purple-300" />
+                <span>Exit Fullscreen</span>
+                <kbd className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 border border-slate-700">ESC</kbd>
+              </button>
+            )}
             {/* Top 3D Globe Orientation & Spin Controls */}
             <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 bg-slate-950/80 backdrop-blur-xs px-2 py-1 rounded-lg border border-slate-800 text-[10px]">
               <button
@@ -833,9 +876,15 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
             <canvas
               ref={globeCanvasRef}
-              className={`h-80 sm:h-96 w-auto rounded-lg border border-slate-800/80 shadow-2xl transition ${
-                isDraggingGlobe ? 'cursor-grabbing' : 'cursor-grab'
-              }`}
+              className={
+                isFullscreen
+                  ? `max-h-[88vh] max-w-[88vw] w-auto h-auto rounded-xl border border-slate-800 shadow-2xl transition ${
+                      isDraggingGlobe ? 'cursor-grabbing' : 'cursor-grab'
+                    }`
+                  : `h-80 sm:h-96 w-auto rounded-lg border border-slate-800/80 shadow-2xl transition ${
+                      isDraggingGlobe ? 'cursor-grabbing' : 'cursor-grab'
+                    }`
+              }
               onMouseDown={(e) => {
                 if (e.button !== 0) return;
                 setIsDraggingGlobe(true);
@@ -896,20 +945,22 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               </div>
             )}
 
-            <div className="w-full flex justify-between items-center text-[10px] text-slate-500 px-2 mt-1 flex-wrap gap-2">
-              <span>
-                3D Spherical Projection •{' '}
-                {showTileGrid
-                  ? `Goldberg Grid (${goldbergGrid.tileCount} Tiles) • Double-click tile to open 3D Terrain`
-                  : surfaceModel.isNoSurface
-                  ? 'Fluid/Gas Envelope'
-                  : `Crust: ${surfaceModel.compositionPalette.compositionLabel}`}{' '}
-                • Drag to rotate
-              </span>
-              <span>
-                {surfaceModel.weatherRegime} • {surfaceModel.atmospherePalette.classLabel} ({Math.round(surfaceModel.cloudOpacity * 100)}%)
-              </span>
-            </div>
+            {!isFullscreen && (
+              <div className="w-full flex justify-between items-center text-[10px] text-slate-500 px-2 mt-1 flex-wrap gap-2">
+                <span>
+                  3D Spherical Projection •{' '}
+                  {showTileGrid
+                    ? `Goldberg Grid (${goldbergGrid.tileCount} Tiles) • Double-click tile to open 3D Terrain`
+                    : surfaceModel.isNoSurface
+                    ? 'Fluid/Gas Envelope'
+                    : `Crust: ${surfaceModel.compositionPalette.compositionLabel}`}{' '}
+                  • Drag to rotate
+                </span>
+                <span>
+                  {surfaceModel.weatherRegime} • {surfaceModel.atmospherePalette.classLabel} ({Math.round(surfaceModel.cloudOpacity * 100)}%)
+                </span>
+              </div>
+            )}
           </div>
         ) : displayMode === 'terrain' ? (
           <LocalTileTerrainView
