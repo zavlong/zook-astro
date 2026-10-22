@@ -419,11 +419,17 @@ export function formatRockyBodyClass(
     hydroClass = 'Airless';
   }
 
-  // Composition class: ("terrestrial" for rocky planets, "rocky" for rocky moons, icy, replace with "ocean" if surface is 100% liquid or "molten" if temp > 800K)
+  // Composition class: ("terrestrial" for rocky planets, "rocky" for rocky moons, icy, replace with "ocean" if surface is 100% liquid, significantly icy aquatic world, or "molten" if temp > 800K)
   let compClass = '';
   if (T > 800) {
     compClass = 'Molten';
-  } else if (is100Pct) {
+  } else if (
+    is100Pct ||
+    (hydroClass === 'Aquatic' &&
+      (iceFrac >= 0.015 || fallbackClass.includes('Ocean') || fallbackClass.includes('Pelagic')))
+  ) {
+    // Aquatic worlds with a significantly icy/volatile composition (>= 1.5% bulk water ice or deep water mantle)
+    // lack emergent continental crust and will always be ocean worlds
     compClass = 'Ocean';
   } else {
     // Solid surface water ice cannot exist when T >= 273.15 K
