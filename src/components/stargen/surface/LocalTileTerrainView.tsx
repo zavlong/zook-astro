@@ -168,7 +168,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     if (cached) return cached;
 
     const sides = activeTile.isPentagon ? 5 : 6;
-    const rings = 36; // 36 rings provide crisp 3D relief with ~2.2x fewer polygons for fast hydration
+    const rings = 72; // 72 rings double 3D vertex & triangle resolution for ultra-crisp physical relief
     const tileSeed = (surfaceModel.seed * 1664525 + activeTile.tileId * 1013904223) & 0x7fffffff;
 
     // Corner angles in local (x, z) plane aligned with neighbor compass directions
@@ -527,7 +527,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const vertices: LocalVertex[] = [];
     const buildVertex = (px: number, pz: number, edgeFrac: number): LocalVertex => {
       const { hLocal, oceanWeight } = sampleHeightOnly(px, pz);
-      const eps = 0.014;
+      const eps = 0.007;
       const hxPos = sampleHeightOnly(px + eps, pz).hLocal;
       const hxNeg = sampleHeightOnly(px - eps, pz).hLocal;
       const hzPos = sampleHeightOnly(px, pz + eps).hLocal;
@@ -638,9 +638,9 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     }
 
     // ============================================================================
-    // GENERATE 384x384 HIGH-RESOLUTION PROCEDURAL BIOME TEXTURE & BUMP NORMAL MAP
+    // GENERATE 768x768 HIGH-RESOLUTION PROCEDURAL BIOME TEXTURE & BUMP NORMAL MAP
     // ============================================================================
-    const TEX_RES = 384;
+    const TEX_RES = 768;
     const texR = new Uint8Array(TEX_RES * TEX_RES);
     const texG = new Uint8Array(TEX_RES * TEX_RES);
     const texB = new Uint8Array(TEX_RES * TEX_RES);
@@ -649,8 +649,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     const texFlags = new Uint8Array(TEX_RES * TEX_RES);
     const texCloudShadow = new Uint8Array(TEX_RES * TEX_RES);
 
-    // Precompute a 97x97 macro terrain grid across [-1, +1] (1:1 unstretched tile coordinates)
-    const MACRO_N = 97;
+    // Precompute a 193x193 macro terrain grid across [-1, +1] (1:1 unstretched tile coordinates)
+    const MACRO_N = 193;
     const macroHGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroFbmGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroRidgeGrid = new Float32Array(MACRO_N * MACRO_N);

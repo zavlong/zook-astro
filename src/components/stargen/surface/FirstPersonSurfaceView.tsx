@@ -483,7 +483,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       };
     };
 
-    const MACRO_N = 193;
+    const MACRO_N = 385;
     const macroHGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroFbmGrid = new Float32Array(MACRO_N * MACRO_N);
     const macroRidgeGrid = new Float32Array(MACRO_N * MACRO_N);
