@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
-import { Maximize2, X, Download, Sprout } from 'lucide-react';
-import { XenofloraSpecies } from '../../../core/xenobiology/floraGen';
-import { generateBotanicalSvg } from '../../../core/xenobiology/botanicalArtGen';
+import { Maximize2, X, Download, Sprout, Disc } from 'lucide-react';
+import { SpecimenSpecies, generateBotanicalSvg } from '../../../core/xenobiology/botanicalArtGen';
 
 export interface BotanicalSpecimenPlateProps {
-  species: XenofloraSpecies;
+  species: SpecimenSpecies;
   size?: 'thumb' | 'card' | 'large';
   interactive?: boolean;
   className?: string;
@@ -147,7 +146,7 @@ export const BotanicalSpecimenPlate: React.FC<BotanicalSpecimenPlateProps> = ({
 
 // Modal for full-resolution specimen examination
 interface BotanicalLightboxModalProps {
-  species: XenofloraSpecies;
+  species: SpecimenSpecies;
   onClose: () => void;
   onDownload: (e: React.MouseEvent) => void;
 }
@@ -157,6 +156,7 @@ const BotanicalLightboxModal: React.FC<BotanicalLightboxModalProps> = ({
   onClose,
   onDownload,
 }) => {
+  const isFungi = 'kingdom' in species && species.kingdom === 'Fungi';
   const highResSvgXml = generateBotanicalSvg(species, {
     width: 440,
     height: 440,
@@ -171,7 +171,9 @@ const BotanicalLightboxModal: React.FC<BotanicalLightboxModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="relative max-w-2xl w-full bg-[#0c121e] border border-emerald-500/50 rounded-2xl p-5 shadow-2xl font-mono text-xs flex flex-col md:flex-row gap-5"
+        className={`relative max-w-2xl w-full bg-[#0c121e] border ${
+          isFungi ? 'border-fuchsia-500/50 shadow-fuchsia-950/40' : 'border-emerald-500/50 shadow-emerald-950/40'
+        } rounded-2xl p-5 shadow-2xl font-mono text-xs flex flex-col md:flex-row gap-5`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Close Button */}
@@ -195,14 +197,16 @@ const BotanicalLightboxModal: React.FC<BotanicalLightboxModalProps> = ({
         <div className="flex-1 flex flex-col justify-between gap-3 text-slate-300">
           <div className="space-y-3">
             <div>
-              <div className="flex items-center gap-1.5 text-emerald-400 text-[10px] uppercase font-bold tracking-wider">
-                <Sprout className="w-3.5 h-3.5" />
-                <span>EXOBIOLOGICAL FIELD SPECIMEN</span>
+              <div className={`flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider ${
+                isFungi ? 'text-fuchsia-400' : 'text-emerald-400'
+              }`}>
+                {isFungi ? <Disc className="w-3.5 h-3.5" /> : <Sprout className="w-3.5 h-3.5" />}
+                <span>{isFungi ? 'EXOBIOLOGICAL MYCOTA SPECIMEN' : 'EXOBIOLOGICAL FIELD SPECIMEN'}</span>
               </div>
               <h3 className="text-lg font-bold text-white tracking-wide mt-0.5">
                 {species.commonName}
               </h3>
-              <p className="text-emerald-300/90 italic font-serif text-xs">
+              <p className={`${isFungi ? 'text-fuchsia-300/90' : 'text-emerald-300/90'} italic font-serif text-xs`}>
                 {species.scientificName}
               </p>
             </div>
@@ -226,7 +230,9 @@ const BotanicalLightboxModal: React.FC<BotanicalLightboxModalProps> = ({
                 </span>
               </div>
               <div className="bg-[#080d16] p-2 rounded border border-slate-800">
-                <span className="text-slate-500 block uppercase text-[9px]">Photosynthetic Pigment</span>
+                <span className="text-slate-500 block uppercase text-[9px]">
+                  {isFungi ? 'Pigment / Melanin' : 'Photosynthetic Pigment'}
+                </span>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <span
                     className="w-2.5 h-2.5 rounded-full border border-white/30"
@@ -247,7 +253,11 @@ const BotanicalLightboxModal: React.FC<BotanicalLightboxModalProps> = ({
                 {species.nativeBiomeNames.map((name) => (
                   <span
                     key={name}
-                    className="px-2 py-0.5 rounded text-[9px] font-semibold bg-emerald-950/70 border border-emerald-500/40 text-emerald-300"
+                    className={`px-2 py-0.5 rounded text-[9px] font-semibold border ${
+                      isFungi
+                        ? 'bg-fuchsia-950/70 border-fuchsia-500/40 text-fuchsia-300'
+                        : 'bg-emerald-950/70 border-emerald-500/40 text-emerald-300'
+                    }`}
                   >
                     {name}
                   </span>

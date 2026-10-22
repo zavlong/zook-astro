@@ -7,6 +7,10 @@
  */
 
 import { XenofloraSpecies, PlantFormCategory } from './floraGen';
+import { XenofungiSpecies, FungiFormCategory } from './fungiGen';
+
+export type SpecimenSpecies = XenofloraSpecies | XenofungiSpecies;
+export type SpecimenFormCategory = PlantFormCategory | FungiFormCategory;
 
 export interface BotanicalArtOptions {
   width?: number;
@@ -60,8 +64,14 @@ function getPolymerColors(structuralPolymer: string): { stipeBase: string; stipe
   if (lower.includes('cryo') || lower.includes('gel')) {
     return { stipeBase: '#164e63', stipeHighlight: '#67e8f9' };
   }
-  if (lower.includes('fluoro') || lower.includes('chitin')) {
+  if (lower.includes('melanin') || lower.includes('melanized')) {
+    return { stipeBase: '#18181b', stipeHighlight: '#52525b' };
+  }
+  if (lower.includes('fluoro') || lower.includes('chitin') || lower.includes('glucan')) {
     return { stipeBase: '#292524', stipeHighlight: '#78716c' };
+  }
+  if (lower.includes('hyphal') || lower.includes('rhizomorph')) {
+    return { stipeBase: '#3f3f46', stipeHighlight: '#d4d4d8' };
   }
   if (lower.includes('slime') || lower.includes('poly')) {
     return { stipeBase: '#713f12', stipeHighlight: '#ca8a04' };
@@ -74,7 +84,7 @@ function getPolymerColors(structuralPolymer: string): { stipeBase: string; stipe
  * Generates an SVG string containing the complete botanical specimen illustration.
  */
 export function generateBotanicalSvg(
-  species: XenofloraSpecies,
+  species: SpecimenSpecies,
   options: BotanicalArtOptions = {}
 ): string {
   const width = options.width || 240;
@@ -85,7 +95,7 @@ export function generateBotanicalSvg(
 
   const seed = hashString(species.id + species.scientificName);
 
-  const formCategory: PlantFormCategory = (species.formCategory as PlantFormCategory) || 'Tree';
+  const formCategory: SpecimenFormCategory = (species.formCategory as SpecimenFormCategory) || 'Tree';
   const pigment = species.pigmentColorHex || '#10b981';
   const pigmentDark = adjustColorBrightness(pigment, -45);
   const pigmentLight = adjustColorBrightness(pigment, 40);
@@ -409,6 +419,293 @@ export function generateBotanicalSvg(
       `;
       break;
     }
+
+    case 'Cap': {
+      // Classic Toadstool / Agaric: Fibrous stipe, partial veil (annulus), lamellae gills, convex cap with scales & spore mist
+      const capY = height * 0.44;
+      const stipeTopW = width * 0.038;
+      const stipeBaseW = width * 0.075;
+      const capW = width * 0.32;
+      const capH = height * 0.17;
+      const ringY = groundY - (groundY - capY) * 0.42;
+
+      // Radial gills under cap
+      let gills = '';
+      const gillCount = 13;
+      for (let g = 0; g < gillCount; g++) {
+        const t = g / (gillCount - 1);
+        const gx = (centerX - capW * 0.88) + t * (capW * 1.76);
+        const gy = capY + 3 - Math.sin(t * Math.PI) * 4;
+        gills += `<line x1="${centerX}" y1="${capY}" x2="${gx}" y2="${gy}" stroke="${adjustColorBrightness(stipeBase, 30)}" stroke-width="0.8" opacity="0.65" />`;
+      }
+
+      // Cap scales/warts
+      const warts = [
+        { cx: centerX - capW * 0.5, cy: capY - capH * 0.4, r: 2.8 },
+        { cx: centerX - capW * 0.22, cy: capY - capH * 0.9, r: 3.5 },
+        { cx: centerX + capW * 0.05, cy: capY - capH * 1.05, r: 4.0 },
+        { cx: centerX + capW * 0.35, cy: capY - capH * 0.7, r: 3.2 },
+        { cx: centerX + capW * 0.58, cy: capY - capH * 0.3, r: 2.5 },
+        { cx: centerX - capW * 0.1, cy: capY - capH * 0.5, r: 3.0 },
+        { cx: centerX + capW * 0.18, cy: capY - capH * 0.45, r: 2.8 },
+      ];
+
+      // Subtle drifting spores
+      const spores = [
+        { cx: centerX - width * 0.18, cy: capY + 18, r: 1.2 },
+        { cx: centerX - width * 0.08, cy: capY + 32, r: 1.0 },
+        { cx: centerX + width * 0.12, cy: capY + 22, r: 1.4 },
+        { cx: centerX + width * 0.22, cy: capY + 38, r: 1.1 },
+        { cx: centerX - width * 0.02, cy: capY + 45, r: 0.9 },
+      ];
+
+      floraShapesSvg = `
+        <!-- Basal Volva Bulb -->
+        <ellipse cx="${centerX}" cy="${groundY}" rx="${stipeBaseW * 1.3}" ry="7" fill="url(#${uniqueId}_stipe)" />
+        <ellipse cx="${centerX}" cy="${groundY - 3}" rx="${stipeBaseW * 1.1}" ry="5" fill="${stipeHighlight}" opacity="0.3" />
+
+        <!-- Stipe Stem -->
+        <path d="M ${centerX - stipeBaseW} ${groundY} Q ${centerX - stipeTopW * 1.2} ${(groundY + capY) * 0.5} ${centerX - stipeTopW} ${capY} L ${centerX + stipeTopW} ${capY} Q ${centerX + stipeTopW * 1.2} ${(groundY + capY) * 0.5} ${centerX + stipeBaseW} ${groundY} Z" fill="url(#${uniqueId}_stipe)" />
+        <path d="M ${centerX - stipeBaseW * 0.3} ${groundY} Q ${centerX} ${(groundY + capY) * 0.5} ${centerX - 1} ${capY}" stroke="${stipeHighlight}" stroke-width="1.0" fill="none" opacity="0.6" />
+
+        <!-- Annulus Veil Ring -->
+        <ellipse cx="${centerX}" cy="${ringY}" rx="${stipeTopW * 2.2}" ry="3.5" fill="${stipeHighlight}" stroke="${stipeBase}" stroke-width="0.8" />
+        <ellipse cx="${centerX}" cy="${ringY - 1}" rx="${stipeTopW * 1.8}" ry="2.2" fill="${adjustColorBrightness(stipeBase, 40)}" />
+
+        <!-- Sub-Cap Gill Plate Shadow -->
+        <path d="M ${centerX - capW * 0.92} ${capY} Q ${centerX} ${capY + capH * 0.35} ${centerX + capW * 0.92} ${capY} Z" fill="#030712" opacity="0.85" />
+        ${gills}
+
+        <!-- Pileus Cap Dome -->
+        <path d="M ${centerX - capW} ${capY} Q ${centerX} ${capY - capH * 1.65} ${centerX + capW} ${capY} Q ${centerX} ${capY + 3} ${centerX - capW} ${capY} Z" fill="url(#${uniqueId}_pigment)" stroke="${stipeHighlight}" stroke-width="0.8" />
+        <!-- Cap Lustrous Highlight -->
+        <ellipse cx="${centerX}" cy="${capY - capH * 0.95}" rx="${capW * 0.7}" ry="${capH * 0.45}" fill="${pigmentLight}" opacity="0.25" />
+
+        <!-- Cap Warts & Bioluminescent Scales -->
+        ${warts.map(w => `
+          <circle cx="${w.cx}" cy="${w.cy}" r="${w.r}" fill="${pigmentLight}" stroke="${pigmentDark}" stroke-width="0.6" />
+          <circle cx="${w.cx - 0.7}" cy="${w.cy - 0.7}" r="${w.r * 0.4}" fill="#ffffff" opacity="0.85" />
+        `).join('\n')}
+
+        <!-- Falling Micro-Spores -->
+        ${spores.map(s => `
+          <circle cx="${s.cx}" cy="${s.cy}" r="${s.r}" fill="${pigmentLight}" opacity="0.75" />
+          <circle cx="${s.cx}" cy="${s.cy}" r="${s.r * 2.5}" fill="${pigmentLight}" opacity="0.2" />
+        `).join('\n')}
+      `;
+      break;
+    }
+
+    case 'Bracket': {
+      // Polypore Shelf Bracket Conk: Vertical host bark trunk, tiered horizontal semicircular brackets, concentric growth rings
+      const hostX = centerX - width * 0.16;
+      const hostW = width * 0.14;
+      const hostTopY = height * 0.18;
+
+      const shelves = [
+        { y: height * 0.34, w: width * 0.32, h: height * 0.08, z: 1.0 },
+        { y: height * 0.46, w: width * 0.42, h: height * 0.09, z: 1.1 },
+        { y: height * 0.58, w: width * 0.38, h: height * 0.085, z: 0.95 },
+        { y: height * 0.70, w: width * 0.28, h: height * 0.075, z: 0.8 },
+      ];
+
+      floraShapesSvg = `
+        <!-- Host Tree Trunk / Rock Column -->
+        <rect x="${hostX - hostW * 0.5}" y="${hostTopY}" width="${hostW}" height="${groundY - hostTopY}" fill="url(#${uniqueId}_stipe)" stroke="${adjustColorBrightness(stipeBase, -40)}" stroke-width="1" />
+        <line x1="${hostX - hostW * 0.2}" y1="${hostTopY}" x2="${hostX - hostW * 0.2}" y2="${groundY}" stroke="${stipeHighlight}" stroke-width="1.2" opacity="0.5" />
+        <line x1="${hostX + hostW * 0.2}" y1="${hostTopY}" x2="${hostX + hostW * 0.2}" y2="${groundY}" stroke="${adjustColorBrightness(stipeBase, -20)}" stroke-width="1.2" opacity="0.8" />
+
+        <!-- Tiered Shelf Brackets -->
+        ${shelves.map(s => {
+          const startX = hostX + hostW * 0.45;
+          const endX = startX + s.w;
+          const midX = (startX + endX) * 0.5;
+          return `
+            <g>
+              <!-- Poroid Under-surface Shadow -->
+              <path d="M ${startX} ${s.y + 2} Q ${midX} ${s.y + s.h * 1.2} ${endX} ${s.y + 4} L ${startX} ${s.y + 8} Z" fill="#020617" opacity="0.8" />
+              <!-- Semicircular Bracket Shelf Top -->
+              <path d="M ${startX} ${s.y} Q ${midX} ${s.y - s.h} ${endX} ${s.y + 2} Q ${midX} ${s.y + s.h * 0.4} ${startX} ${s.y + 4} Z" fill="url(#${uniqueId}_pigment)" stroke="${stipeHighlight}" stroke-width="0.8" />
+              <!-- Concentric Growth Zonation Rings -->
+              <path d="M ${startX + s.w * 0.2} ${s.y - 1} Q ${midX} ${s.y - s.h * 0.65} ${endX - s.w * 0.15} ${s.y + 1}" stroke="${pigmentLight}" stroke-width="1.0" fill="none" opacity="0.7" />
+              <path d="M ${startX + s.w * 0.4} ${s.y} Q ${midX} ${s.y - s.h * 0.35} ${endX - s.w * 0.35} ${s.y + 1}" stroke="${pigmentDark}" stroke-width="1.0" fill="none" opacity="0.8" />
+              <!-- Luminous Margin Rim -->
+              <path d="M ${startX} ${s.y + 3} Q ${midX} ${s.y + s.h * 0.35} ${endX} ${s.y + 2}" stroke="${pigmentLight}" stroke-width="1.4" fill="none" opacity="0.9" />
+            </g>
+          `;
+        }).join('\n')}
+      `;
+      break;
+    }
+
+    case 'Puffball': {
+      // Bulbous Gasteromycete Gleba: Squat sterile stipe, spherical spore chamber, apical ostiole pore, active spore plume
+      const baseW = width * 0.16;
+      const puffCy = groundY - height * 0.32;
+      const puffRx = width * 0.27;
+      const puffRy = height * 0.22;
+      const ostioleY = puffCy - puffRy * 0.98;
+
+      floraShapesSvg = `
+        <!-- Basal Rhizomorph Hyphae Rootlets -->
+        <path d="M ${centerX - baseW * 1.5} ${groundY + 3} Q ${centerX - baseW * 0.8} ${groundY - 4} ${centerX} ${groundY} Q ${centerX + baseW * 0.8} ${groundY - 4} ${centerX + baseW * 1.5} ${groundY + 3}" stroke="${stipeHighlight}" stroke-width="1.2" fill="none" />
+        
+        <!-- Squat Sterile Base -->
+        <path d="M ${centerX - baseW} ${groundY} L ${centerX - baseW * 0.8} ${puffCy + puffRy * 0.5} L ${centerX + baseW * 0.8} ${puffCy + puffRy * 0.5} L ${centerX + baseW} ${groundY} Z" fill="url(#${uniqueId}_stipe)" />
+        
+        <!-- Bulbous Peridium (Spore Chamber) -->
+        <ellipse cx="${centerX}" cy="${puffCy}" rx="${puffRx}" ry="${puffRy}" fill="url(#${uniqueId}_pigment)" stroke="${stipeHighlight}" stroke-width="0.8" />
+        <!-- Soft Top Illumination Highlight -->
+        <ellipse cx="${centerX}" cy="${puffCy - puffRy * 0.35}" rx="${puffRx * 0.72}" ry="${puffRy * 0.6}" fill="${pigmentLight}" opacity="0.3" />
+
+        <!-- Polygonal Tessellated Peridium Scales -->
+        <circle cx="${centerX - puffRx * 0.4}" cy="${puffCy - puffRy * 0.2}" r="3.2" fill="${pigmentDark}" opacity="0.5" />
+        <circle cx="${centerX + puffRx * 0.35}" cy="${puffCy - puffRy * 0.15}" r="3.0" fill="${pigmentDark}" opacity="0.5" />
+        <circle cx="${centerX - puffRx * 0.25}" cy="${puffCy + puffRy * 0.25}" r="3.5" fill="${pigmentDark}" opacity="0.5" />
+        <circle cx="${centerX + puffRx * 0.2}" cy="${puffCy + puffRy * 0.3}" r="3.8" fill="${pigmentDark}" opacity="0.5" />
+
+        <!-- Apical Ostiole Rupture Pore -->
+        <ellipse cx="${centerX}" cy="${ostioleY}" rx="${width * 0.045}" ry="${height * 0.018}" fill="#020617" stroke="${pigmentLight}" stroke-width="1.2" />
+
+        <!-- Active Spore Plume Eruption Cloud -->
+        <ellipse cx="${centerX}" cy="${ostioleY - 14}" rx="8" ry="12" fill="url(#${uniqueId}_plume)" opacity="0.85" />
+        <ellipse cx="${centerX}" cy="${ostioleY - 30}" rx="14" ry="18" fill="url(#${uniqueId}_plume)" opacity="0.5" />
+        <ellipse cx="${centerX}" cy="${ostioleY - 48}" rx="22" ry="24" fill="url(#${uniqueId}_plume)" opacity="0.25" />
+        <!-- Micro-spore particles in plume -->
+        <circle cx="${centerX - 4}" cy="${ostioleY - 22}" r="1.2" fill="#ffffff" />
+        <circle cx="${centerX + 5}" cy="${ostioleY - 36}" r="1.4" fill="#ffffff" opacity="0.8" />
+        <circle cx="${centerX - 7}" cy="${ostioleY - 44}" r="1.0" fill="#ffffff" opacity="0.7" />
+      `;
+      break;
+    }
+
+    case 'Cup': {
+      // Pezizoid Apothecia Cup / Chalice: Inverted cone/chalice, concave hymenium lining, glowing inner disc, spore jet sparkles
+      const cupTopY = height * 0.35;
+      const cupBaseY = height * 0.58;
+      const cupW = width * 0.34;
+      const stipeW = width * 0.04;
+
+      floraShapesSvg = `
+        <!-- Basal Rhizoids -->
+        <ellipse cx="${centerX}" cy="${groundY}" rx="${width * 0.1}" ry="5" fill="url(#${uniqueId}_stipe)" />
+
+        <!-- Slender Pedicel Stipe -->
+        <path d="M ${centerX - stipeW * 1.4} ${groundY} Q ${centerX - stipeW * 0.8} ${(groundY + cupBaseY) * 0.5} ${centerX - stipeW} ${cupBaseY} L ${centerX + stipeW} ${cupBaseY} Q ${centerX + stipeW * 0.8} ${(groundY + cupBaseY) * 0.5} ${centerX + stipeW * 1.4} ${groundY} Z" fill="url(#${uniqueId}_stipe)" />
+
+        <!-- Chalice Exterior Flesh -->
+        <path d="M ${centerX - cupW} ${cupTopY} Q ${centerX - cupW * 0.6} ${cupBaseY} ${centerX} ${cupBaseY + 6} Q ${centerX + cupW * 0.6} ${cupBaseY} ${centerX + cupW} ${cupTopY} Z" fill="url(#${uniqueId}_stipe)" stroke="${stipeHighlight}" stroke-width="0.8" />
+
+        <!-- Concave Inner Hymenium Spore Surface -->
+        <ellipse cx="${centerX}" cy="${cupTopY}" rx="${cupW}" ry="${height * 0.11}" fill="url(#${uniqueId}_pigment)" stroke="${pigmentLight}" stroke-width="1.2" />
+        <ellipse cx="${centerX}" cy="${cupTopY + 2}" rx="${cupW * 0.85}" ry="${height * 0.08}" fill="${pigmentVibrant}" opacity="0.6" />
+        <ellipse cx="${centerX}" cy="${cupTopY + 3}" rx="${cupW * 0.5}" ry="${height * 0.045}" fill="#ffffff" opacity="0.35" />
+
+        <!-- Ascospore Jet Sparkles Emitted Vertically -->
+        <line x1="${centerX - 12}" y1="${cupTopY}" x2="${centerX - 18}" y2="${cupTopY - 28}" stroke="${pigmentLight}" stroke-width="0.8" stroke-dasharray="2,3" opacity="0.75" />
+        <line x1="${centerX}" y1="${cupTopY}" x2="${centerX}" y2="${cupTopY - 38}" stroke="#ffffff" stroke-width="1.0" stroke-dasharray="2,4" opacity="0.9" />
+        <line x1="${centerX + 12}" y1="${cupTopY}" x2="${centerX + 18}" y2="${cupTopY - 26}" stroke="${pigmentLight}" stroke-width="0.8" stroke-dasharray="2,3" opacity="0.75" />
+        <circle cx="${centerX}" cy="${cupTopY - 40}" r="2" fill="#ffffff" />
+        <circle cx="${centerX - 18}" cy="${cupTopY - 30}" r="1.5" fill="${pigmentLight}" />
+        <circle cx="${centerX + 18}" cy="${cupTopY - 28}" r="1.5" fill="${pigmentLight}" />
+      `;
+      break;
+    }
+
+    case 'Coral': {
+      // Clavarioid Ramaria / Antler Coral: Densely branched upright stems dividing into vibrant glowing tips
+      const bStems = [
+        // Left main branch
+        `M ${centerX - 10} ${groundY} Q ${centerX - 24} ${groundY - height * 0.2} ${centerX - width * 0.22} ${height * 0.42}`,
+        `M ${centerX - width * 0.22} ${height * 0.42} Q ${centerX - width * 0.32} ${height * 0.34} ${centerX - width * 0.34} ${height * 0.24}`,
+        `M ${centerX - width * 0.22} ${height * 0.42} Q ${centerX - width * 0.16} ${height * 0.32} ${centerX - width * 0.18} ${height * 0.22}`,
+        // Center-left branch
+        `M ${centerX - 4} ${groundY} Q ${centerX - 10} ${groundY - height * 0.25} ${centerX - width * 0.08} ${height * 0.38}`,
+        `M ${centerX - width * 0.08} ${height * 0.38} Q ${centerX - width * 0.14} ${height * 0.28} ${centerX - width * 0.12} ${height * 0.18}`,
+        `M ${centerX - width * 0.08} ${height * 0.38} Q ${centerX - width * 0.02} ${height * 0.26} ${centerX - width * 0.04} ${height * 0.16}`,
+        // Center-right branch
+        `M ${centerX + 4} ${groundY} Q ${centerX + 10} ${groundY - height * 0.24} ${centerX + width * 0.08} ${height * 0.37}`,
+        `M ${centerX + width * 0.08} ${height * 0.37} Q ${centerX + width * 0.03} ${height * 0.26} ${centerX + width * 0.04} ${height * 0.15}`,
+        `M ${centerX + width * 0.08} ${height * 0.37} Q ${centerX + width * 0.15} ${height * 0.27} ${centerX + width * 0.14} ${height * 0.19}`,
+        // Right main branch
+        `M ${centerX + 10} ${groundY} Q ${centerX + 24} ${groundY - height * 0.2} ${centerX + width * 0.22} ${height * 0.43}`,
+        `M ${centerX + width * 0.22} ${height * 0.43} Q ${centerX + width * 0.18} ${height * 0.33} ${centerX + width * 0.19} ${height * 0.23}`,
+        `M ${centerX + width * 0.22} ${height * 0.43} Q ${centerX + width * 0.32} ${height * 0.33} ${centerX + width * 0.34} ${height * 0.25}`,
+      ];
+
+      const tips = [
+        { x: centerX - width * 0.34, y: height * 0.24 },
+        { x: centerX - width * 0.18, y: height * 0.22 },
+        { x: centerX - width * 0.12, y: height * 0.18 },
+        { x: centerX - width * 0.04, y: height * 0.16 },
+        { x: centerX + width * 0.04, y: height * 0.15 },
+        { x: centerX + width * 0.14, y: height * 0.19 },
+        { x: centerX + width * 0.19, y: height * 0.23 },
+        { x: centerX + width * 0.34, y: height * 0.25 },
+      ];
+
+      floraShapesSvg = `
+        <!-- Basal Mass -->
+        <ellipse cx="${centerX}" cy="${groundY}" rx="${width * 0.14}" ry="8" fill="url(#${uniqueId}_stipe)" />
+
+        <!-- Antler Stems -->
+        ${bStems.map(d => `<path d="${d}" stroke="url(#${uniqueId}_pigment)" stroke-width="4.2" stroke-linecap="round" fill="none" />`).join('\n')}
+        ${bStems.map(d => `<path d="${d}" stroke="${pigmentLight}" stroke-width="1.8" stroke-linecap="round" fill="none" opacity="0.6" />`).join('\n')}
+
+        <!-- Glowing Terminal Antler Apices -->
+        ${tips.map(tp => `
+          <circle cx="${tp.x}" cy="${tp.y}" r="4.5" fill="${pigmentLight}" stroke="${pigmentDark}" stroke-width="0.8" />
+          <circle cx="${tp.x}" cy="${tp.y}" r="2.0" fill="#ffffff" />
+          <circle cx="${tp.x}" cy="${tp.y}" r="8.0" fill="${pigmentLight}" opacity="0.25" />
+        `).join('\n')}
+      `;
+      break;
+    }
+
+    case 'MycelialNet': {
+      // Rhizomorph Hyphal Network: Dendritic filaments creeping across substrate, micro-sclerotia nodes, bioluminescent web pulses
+      const hyphaePaths = [
+        `M ${centerX} ${groundY - 14} Q ${centerX - width * 0.2} ${groundY - 18} ${centerX - width * 0.42} ${groundY + 2}`,
+        `M ${centerX - width * 0.2} ${groundY - 18} Q ${centerX - width * 0.3} ${groundY - 32} ${centerX - width * 0.35} ${groundY - 45}`,
+        `M ${centerX} ${groundY - 14} Q ${centerX + width * 0.2} ${groundY - 20} ${centerX + width * 0.42} ${groundY + 2}`,
+        `M ${centerX + width * 0.18} ${groundY - 20} Q ${centerX + width * 0.28} ${groundY - 34} ${centerX + width * 0.32} ${groundY - 48}`,
+        `M ${centerX} ${groundY - 14} Q ${centerX - width * 0.05} ${groundY - 35} ${centerX} ${groundY - 55}`,
+        `M ${centerX} ${groundY - 55} Q ${centerX - width * 0.1} ${groundY - 68} ${centerX - width * 0.12} ${groundY - 78}`,
+        `M ${centerX} ${groundY - 55} Q ${centerX + width * 0.1} ${groundY - 68} ${centerX + width * 0.12} ${groundY - 78}`,
+      ];
+
+      const nodes = [
+        { cx: centerX, cy: groundY - 14, r: 6.0 },
+        { cx: centerX - width * 0.2, cy: groundY - 18, r: 4.5 },
+        { cx: centerX + width * 0.18, cy: groundY - 20, r: 4.8 },
+        { cx: centerX - width * 0.35, cy: groundY - 45, r: 3.8 },
+        { cx: centerX + width * 0.32, cy: groundY - 48, r: 4.0 },
+        { cx: centerX, cy: groundY - 55, r: 5.2 },
+        { cx: centerX - width * 0.12, cy: groundY - 78, r: 3.5 },
+        { cx: centerX + width * 0.12, cy: groundY - 78, r: 3.5 },
+      ];
+
+      floraShapesSvg = `
+        <!-- Substrate Ambient Mycelial Glow -->
+        <ellipse cx="${centerX}" cy="${groundY}" rx="${width * 0.44}" ry="12" fill="url(#${uniqueId}_plume)" opacity="0.35" />
+
+        <!-- Hyphal Filaments -->
+        ${hyphaePaths.map(d => `
+          <path d="${d}" stroke="url(#${uniqueId}_stipe)" stroke-width="3.2" fill="none" stroke-linecap="round" />
+          <path d="${d}" stroke="${pigmentLight}" stroke-width="1.2" fill="none" stroke-linecap="round" opacity="0.85" />
+        `).join('\n')}
+
+        <!-- Micro-Sclerotia Fruiting Nodules -->
+        ${nodes.map(n => `
+          <g>
+            <circle cx="${n.cx}" cy="${n.cy}" r="${n.r * 2.2}" fill="${pigmentLight}" opacity="0.18" />
+            <circle cx="${n.cx}" cy="${n.cy}" r="${n.r}" fill="url(#${uniqueId}_pigment)" stroke="${stipeHighlight}" stroke-width="0.8" />
+            <circle cx="${n.cx - n.r * 0.25}" cy="${n.cy - n.r * 0.25}" r="${n.r * 0.4}" fill="#ffffff" opacity="0.85" />
+          </g>
+        `).join('\n')}
+      `;
+      break;
+    }
   }
 
   // Format height string for scale bar
@@ -430,11 +727,12 @@ export function generateBotanicalSvg(
     </g>
   ` : '';
 
+  const isFungi = 'kingdom' in species && species.kingdom === 'Fungi';
   const labelsSvg = showLabels ? `
     <!-- Field Specimen Taxonomic Stamp -->
     <g transform="translate(12, 16)">
-      <text x="0" y="0" fill="#38bdf8" font-size="7.5" font-family="monospace" font-weight="bold" letter-spacing="0.5">
-        SPECIMEN EX-${seed.toString(16).substring(0, 4).toUpperCase()}
+      <text x="0" y="0" fill="${isFungi ? '#f472b6' : '#38bdf8'}" font-size="7.5" font-family="monospace" font-weight="bold" letter-spacing="0.5">
+        ${isFungi ? 'MYCOTA' : 'SPECIMEN'} EX-${seed.toString(16).substring(0, 4).toUpperCase()}
       </text>
       <text x="0" y="9" fill="#94a3b8" font-size="7" font-family="sans-serif" font-style="italic">
         ${species.scientificName}
@@ -506,7 +804,7 @@ export function generateBotanicalSvg(
       <line x1="0" y1="${groundY}" x2="${width}" y2="${groundY}" stroke="rgba(255,255,255,0.12)" stroke-width="1" />
       <line x1="0" y1="${groundY + 1}" x2="${width}" y2="${groundY + 1}" stroke="${pigment}" stroke-width="0.8" opacity="0.25" />
 
-      <!-- Botanical Plant Specimen Anatomy -->
+      <!-- Botanical Plant / Fungal Specimen Anatomy -->
       ${floraShapesSvg}
 
       <!-- Specimen Labels & Scale Bar -->
@@ -523,7 +821,7 @@ export function generateBotanicalSvg(
  * Encodes procedural SVG as an inline Data URL for <img> tags or CSS backgrounds.
  */
 export function getBotanicalDataUrl(
-  species: XenofloraSpecies,
+  species: SpecimenSpecies,
   options: BotanicalArtOptions = {}
 ): string {
   const svg = generateBotanicalSvg(species, options);

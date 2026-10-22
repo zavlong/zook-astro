@@ -37,6 +37,7 @@ import { FirstPersonSurfaceView } from './FirstPersonSurfaceView';
 import { PlanetaryChemistrySection } from './PlanetaryChemistrySection';
 import { SurfaceEcosystemPanel } from './SurfaceEcosystemPanel';
 import { generatePlantEcosystem } from '../../../core/xenobiology/floraGen';
+import { generateFungiEcosystem } from '../../../core/xenobiology/fungiGen';
 
 interface PlanetarySurfaceExplorerProps {
   planet: RealisticPlanetBody;
@@ -94,6 +95,28 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       : true;
 
     return generatePlantEcosystem({
+      seed: surfaceModel.seed,
+      hasBiosphere: surfaceModel.hasBiosphere,
+      biosphereDescription: (moon ? moon.hydrosphere?.biosphere : planet.hydrosphere?.biosphere) || undefined,
+      starTeff: stars?.[0]?.Teff,
+      gravityG: moon ? moon.gravityG : planet.gravityG,
+      pressureBar: moon ? moon.pressureBar : planet.pressureBar,
+      solventKey: surfaceModel.seaPalette?.solventKey || (moon ? moon.hydrosphere?.solvent : planet.hydrosphere?.solvent) || 'H2O',
+      hasLiquid: surfaceModel.hasLiquid,
+      hasLand,
+      coveragePct,
+      biomeGrid: surfaceModel.biomeGrid,
+    });
+  }, [surfaceModel, planet, moon, stars]);
+
+  // Procedural Fungi & Mycota Ecosystem
+  const fungiEcosystem = useMemo(() => {
+    const coveragePct = (moon ? moon.hydrosphere?.coveragePct : planet.hydrosphere?.coveragePct) ?? (surfaceModel.hasLiquid ? 70 : 0);
+    const hasLand = surfaceModel.hasLiquid
+      ? coveragePct < 100 && !surfaceModel.isNoSurface
+      : true;
+
+    return generateFungiEcosystem({
       seed: surfaceModel.seed,
       hasBiosphere: surfaceModel.hasBiosphere,
       biosphereDescription: (moon ? moon.hydrosphere?.biosphere : planet.hydrosphere?.biosphere) || undefined,
@@ -563,10 +586,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
                   ? 'bg-emerald-950/70 border-emerald-500/60 text-emerald-300 hover:bg-emerald-900/50'
                   : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
               }`}
-              title="Toggle Indigenous Xenoflora & Ecosystem Species Catalog"
+              title="Toggle Indigenous Xenoflora, Xenofungi & Ecosystem Species Catalog"
             >
               <Sprout className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Flora</span>
+              <span>Ecosystem</span>
               {surfaceModel.hasBiosphere && (
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
               )}
@@ -887,9 +910,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         </div>
       </div>
 
-      {/* Indigenous Xenoflora & Detailed Ecosystem Catalog (Toggleable) */}
+      {/* Indigenous Xenoflora, Xenofungi & Detailed Ecosystem Catalog (Toggleable) */}
       <SurfaceEcosystemPanel
         ecosystem={ecosystem}
+        fungiEcosystem={fungiEcosystem}
         activeTile={selectedTile}
         isTileView={displayMode === 'terrain' || displayMode === 'horizon'}
         isOpen={showEcosystemPanel}
