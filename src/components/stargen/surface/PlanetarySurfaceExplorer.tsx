@@ -9,6 +9,7 @@ import {
   Pause,
   RotateCcw,
   Hexagon,
+  Sprout,
 } from 'lucide-react';
 import {
   RealisticPlanetBody,
@@ -34,6 +35,8 @@ import {
 import { LocalTileTerrainView } from './LocalTileTerrainView';
 import { FirstPersonSurfaceView } from './FirstPersonSurfaceView';
 import { PlanetaryChemistrySection } from './PlanetaryChemistrySection';
+import { SurfaceEcosystemPanel } from './SurfaceEcosystemPanel';
+import { generatePlantEcosystem } from '../../../core/xenobiology/floraGen';
 
 interface PlanetarySurfaceExplorerProps {
   planet: RealisticPlanetBody;
@@ -59,6 +62,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
   const [timeOfDayDeg, setTimeOfDayDeg] = useState<number>(45); // 0 = Sunrise, 90 = Noon, 180 = Sunset, 270 = Midnight
   const [showGrid, setShowGrid] = useState<boolean>(false);
   const [showTileGrid, setShowTileGrid] = useState<boolean>(true);
+  const [showEcosystemPanel, setShowEcosystemPanel] = useState<boolean>(false);
 
   // Interactive 3D Globe Rotation State
   const [globeYaw, setGlobeYaw] = useState<number>(0);
@@ -81,6 +85,21 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
   const surfaceModel = useMemo<PlanetarySurfaceModel>(() => {
     return generatePlanetarySurfaceModel(planet, moon, zone, stars);
   }, [planet, moon, zone, stars]);
+
+  // Procedural Plant Ecosystem & Xenoflora
+  const ecosystem = useMemo(() => {
+    return generatePlantEcosystem({
+      seed: surfaceModel.seed,
+      hasBiosphere: surfaceModel.hasBiosphere,
+      biosphereDescription: (moon ? moon.hydrosphere?.biosphere : planet.hydrosphere?.biosphere) || undefined,
+      starTeff: stars?.[0]?.Teff,
+      gravityG: moon ? moon.gravityG : planet.gravityG,
+      pressureBar: moon ? moon.pressureBar : planet.pressureBar,
+      solventKey: surfaceModel.seaPalette?.solventKey || (moon ? moon.hydrosphere?.solvent : planet.hydrosphere?.solvent) || 'H2O',
+      hasLiquid: surfaceModel.hasLiquid,
+      biomeGrid: surfaceModel.biomeGrid,
+    });
+  }, [surfaceModel, planet, moon, stars]);
 
   // Generate Goldberg Polyhedron (480 Hexagons + 12 Pentagons) planetary tile grid
   const goldbergGrid = useMemo<PlanetaryGoldbergGrid>(() => {
@@ -529,6 +548,25 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
             <button
               type="button"
+              onClick={() => setShowEcosystemPanel(prev => !prev)}
+              className={`px-2 py-1 rounded text-[11px] border font-bold flex items-center gap-1.5 cursor-pointer transition ${
+                showEcosystemPanel
+                  ? 'bg-emerald-900 border-emerald-400 text-emerald-200 shadow-md shadow-emerald-950/40'
+                  : surfaceModel.hasBiosphere
+                  ? 'bg-emerald-950/70 border-emerald-500/60 text-emerald-300 hover:bg-emerald-900/50'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
+              }`}
+              title="Toggle Indigenous Xenoflora & Ecosystem Species Catalog"
+            >
+              <Sprout className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Flora</span>
+              {surfaceModel.hasBiosphere && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              )}
+            </button>
+
+            <button
+              type="button"
               onClick={handleDownloadMap}
               className="p-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 cursor-pointer ml-1"
               title="Download High-Res Surface Map or Globe"
@@ -837,6 +875,14 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
           </b>
         </div>
       </div>
+
+      {/* Indigenous Xenoflora & Detailed Ecosystem Catalog (Toggleable) */}
+      <SurfaceEcosystemPanel
+        ecosystem={ecosystem}
+        activeTile={selectedTile}
+        isOpen={showEcosystemPanel}
+        onClose={() => setShowEcosystemPanel(false)}
+      />
 
       {/* Surface & Internal Geochemistry Composition Tables */}
       <PlanetaryChemistrySection planet={planet} moon={moon} surfaceModel={surfaceModel} />

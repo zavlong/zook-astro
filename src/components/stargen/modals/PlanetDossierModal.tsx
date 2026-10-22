@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Crosshair,
   X,
@@ -15,9 +15,12 @@ import {
   Download,
   Copy,
   Check,
+  Sprout,
+  ArrowRight,
 } from 'lucide-react';
 import { PlanetarySurfaceExplorer } from '../surface/PlanetarySurfaceExplorer';
 import { PlanetaryChemistrySection } from '../surface/PlanetaryChemistrySection';
+import { generatePlantEcosystem } from '../../../core/xenobiology/floraGen';
 import {
   ExportFormatType,
   exportSingleEntityInFormat,
@@ -144,6 +147,23 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
   const hydro = isMoon && activeMoon ? activeMoon.hydrosphere : hostPlanet.hydrosphere;
   const magField = isMoon && activeMoon ? activeMoon.magneticField : hostPlanet.magneticField;
   const sysAge = systemResult?.step1?.age ?? 4.5;
+
+  const planetEcosystem = useMemo(() => {
+    const seed = isMoon && activeMoon
+      ? Math.round(activeMoon.radiusKm * 31 + (activeMoon.surfaceTempK || 200))
+      : Math.round(hostPlanet.a * 1000 + hostPlanet.massEarth * 100);
+    return generatePlantEcosystem({
+      seed,
+      hasBiosphere: Boolean(hydro?.biosphere),
+      biosphereDescription: hydro?.biosphere || undefined,
+      systemAgeGyr: sysAge,
+      starTeff: systemResult.hierarchy.stars[0]?.Teff,
+      gravityG: isMoon && activeMoon ? activeMoon.gravityG : hostPlanet.gravityG,
+      pressureBar: pBar,
+      solventKey: hydro?.solvent || 'H2O',
+      hasLiquid: hydro?.coveragePct !== undefined ? hydro.coveragePct > 0 : true,
+    });
+  }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, systemResult, pBar]);
 
   const tauIR =
     ghK > 0 && Tatm > 10 ? Math.max(0.01, (4 / 3) * (Math.pow(Tsurf / Tatm, 4) - 1)) : 0;
@@ -819,6 +839,68 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
               <span className="text-slate-400 block text-[10px] mb-0.5">ECOSYSTEM SUMMARY</span>
               <p className="text-emerald-200 text-xs leading-relaxed">{hydro.biosphere}</p>
             </div>
+
+            {/* Brief Indigenous Plant Life & Xenoflora Summary */}
+            {planetEcosystem.hasPlantLife && (
+              <div className="bg-[#0c121d] p-2.5 rounded-lg border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                    <Sprout className="w-3.5 h-3.5 text-emerald-400" />
+                    Indigenous Plant Life & Autotrophs
+                  </span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 border border-emerald-500/50 text-emerald-300">
+                    {planetEcosystem.totalSpeciesCount} Taxa Cataloged
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+                  <div>
+                    <span className="text-slate-500 block text-[9px]">DOMINANT PIGMENT</span>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full border border-white/30 flex-shrink-0"
+                        style={{ backgroundColor: planetEcosystem.dominantPigmentHex }}
+                      />
+                      <b className="text-white truncate" title={planetEcosystem.dominantPigment}>
+                        {planetEcosystem.dominantPigment.split('(')[0].trim()}
+                      </b>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[9px]">PHOTOTROPHY</span>
+                    <b className="text-emerald-300 block truncate mt-0.5" title={planetEcosystem.photosynthesisType}>
+                      {planetEcosystem.photosynthesisType}
+                    </b>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[9px]">CANOPY HEIGHT</span>
+                    <b className="text-sky-300 block mt-0.5">
+                      Up to {planetEcosystem.canopyHeightRangeM.max}m
+                    </b>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[9px]">STRUCTURE</span>
+                    <b className="text-amber-200 block truncate mt-0.5" title={planetEcosystem.structuralBase}>
+                      {planetEcosystem.structuralBase}
+                    </b>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[10px]">
+                  <span className="text-slate-400">
+                    Gravity-scaled morphology ({(isMoon && activeMoon ? activeMoon.gravityG : hostPlanet.gravityG).toFixed(2)}g)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('surface')}
+                    className="flex items-center gap-1 text-emerald-300 hover:text-emerald-200 font-bold transition hover:underline cursor-pointer"
+                  >
+                    <span>View Species Table in Surface View</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
