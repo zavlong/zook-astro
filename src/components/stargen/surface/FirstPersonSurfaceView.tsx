@@ -33,8 +33,8 @@ import {
   isotropicNoise2D,
   fbm2D,
   ridgedFbm2D,
-  cellularFeature2D,
 } from './terrainNoise';
+import { evaluateDetailedBiomeTexel } from './detailedBiomeTextures';
 
 interface FirstPersonSurfaceViewProps {
   surfaceModel: PlanetarySurfaceModel;
@@ -179,7 +179,6 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
     );
 
     const isBiomeOcean = (id: number) => !surfaceModel.isNoSurface && (id <= 2 || id === 17 || id === 23);
-    const isBiomeIce = (id: number) => id === 8 || id === 13 || id === 18 || id === 21;
     const anyOceanBiome = isBiomeOcean(bId1) || (bId2 !== null && isBiomeOcean(bId2));
     const isPureOceanTile = isBiomeOcean(bId1) && (bId2 === null || isBiomeOcean(bId2));
     const hasAlgalSeaBiome = bId1 === 23 || bId2 === 23;
@@ -284,13 +283,10 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
     const highRgb = hexToRgb(surfaceModel.compositionPalette.mountainHex);
     const peakRgb = hexToRgb(surfaceModel.compositionPalette.peakHex);
     const basaltRgb = hexToRgb(surfaceModel.compositionPalette.basaltHex);
-    const plateauRgb = hexToRgb(surfaceModel.compositionPalette.plateauHex);
     const alluvialRgb = hexToRgb(surfaceModel.compositionPalette.alluvialHex);
     const iceRgb = hexToRgb(surfaceModel.compositionPalette.iceHex);
     const marshRgb = hexToRgb(surfaceModel.floraPalette.marshHex);
     const plainsRgb = hexToRgb(surfaceModel.floraPalette.plainsHex);
-    const forestRgb = hexToRgb(surfaceModel.floraPalette.woodlandHex);
-    const taigaRgb = hexToRgb(surfaceModel.floraPalette.taigaHex);
 
     const effCloudCover = surfaceModel.isNoSurface
       ? 0.85
@@ -546,181 +542,39 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       baseNz: number,
       isFissureFloor: boolean
     ): { r: number; g: number; b: number; nx: number; nz: number; hDelta: number; flags: number } => {
-      let r = targetBaseRgb[0];
-      let g = targetBaseRgb[1];
-      let b = targetBaseRgb[2];
-      let nx = baseNx;
-      let nz = baseNz;
-      let hDelta = 0;
-      let flags = 0;
+      const res = evaluateDetailedBiomeTexel({
+        biomeId: targetBiomeId,
+        baseRgb: targetBaseRgb,
+        px,
+        pz,
+        hLocal,
+        slope,
+        dhx,
+        dhz,
+        baseFbm,
+        ridge,
+        fine1,
+        fine2,
+        fine3: grain,
+        grain,
+        baseBumpX: baseNx,
+        baseBumpZ: baseNz,
+        fissureWeight: isFissureFloor ? 0.85 : 0,
+        tileSeed,
+        surfaceModel,
+        craterIntensity: activeTile.craterIntensity,
+        isFirstPerson: true,
+      });
 
-      const isIceB = isBiomeIce(targetBiomeId);
-      const hasBioB = targetBiomeId >= 3 && targetBiomeId <= 6 && surfaceModel.floraPalette.hasAnyLife;
-      const isDesertB = targetBiomeId === 10;
-      const isCanyonB = targetBiomeId === 11;
-      const isVolcB = targetBiomeId === 15 || targetBiomeId === 22 || surfaceModel.isMoltenWorld;
-      const isCraterOrBarrenB =
-        targetBiomeId === 8 ||
-        targetBiomeId === 9 ||
-        targetBiomeId === 12 ||
-        targetBiomeId === 13 ||
-        targetBiomeId === 14 ||
-        targetBiomeId === 16;
-
-      if (isIceB) {
-        flags |= FLAG_ICE_SPEC;
-        const isTholinIce =
-          surfaceModel.seaPalette.solventKey === 'NH3-H2O' ||
-          surfaceModel.seaPalette.solventKey === 'CH4-C2H6' ||
-          surfaceModel.compositionPalette.compositionLabel.includes('Tholin');
-        const sastrugiWave = Math.sin(px * 75 - pz * 38 + fine1 * 5.2 + fine2 * 1.8);
-        const crevassePattern = Math.abs(fine1 * 2.0 - 1.0 + (ridge - 0.5) * 0.6);
-        const isCrevasse = crevassePattern < 0.14 || isFissureFloor;
-        nx += Math.cos(px * 75 - pz * 38 + fine1 * 5.2) * 0.48;
-        nz -= Math.sin(px * 75 - pz * 38 + fine1 * 5.2) * 0.36;
-
-        if (isCrevasse) {
-          const depthCrev = isFissureFloor ? 0.85 : 1.0 - crevassePattern / 0.14;
-          r = Math.round(targetBaseRgb[0] * (1 - depthCrev * 0.62) + (isTholinIce ? 92 : 38) * (depthCrev * 0.62));
-          g = Math.round(targetBaseRgb[1] * (1 - depthCrev * 0.48) + (isTholinIce ? 36 : 128) * (depthCrev * 0.48));
-          b = Math.round(targetBaseRgb[2] * (1 - depthCrev * 0.38) + (isTholinIce ? 18 : 210) * (depthCrev * 0.38));
-          hDelta -= depthCrev * 0.015;
-        } else {
-          const frostSparkle = sastrugiWave * 12 + grain * 14;
-          r = Math.round(targetBaseRgb[0] * 0.72 + iceRgb[0] * 0.28 + frostSparkle * (isTholinIce ? 1.15 : 1.0));
-          g = Math.round(targetBaseRgb[1] * 0.72 + iceRgb[1] * 0.28 + frostSparkle * (isTholinIce ? 0.76 : 1.0));
-          b = Math.round(targetBaseRgb[2] * 0.7 + iceRgb[2] * 0.3 + frostSparkle * (isTholinIce ? 0.42 : 1.1));
-        }
-      } else if (hasBioB) {
-        const isForestBiome = targetBiomeId === 5 || targetBiomeId === 6;
-        const isGrasslandBiome = targetBiomeId === 4;
-        const canopyDensity = Math.max(
-          0,
-          Math.min(
-            1,
-            baseFbm * 1.15 +
-              (targetBiomeId === 5 ? 0.38 : targetBiomeId === 6 ? 0.26 : isGrasslandBiome ? -0.18 : 0.08)
-          )
-        );
-        const cell = cellularFeature2D(px * 32.0, pz * 32.0, tileSeed + 809);
-        const crownRadius = isForestBiome
-          ? 0.34 + canopyDensity * 0.26
-          : isGrasslandBiome
-          ? 0.16 + canopyDensity * 0.16
-          : 0.25 + canopyDensity * 0.22;
-
-        const isUnicellular = surfaceModel.isUnicellularOnly;
-        const hasTreeHere =
-          !isUnicellular &&
-          cell.dist < crownRadius &&
-          slope < 0.55 &&
-          hLocal > 0.015 &&
-          hLocal < 0.27 &&
-          (isForestBiome || cell.cellHash < (isGrasslandBiome ? 0.32 : 0.65));
-
-        if (hasTreeHere) {
-          const uCrown = cell.dist / crownRadius;
-          const crownHeightProfile = Math.sqrt(Math.max(0, 1.0 - uCrown * uCrown));
-          hDelta += crownHeightProfile * (isForestBiome ? 0.025 : 0.016);
-          nx += (cell.dx / crownRadius) * 1.15 + (fine2 - 0.5) * 0.32;
-          nz += (cell.dy / crownRadius) * 1.15 + grain * 0.32;
-
-          const speciesShade =
-            (cell.cellHash - 0.5) * 24 + crownHeightProfile * 16 - (1 - crownHeightProfile) * 20;
-          const cRgb = targetBiomeId === 6 ? taigaRgb : isForestBiome ? forestRgb : plainsRgb;
-          r = Math.round(cRgb[0] + speciesShade + fine2 * 12);
-          g = Math.round(cRgb[1] + speciesShade * 1.15 + fine2 * 16);
-          b = Math.round(cRgb[2] + speciesShade * 0.7 + fine2 * 9);
-        } else {
-          const wetlandT = hLocal < 0.055 ? Math.max(0, Math.min(1, (0.055 - hLocal) / 0.055)) : 0;
-          const windMeadow = Math.sin(px * 44 + pz * 32 + fine1 * 5.5) * 10 + (fine2 - 0.5) * 14 + grain * 10;
-          const baseBioRgb =
-            targetBiomeId === 6 ? taigaRgb : isForestBiome ? forestRgb : targetBiomeId === 3 ? marshRgb : plainsRgb;
-          r = Math.round(baseBioRgb[0] * (1 - wetlandT * 0.65) + marshRgb[0] * (wetlandT * 0.65) + windMeadow * 0.9);
-          g = Math.round(
-            baseBioRgb[1] * (1 - wetlandT * 0.65) + marshRgb[1] * (wetlandT * 0.65) + windMeadow * 1.15
-          );
-          b = Math.round(
-            baseBioRgb[2] * (1 - wetlandT * 0.65) + marshRgb[2] * (wetlandT * 0.65) + windMeadow * 0.75
-          );
-        }
-      } else if (isDesertB) {
-        const ripplePhase =
-          px * 128.0 + pz * 58.0 + Math.sin(pz * 14.0 + baseFbm * 5.0) * 6.5 + fine1 * 4.0;
-        const rippleWave = Math.sin(ripplePhase);
-        nx += Math.cos(ripplePhase) * 0.55;
-        nz += Math.sin(ripplePhase) * 0.3;
-
-        const mineralBand = Math.sin(hLocal * 42 + baseFbm * 6.0) * 14 + rippleWave * 8 + grain * 14;
-        r = Math.round(targetBaseRgb[0] + mineralBand * 1.15);
-        g = Math.round(targetBaseRgb[1] + mineralBand * 0.92);
-        b = Math.round(targetBaseRgb[2] + mineralBand * 0.65);
-      } else if (isCanyonB) {
-        const strataPhase = hLocal * 125.0 + fine1 * 2.2 + fine2 * 0.8;
-        const strataBand = Math.sin(strataPhase);
-        const fineLayer = Math.sin(strataPhase * 3.4) * 0.5;
-        const bandContrast = strataBand * 22 + fineLayer * 11 + grain * 10;
-        nx += dhx * strataBand * 0.65;
-        nz += dhz * strataBand * 0.65;
-
-        r = Math.round(plateauRgb[0] * 0.88 + highRgb[0] * 0.12 + bandContrast * 1.2);
-        g = Math.round(plateauRgb[1] * 0.88 + highRgb[1] * 0.12 + bandContrast * 0.85);
-        b = Math.round(plateauRgb[2] * 0.88 + highRgb[2] * 0.12 + bandContrast * 0.55);
-      } else if (isVolcB) {
-        const pahoehoe = Math.sin(px * 62 + pz * 50 + fine1 * 7.5);
-        const crack = Math.abs(fine1 * 2.0 - 1.0 + (fine2 - 0.5) * 0.5);
-        nx += pahoehoe * 0.55;
-        nz -= pahoehoe * 0.48;
-
-        if (crack < 0.065 && (activeTile.volcanoIntensity > 0.35 || surfaceModel.isMoltenWorld)) {
-          const glow = 1.0 - crack / 0.065;
-          r = Math.round(180 + 75 * glow);
-          g = Math.round(55 + 110 * glow);
-          b = Math.round(12 + 30 * glow);
-          flags |= FLAG_LAVA;
-        } else {
-          const ashVar = pahoehoe * 10 + (fine2 - 0.5) * 22 + grain * 14;
-          r = Math.round(basaltRgb[0] + ashVar);
-          g = Math.round(basaltRgb[1] + ashVar * 0.9);
-          b = Math.round(basaltRgb[2] + ashVar * 0.85);
-        }
-      } else if (isCraterOrBarrenB) {
-        const cell = cellularFeature2D(px * 28.0, pz * 28.0, tileSeed + 937);
-        let microRelief = (fine1 - 0.5) * 20 + (fine2 - 0.5) * 15 + grain * 14;
-
-        if (cell.dist < 0.28) {
-          const uCr = cell.dist / 0.28;
-          if (cell.cellHash > 0.32 && effCraterIntensity > 0.04) {
-            if (uCr < 0.76) {
-              nx -= (cell.dx / 0.28) * 1.35;
-              nz -= (cell.dy / 0.28) * 1.35;
-              microRelief -= (1 - uCr) * 22;
-              hDelta -= (1 - uCr) * 0.011;
-            } else {
-              nx += (cell.dx / 0.28) * 1.15;
-              nz += (cell.dy / 0.28) * 1.15;
-              microRelief += 16;
-              hDelta += 0.007;
-            }
-          } else {
-            nx += (cell.dx / 0.28) * 1.05;
-            nz += (cell.dy / 0.28) * 1.05;
-            microRelief += (1 - uCr) * 14;
-            hDelta += (1 - uCr) * 0.011;
-          }
-        }
-
-        r = Math.round(targetBaseRgb[0] + microRelief);
-        g = Math.round(targetBaseRgb[1] + microRelief * 0.95);
-        b = Math.round(targetBaseRgb[2] + microRelief * 0.9);
-      } else {
-        const texVar = (fine1 - 0.5) * 24 + (fine2 - 0.5) * 16 + grain * 14;
-        r = Math.round(targetBaseRgb[0] + texVar);
-        g = Math.round(targetBaseRgb[1] + texVar * 0.96);
-        b = Math.round(targetBaseRgb[2] + texVar * 0.9);
-      }
-
-      return { r, g, b, nx, nz, hDelta, flags };
+      return {
+        r: res.r,
+        g: res.g,
+        b: res.b,
+        nx: res.bumpX,
+        nz: res.bumpZ,
+        hDelta: res.hDelta,
+        flags: res.flags,
+      };
     };
 
     for (let tz = 0; tz < TEX_RES; tz++) {
