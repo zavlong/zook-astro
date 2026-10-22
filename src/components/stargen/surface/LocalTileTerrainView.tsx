@@ -1885,7 +1885,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
   ]);
 
   return (
-    <div className="w-full flex flex-col gap-3">
+    <div className={`w-full flex flex-col ${isFullscreen ? 'flex-1 h-full min-h-0 gap-2' : 'gap-3'}`}>
       {/* Top Bar: Tile Info + Back to Globe + 3D Biome Block Controls */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/90 px-3 py-2 rounded-lg border border-slate-800">
         <div className="flex items-center gap-2.5 flex-wrap">
@@ -1970,21 +1970,23 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={() => setShowGeologyPanel((v) => !v)}
-            className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
-              showGeologyPanel
-                ? 'bg-amber-900/60 border-amber-500/70 text-amber-200'
-                : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
-            }`}
-            title="Toggle Local Geology & Crust Composition Panel"
-          >
-            <Layers className="w-3 h-3" />
-            Local Geology
-          </button>
+          {!isFullscreen && (
+            <button
+              type="button"
+              onClick={() => setShowGeologyPanel((v) => !v)}
+              className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
+                showGeologyPanel
+                  ? 'bg-amber-900/60 border-amber-500/70 text-amber-200'
+                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+              }`}
+              title="Toggle Local Geology & Crust Composition Panel"
+            >
+              <Layers className="w-3 h-3" />
+              Local Geology
+            </button>
+          )}
 
-          {onToggleFlora && (
+          {!isFullscreen && onToggleFlora && (
             <button
               type="button"
               onClick={onToggleFlora}
@@ -2032,7 +2034,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       </div>
 
       {/* Toggleable Local Geology & Crust Composition Panel */}
-      {showGeologyPanel && (
+      {showGeologyPanel && !isFullscreen && (
         <div className="bg-slate-950/95 border border-amber-500/40 rounded-lg p-3 text-xs text-slate-300 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-0.5">
@@ -2084,11 +2086,11 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       )}
 
       {/* Main 3D Biome Block Viewport + Neighbor Navigation Sidebar */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+      <div className={`grid gap-3 ${isFullscreen ? 'grid-cols-1 w-full flex-1 min-h-0' : 'grid-cols-1 lg:grid-cols-4'}`}>
         <div
           className={`${
             isFullscreen
-              ? 'fixed inset-0 z-[9999] w-screen h-screen bg-black flex items-center justify-center p-0 m-0 overflow-hidden'
+              ? 'w-full h-full flex-1 min-h-0 relative rounded-lg overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center'
               : 'lg:col-span-3 relative rounded-lg overflow-hidden border border-slate-800 bg-slate-950'
           } select-none ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
           onMouseDown={(e) => {
@@ -2143,137 +2145,73 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
                 : 'w-full h-[380px] sm:h-[440px] block object-cover'
             }
           />
-
-          {/* Fullscreen Floating Controls & Minimal HUD */}
-          {isFullscreen && onToggleFullscreen && (
-            <button
-              type="button"
-              onClick={onToggleFullscreen}
-              className="absolute top-4 right-4 z-50 px-3 py-1.5 rounded-lg bg-slate-900/85 hover:bg-slate-800 text-white border border-slate-700/80 backdrop-blur-md font-bold flex items-center gap-2 cursor-pointer shadow-2xl transition hover:border-purple-400"
-              title="Exit Fullscreen (Esc)"
-            >
-              <Minimize2 className="w-4 h-4 text-purple-300" />
-              <span>Exit Fullscreen</span>
-              <kbd className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 border border-slate-700">ESC</kbd>
-            </button>
-          )}
-
-          {isFullscreen && (
-            <div className="absolute top-4 left-4 z-40 bg-slate-950/85 backdrop-blur-md px-3.5 py-2 rounded-lg border border-slate-800/90 text-xs text-white shadow-2xl flex flex-col gap-0.5 pointer-events-none">
-              <div className="font-bold text-sky-300 flex items-center gap-2">
-                <span>{moon ? `Moon ${moon.name}` : planet.planetClass}</span>
-                <span className="text-slate-500">•</span>
-                <span className="text-slate-300 font-mono text-[11px]">
-                  {activeTile.centerLat >= 0 ? `${activeTile.centerLat.toFixed(1)}°N` : `${Math.abs(activeTile.centerLat).toFixed(1)}°S`},{' '}
-                  {activeTile.centerLon >= 0 ? `${activeTile.centerLon.toFixed(1)}°E` : `${Math.abs(activeTile.centerLon).toFixed(1)}°W`}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-[11px] text-slate-300">
-                <span
-                  className="w-2.5 h-2.5 rounded-full inline-block shrink-0 shadow-sm"
-                  style={{ backgroundColor: activeTile.biomeColor }}
-                />
-                <span className="font-bold">{activeTile.biomeName}</span>
-                <span className="text-slate-500">•</span>
-                <span className="text-amber-200">
-                  {activeTile.elevationMeters >= 0 ? `+${activeTile.elevationMeters.toLocaleString()} m` : `${activeTile.elevationMeters.toLocaleString()} m`}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {isFullscreen && (
-            <div className="absolute bottom-4 left-4 z-40 bg-slate-950/85 backdrop-blur-md px-3.5 py-2 rounded-lg border border-slate-800/90 text-[11px] text-slate-300 shadow-2xl flex flex-col gap-0.5 pointer-events-none">
-              <div className="text-slate-400 text-[10px]">
-                Drag to rotate 3D block • Scroll wheel to zoom
-              </div>
-              <div className="flex items-center gap-3 text-slate-400 text-[10px]">
-                <span>Temp: <b className="text-amber-300">{activeTile.temperatureK} K ({activeTile.temperatureC}°C)</b></span>
-                <span>Pressure: <b className="text-white">{activeTile.pressureBar > 0 ? `${activeTile.pressureBar} bar` : 'Vacuum'}</b></span>
-              </div>
-            </div>
-          )}
-
-          {isFullscreen && (
-            <div className="absolute bottom-4 right-4 z-40 bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-lg border border-slate-800/90 flex items-center gap-3 shadow-2xl">
-              <div className="flex items-center gap-1.5 text-xs text-amber-300 font-bold">
-                <Sun className="w-3.5 h-3.5 text-amber-400" />
-                <input
-                  type="range"
-                  min="-60"
-                  max="180"
-                  step="5"
-                  value={timeOfDayDeg}
-                  onChange={(e) => onChangeTimeOfDay(+e.target.value)}
-                  className="w-20 accent-amber-400 cursor-pointer"
-                  title="Adjust Solar Elevation / Time of Day"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setRotYaw(0.78);
-                  setRotPitch(0.55);
-                  setZoom(1.0);
-                }}
-                className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 cursor-pointer text-[10px] flex items-center gap-1"
-                title="Reset Camera Orientation & Zoom"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>Reset</span>
-              </button>
-            </div>
-          )}
         </div>
 
-        {/* Right Column: Linked Adjacent Tiles */}
-        <div className="bg-slate-950/90 rounded-lg border border-slate-800 p-3 flex flex-col justify-between gap-3">
-          <div>
-            <div className="text-xs font-bold text-sky-400 tracking-wide flex items-center gap-1.5 mb-2.5">
-              <Compass className="w-3.5 h-3.5" />
-              Adjacent Tiles (Click to travel)
+        {/* Right Column: Linked Adjacent Tiles (hidden in fullscreen) */}
+        {!isFullscreen && (
+          <div className="bg-slate-950/90 rounded-lg border border-slate-800 p-3 flex flex-col justify-between gap-3">
+            <div>
+              <div className="text-xs font-bold text-sky-400 tracking-wide flex items-center gap-1.5 mb-2.5">
+                <Compass className="w-3.5 h-3.5" />
+                Adjacent Tiles (Click to travel)
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                {neighborTiles.map((nb) => (
+                  <button
+                    key={nb.tile.tileId}
+                    type="button"
+                    onClick={() => {
+                      React.startTransition(() => {
+                        onSelectTile(nb.tile);
+                      });
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 rounded-md bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-sky-500/50 transition flex items-center justify-between cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-950 text-sky-300 border border-slate-800 w-7 text-center shrink-0">
+                        {nb.compass}
+                      </span>
+                      <span className="inline-flex items-center -space-x-1 shrink-0">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full border border-white/20"
+                          style={{ backgroundColor: nb.tile.biomeColor }}
+                        />
+                        {nb.tile.secondaryBiomeColor && (
+                          <span
+                            className="w-2.5 h-2.5 rounded-full border border-white/30"
+                            style={{ backgroundColor: nb.tile.secondaryBiomeColor }}
+                          />
+                        )}
+                      </span>
+                      <span className="text-xs text-slate-200 truncate group-hover:text-white font-medium">
+                        {nb.tile.biomeName}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                      {nb.tile.elevationKm >= 0 ? `+${nb.tile.elevationKm.toFixed(1)}k` : `${nb.tile.elevationKm.toFixed(1)}k`}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              {neighborTiles.map((nb) => (
-                <button
-                  key={nb.tile.tileId}
-                  type="button"
-                  onClick={() => {
-                    React.startTransition(() => {
-                      onSelectTile(nb.tile);
-                    });
-                  }}
-                  className="w-full text-left px-2.5 py-1.5 rounded-md bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-sky-500/50 transition flex items-center justify-between cursor-pointer group"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-950 text-sky-300 border border-slate-800 w-7 text-center shrink-0">
-                      {nb.compass}
-                    </span>
-                    <span className="inline-flex items-center -space-x-1 shrink-0">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full border border-white/20"
-                        style={{ backgroundColor: nb.tile.biomeColor }}
-                      />
-                      {nb.tile.secondaryBiomeColor && (
-                        <span
-                          className="w-2.5 h-2.5 rounded-full border border-white/30"
-                          style={{ backgroundColor: nb.tile.secondaryBiomeColor }}
-                        />
-                      )}
-                    </span>
-                    <span className="text-[11px] text-slate-200 font-medium truncate group-hover:text-white">
-                      {nb.tile.biomeName}
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-mono shrink-0 ml-1">
-                    {nb.tile.temperatureK}K
-                  </span>
-                </button>
-              ))}
+            <div className="pt-2 border-t border-slate-800/80 text-[10px] text-slate-400 flex flex-col gap-1">
+              <div className="flex justify-between">
+                <span>Tile ID:</span>
+                <span className="font-mono text-white">#{activeTile.tileId}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Crater Density:</span>
+                <span className="font-mono text-white">{Math.round(activeTile.craterIntensity * 100)}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Relief Factor:</span>
+                <span className="font-mono text-white">{(activeTile.reliefSpanKm ?? 1).toFixed(1)} km</span>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

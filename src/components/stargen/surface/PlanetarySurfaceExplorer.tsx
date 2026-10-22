@@ -88,16 +88,24 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
   const mapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const globeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const surfaceContainerRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
   const toggleFullscreen = () => {
-    setIsFullscreen((prev) => {
-      const next = !prev;
-      if (!next && document.fullscreenElement) {
+    if (!document.fullscreenElement) {
+      if (surfaceContainerRef.current?.requestFullscreen) {
+        surfaceContainerRef.current.requestFullscreen().catch(() => {
+          setIsFullscreen(true);
+        });
+      } else {
+        setIsFullscreen(true);
+      }
+    } else {
+      if (document.exitFullscreen) {
         document.exitFullscreen().catch(() => {});
       }
-      return next;
-    });
+      setIsFullscreen(false);
+    }
   };
 
   useEffect(() => {
@@ -542,14 +550,19 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
   return (
     <div
-      className="flex flex-col gap-4 font-mono text-xs select-none"
+      ref={surfaceContainerRef}
+      className={`flex flex-col font-mono text-xs select-none ${
+        isFullscreen
+          ? 'fixed inset-0 z-50 bg-[#070b12] p-2 w-screen h-screen overflow-hidden gap-2'
+          : 'gap-4'
+      }`}
       style={{
-        contentVisibility: 'auto',
-        containIntrinsicSize: 'auto 720px',
+        contentVisibility: isFullscreen ? 'visible' : 'auto',
+        containIntrinsicSize: isFullscreen ? 'none' : 'auto 720px',
       }}
     >
       {/* Surface Navigation Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-[#151d2c] p-3 rounded-xl border border-slate-800">
+      <div className={`flex flex-wrap items-center justify-between gap-3 bg-[#151d2c] p-2.5 rounded-xl border border-slate-800 shrink-0 ${isFullscreen ? 'shadow-md' : ''}`}>
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
@@ -731,27 +744,11 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       </div>
 
       {/* Main Visual Display Area */}
-      <div className="relative bg-[#0c121d] rounded-xl border border-slate-800 p-2 overflow-hidden flex flex-col items-center">
+      <div className={`relative bg-[#0c121d] rounded-xl border border-slate-800 overflow-hidden flex flex-col items-center ${
+        isFullscreen ? 'flex-1 w-full h-full min-h-0 p-1 border-0 rounded-lg' : 'p-2'
+      }`}>
         {displayMode === 'map' ? (
-          <div
-            className={`w-full flex flex-col items-center relative ${
-              isFullscreen
-                ? 'fixed inset-0 z-[9999] w-screen h-screen bg-black flex items-center justify-center p-4 m-0 overflow-hidden'
-                : ''
-            }`}
-          >
-            {isFullscreen && (
-              <button
-                type="button"
-                onClick={toggleFullscreen}
-                className="absolute top-4 right-4 z-50 px-3 py-1.5 rounded-lg bg-slate-900/85 hover:bg-slate-800 text-white border border-slate-700/80 backdrop-blur-md font-bold flex items-center gap-2 cursor-pointer shadow-2xl transition hover:border-purple-400"
-                title="Exit Fullscreen (Esc)"
-              >
-                <Minimize2 className="w-4 h-4 text-purple-300" />
-                <span>Exit Fullscreen</span>
-                <kbd className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 border border-slate-700">ESC</kbd>
-              </button>
-            )}
+          <div className={`w-full flex flex-col items-center relative ${isFullscreen ? 'flex-1 h-full min-h-0 justify-center' : ''}`}>
             <canvas
               ref={mapCanvasRef}
               onClick={handleMapClick}
@@ -794,25 +791,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             )}
           </div>
         ) : displayMode === 'globe' ? (
-          <div
-            className={`w-full flex flex-col items-center relative ${
-              isFullscreen
-                ? 'fixed inset-0 z-[9999] w-screen h-screen bg-black flex items-center justify-center p-4 m-0 overflow-hidden'
-                : ''
-            }`}
-          >
-            {isFullscreen && (
-              <button
-                type="button"
-                onClick={toggleFullscreen}
-                className="absolute top-4 right-4 z-50 px-3 py-1.5 rounded-lg bg-slate-900/85 hover:bg-slate-800 text-white border border-slate-700/80 backdrop-blur-md font-bold flex items-center gap-2 cursor-pointer shadow-2xl transition hover:border-purple-400"
-                title="Exit Fullscreen (Esc)"
-              >
-                <Minimize2 className="w-4 h-4 text-purple-300" />
-                <span>Exit Fullscreen</span>
-                <kbd className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 border border-slate-700">ESC</kbd>
-              </button>
-            )}
+          <div className={`w-full flex flex-col items-center relative ${isFullscreen ? 'flex-1 h-full min-h-0 justify-center' : ''}`}>
             {/* Top 3D Globe Orientation & Spin Controls */}
             <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 bg-slate-950/80 backdrop-blur-xs px-2 py-1 rounded-lg border border-slate-800 text-[10px]">
               <button
@@ -1011,96 +990,102 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         )}
       </div>
 
-      {/* Interactive Surface Site Telemetry Inspector */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 bg-[#151d2c] p-3 rounded-xl border border-slate-800">
-        <div>
-          <span className="text-sky-400 font-bold block text-[10px]">
-            LAT / LONG
-          </span>
-          <b className="text-sky-200 font-mono text-sm">
-            {currentTelemetry.lat >= 0 ? `${currentTelemetry.lat}°N` : `${Math.abs(currentTelemetry.lat)}°S`},{' '}
-            {currentTelemetry.lon >= 0 ? `${currentTelemetry.lon}°E` : `${Math.abs(currentTelemetry.lon)}°W`}
-          </b>
-        </div>
+      {/* Interactive Surface Site Telemetry Inspector (hidden in fullscreen) */}
+      {!isFullscreen && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 bg-[#151d2c] p-3 rounded-xl border border-slate-800">
+          <div>
+            <span className="text-sky-400 font-bold block text-[10px]">
+              LAT / LONG
+            </span>
+            <b className="text-sky-200 font-mono text-sm">
+              {currentTelemetry.lat >= 0 ? `${currentTelemetry.lat}°N` : `${Math.abs(currentTelemetry.lat)}°S`},{' '}
+              {currentTelemetry.lon >= 0 ? `${currentTelemetry.lon}°E` : `${Math.abs(currentTelemetry.lon)}°W`}
+            </b>
+          </div>
 
-        <div>
-          <span className="text-slate-400 block text-[10px]">AVERAGE ELEVATION</span>
-          <b
-            className={
-              surfaceModel.isNoSurface
-                ? 'text-slate-400'
+          <div>
+            <span className="text-slate-400 block text-[10px]">AVERAGE ELEVATION</span>
+            <b
+              className={
+                surfaceModel.isNoSurface
+                  ? 'text-slate-400'
+                  : currentTelemetry.isOcean
+                  ? surfaceModel.isMoltenWorld
+                    ? 'text-amber-400'
+                    : 'text-sky-300'
+                  : 'text-amber-200'
+              }
+            >
+              {surfaceModel.isNoSurface
+                ? 'No Solid Surface'
+                : currentTelemetry.elevationMeters > 0
+                ? `+${currentTelemetry.elevationMeters.toLocaleString()} m`
+                : `${currentTelemetry.elevationMeters.toLocaleString()} m`}
+            </b>
+            <span className="text-[9px] text-slate-400 block">
+              {surfaceModel.isNoSurface
+                ? '100% Cloud Envelope'
                 : currentTelemetry.isOcean
                 ? surfaceModel.isMoltenWorld
-                  ? 'text-amber-400'
-                  : 'text-sky-300'
-                : 'text-amber-200'
-            }
-          >
-            {surfaceModel.isNoSurface
-              ? 'No Solid Surface'
-              : currentTelemetry.elevationMeters > 0
-              ? `+${currentTelemetry.elevationMeters.toLocaleString()} m`
-              : `${currentTelemetry.elevationMeters.toLocaleString()} m`}
-          </b>
-          <span className="text-[9px] text-slate-400 block">
-            {surfaceModel.isNoSurface
-              ? '100% Cloud Envelope'
-              : currentTelemetry.isOcean
-              ? surfaceModel.isMoltenWorld
-                ? 'Magma Depth'
-                : 'Abyssal Depth'
-              : `${currentTelemetry.elevationKm} km alt`}
-          </span>
+                  ? 'Magma Depth'
+                  : 'Abyssal Depth'
+                : `${currentTelemetry.elevationKm} km alt`}
+            </span>
+          </div>
+
+          <div>
+            <span className="text-slate-400 block text-[10px]">TEMPERATURE</span>
+            <b className={currentTelemetry.temperatureC > 0 ? 'text-amber-300' : 'text-cyan-300'}>
+              {currentTelemetry.temperatureK} K ({currentTelemetry.temperatureC}°C)
+            </b>
+          </div>
+
+          <div>
+            <span className="text-slate-400 block text-[10px]">PRESSURE</span>
+            <b className="text-white">
+              {surfaceModel.isNoSurface
+                ? 'Opaque Deck'
+                : currentTelemetry.pressureBar > 0
+                ? `${currentTelemetry.pressureBar} bar`
+                : '0 bar (Vacuum)'}
+            </b>
+          </div>
+
+          <div>
+            <span className="text-slate-400 block text-[10px]">CLOUD COVERAGE</span>
+            <b className="text-sky-200">
+              {surfaceModel.isNoSurface
+                ? '100%'
+                : currentTelemetry.pressureBar > 0
+                ? `${Math.round(
+                    (showTileGrid || displayMode === 'terrain' || displayMode === 'horizon'
+                      ? activeInspectedTile.cloudCover
+                      : surfaceModel.cloudOpacity) * 100
+                  )}%`
+                : '0%'}
+            </b>
+          </div>
         </div>
+      )}
 
-        <div>
-          <span className="text-slate-400 block text-[10px]">TEMPERATURE</span>
-          <b className={currentTelemetry.temperatureC > 0 ? 'text-amber-300' : 'text-cyan-300'}>
-            {currentTelemetry.temperatureK} K ({currentTelemetry.temperatureC}°C)
-          </b>
-        </div>
+      {/* Indigenous Xenoflora, Xenofungi & Detailed Ecosystem Catalog (hidden in fullscreen) */}
+      {!isFullscreen && (
+        <SurfaceEcosystemPanel
+          ecosystem={ecosystem}
+          fungiEcosystem={fungiEcosystem}
+          activeTile={selectedTile}
+          isTileView={displayMode === 'terrain' || displayMode === 'horizon'}
+          isOpen={showEcosystemPanel}
+          onClose={() => setShowEcosystemPanel(false)}
+          onGenerateAiImage={handleOpenSpeciesAiGen}
+          onGenerateAiSurface={handleOpenSurfaceAiGen}
+        />
+      )}
 
-        <div>
-          <span className="text-slate-400 block text-[10px]">PRESSURE</span>
-          <b className="text-white">
-            {surfaceModel.isNoSurface
-              ? 'Opaque Deck'
-              : currentTelemetry.pressureBar > 0
-              ? `${currentTelemetry.pressureBar} bar`
-              : '0 bar (Vacuum)'}
-          </b>
-        </div>
-
-        <div>
-          <span className="text-slate-400 block text-[10px]">CLOUD COVERAGE</span>
-          <b className="text-sky-200">
-            {surfaceModel.isNoSurface
-              ? '100%'
-              : currentTelemetry.pressureBar > 0
-              ? `${Math.round(
-                  (showTileGrid || displayMode === 'terrain' || displayMode === 'horizon'
-                    ? activeInspectedTile.cloudCover
-                    : surfaceModel.cloudOpacity) * 100
-                )}%`
-              : '0%'}
-          </b>
-        </div>
-      </div>
-
-      {/* Indigenous Xenoflora, Xenofungi & Detailed Ecosystem Catalog (Toggleable) */}
-      <SurfaceEcosystemPanel
-        ecosystem={ecosystem}
-        fungiEcosystem={fungiEcosystem}
-        activeTile={selectedTile}
-        isTileView={displayMode === 'terrain' || displayMode === 'horizon'}
-        isOpen={showEcosystemPanel}
-        onClose={() => setShowEcosystemPanel(false)}
-        onGenerateAiImage={handleOpenSpeciesAiGen}
-        onGenerateAiSurface={handleOpenSurfaceAiGen}
-      />
-
-      {/* Surface & Internal Geochemistry Composition Tables */}
-      <PlanetaryChemistrySection planet={planet} moon={moon} surfaceModel={surfaceModel} />
+      {/* Surface & Internal Geochemistry Composition Tables (hidden in fullscreen) */}
+      {!isFullscreen && (
+        <PlanetaryChemistrySection planet={planet} moon={moon} surfaceModel={surfaceModel} />
+      )}
 
       {/* AI Image Generation Modal (Google Imagen 3) */}
       <AiImageGenModal

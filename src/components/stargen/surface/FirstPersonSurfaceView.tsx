@@ -2049,7 +2049,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
   ]);
 
   return (
-    <div className="w-full flex flex-col gap-2.5">
+    <div className={`w-full flex flex-col ${isFullscreen ? 'flex-1 h-full min-h-0 gap-1.5' : 'gap-2.5'}`}>
       {/* Top First-Person Controls Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/90 px-3 py-2 rounded-lg border border-slate-800">
         <div className="flex items-center gap-2 flex-wrap">
@@ -2130,21 +2130,23 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={() => setShowGeologyPanel((v) => !v)}
-            className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
-              showGeologyPanel
-                ? 'bg-amber-900/60 border-amber-500/70 text-amber-200'
-                : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
-            }`}
-            title="Toggle Local Geology & Crust Composition Panel"
-          >
-            <Layers className="w-3 h-3" />
-            Local Geology
-          </button>
+          {!isFullscreen && (
+            <button
+              type="button"
+              onClick={() => setShowGeologyPanel((v) => !v)}
+              className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
+                showGeologyPanel
+                  ? 'bg-amber-900/60 border-amber-500/70 text-amber-200'
+                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+              }`}
+              title="Toggle Local Geology & Crust Composition Panel"
+            >
+              <Layers className="w-3 h-3" />
+              Local Geology
+            </button>
+          )}
 
-          {onToggleFlora && (
+          {!isFullscreen && onToggleFlora && (
             <button
               type="button"
               onClick={onToggleFlora}
@@ -2217,7 +2219,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       </div>
 
       {/* Toggleable Local Geology & Crust Composition Panel */}
-      {showGeologyPanel && (
+      {showGeologyPanel && !isFullscreen && (
         <div className="bg-slate-950/95 border border-amber-500/40 rounded-lg p-3 text-xs text-slate-300 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-0.5">
@@ -2272,7 +2274,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       <div
         className={`${
           isFullscreen
-            ? 'fixed inset-0 z-[9999] w-screen h-screen bg-black overflow-hidden m-0 p-0 rounded-none border-0'
+            ? 'w-full h-full flex-1 min-h-0 relative rounded-lg overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center'
             : 'relative rounded-lg overflow-hidden border border-slate-800 bg-slate-950'
         } select-none ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
         onMouseDown={(e) => {
@@ -2325,42 +2327,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           }
         />
 
-        {/* Fullscreen Floating Controls & Minimal HUD */}
-        {isFullscreen && onToggleFullscreen && (
-          <button
-            type="button"
-            onClick={onToggleFullscreen}
-            className="absolute top-4 right-4 z-50 px-3 py-1.5 rounded-lg bg-slate-900/85 hover:bg-slate-800 text-white border border-slate-700/80 backdrop-blur-md font-bold flex items-center gap-2 cursor-pointer shadow-2xl transition hover:border-purple-400"
-            title="Exit Fullscreen (Esc)"
-          >
-            <Minimize2 className="w-4 h-4 text-purple-300" />
-            <span>Exit Fullscreen</span>
-            <kbd className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 border border-slate-700">ESC</kbd>
-          </button>
-        )}
 
-        {isFullscreen && (
-          <div className="absolute top-4 left-4 z-40 bg-slate-950/85 backdrop-blur-md px-3.5 py-2 rounded-lg border border-slate-800/90 text-xs text-white shadow-2xl flex flex-col gap-0.5 pointer-events-none">
-            <div className="font-bold text-amber-300 flex items-center gap-2">
-              <Eye className="w-3.5 h-3.5 text-amber-400" />
-              <span>{moon ? `Moon ${moon.name}` : planet.planetClass}</span>
-              <span className="text-slate-500">•</span>
-              <span className="text-slate-300 font-mono text-[11px]">
-                {activeTile.centerLat >= 0 ? `${activeTile.centerLat.toFixed(1)}°N` : `${Math.abs(activeTile.centerLat).toFixed(1)}°S`},{' '}
-                {activeTile.centerLon >= 0 ? `${activeTile.centerLon.toFixed(1)}°E` : `${Math.abs(activeTile.centerLon).toFixed(1)}°W`}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] text-slate-300">
-              <span
-                className="w-2.5 h-2.5 rounded-full inline-block shrink-0 shadow-sm"
-                style={{ backgroundColor: activeTile.biomeColor }}
-              />
-              <span className="font-bold">{activeTile.biomeName}</span>
-              <span className="text-slate-500">•</span>
-              <span className="text-emerald-300">Heading {hudHeadingDeg}°</span>
-            </div>
-          </div>
-        )}
 
         {/* Bottom-left Controls & Telemetry HUD */}
         <div className={`absolute ${isFullscreen ? 'bottom-4 left-4' : 'bottom-2.5 left-2.5'} bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-lg border border-slate-800/90 text-[11px] text-slate-300 pointer-events-none flex flex-col gap-0.5 z-40`}>
@@ -2372,61 +2339,6 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
             Drag mouse to look 360° • <span className="text-white font-semibold">WASD / Arrows</span> to walk/fly • Click horizon beacons to travel to adjacent tiles
           </div>
         </div>
-
-        {/* Bottom-right Fullscreen Quick-Settings */}
-        {isFullscreen && (
-          <div className="absolute bottom-4 right-4 z-40 bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-lg border border-slate-800/90 flex items-center gap-2 shadow-2xl">
-            <div className="flex items-center gap-1 bg-slate-900/90 p-0.5 rounded border border-slate-800">
-              <button
-                type="button"
-                onClick={() => setHeightMode('walk')}
-                className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${heightMode === 'walk' ? 'bg-amber-900/80 text-amber-200' : 'text-slate-400'}`}
-              >
-                Walk
-              </button>
-              <button
-                type="button"
-                onClick={() => setHeightMode('skim')}
-                className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${heightMode === 'skim' ? 'bg-amber-900/80 text-amber-200' : 'text-slate-400'}`}
-              >
-                Skim
-              </button>
-              <button
-                type="button"
-                onClick={() => setHeightMode('flight')}
-                className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${heightMode === 'flight' ? 'bg-amber-900/80 text-amber-200' : 'text-slate-400'}`}
-              >
-                Flight
-              </button>
-            </div>
-            <div className="flex items-center gap-1">
-              <Sun className="w-3.5 h-3.5 text-amber-400" />
-              <input
-                type="range"
-                min="-60"
-                max="180"
-                step="5"
-                value={timeOfDayDeg}
-                onChange={(e) => onChangeTimeOfDay(+e.target.value)}
-                className="w-16 accent-amber-400 cursor-pointer"
-                title="Adjust Solar Elevation / Time of Day"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                camRef.current.x = 0;
-                camRef.current.z = -0.25;
-                camRef.current.yaw = 0.25;
-                camRef.current.pitch = -0.06;
-              }}
-              className="p-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white cursor-pointer"
-              title="Reset Position"
-            >
-              <RotateCcw className="w-3 h-3" />
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
