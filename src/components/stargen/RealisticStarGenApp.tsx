@@ -20,6 +20,8 @@ import {
   ListTree,
   Star,
   Lock,
+  FileText,
+  Globe,
 } from 'lucide-react';
 import {
   CustomStellarConfig,
@@ -149,8 +151,16 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   // Orrery System Map Labels Toggle (default false)
   const [showLabels, setShowLabels] = useState<boolean>(false);
 
-  // Quick Jump Hierarchy Tree on left side (toggled with J or button)
-  const [showQuickJump, setShowQuickJump] = useState<boolean>(false);
+  // Quick Jump Hierarchy Tree on left side (toggled with J or button - defaults to open)
+  const [showQuickJump, setShowQuickJump] = useState<boolean>(true);
+
+  // Active Planet/Moon Target for Quick-Jump Hierarchy Action Buttons (Planet Data & Planet Surface)
+  const [activeHierarchyPlanet, setActiveHierarchyPlanet] = useState<{
+    kind: 'planet' | 'moon';
+    zoneIdx: number;
+    bodyIdx: number;
+    moonIdx?: number;
+  } | null>(null);
 
   // Dedicated Orbital Mechanics & Flight Planner Overlay (toggled with P or button)
   const [showLagrange, setShowLagrange] = useState<boolean>(false);
@@ -216,7 +226,94 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     }
   }, [trackedTarget, selectedEntity, systemResult]);
 
-  // "Entering <System>" Briefing Overlay State (fades out after a few seconds)
+  // Sync activeHierarchyPlanet with trackedTarget or selectedEntity
+  useEffect(() => {
+    if (trackedTarget && (trackedTarget.kind === 'planet' || trackedTarget.kind === 'moon')) {
+      setActiveHierarchyPlanet({
+        kind: trackedTarget.kind,
+        zoneIdx: trackedTarget.zoneIdx,
+        bodyIdx: trackedTarget.bodyIdx,
+        moonIdx: trackedTarget.kind === 'moon' ? trackedTarget.moonIdx : undefined,
+      });
+    } else if (selectedEntity && (selectedEntity.kind === 'planet' || selectedEntity.kind === 'moon')) {
+      setActiveHierarchyPlanet({
+        kind: selectedEntity.kind,
+        zoneIdx: selectedEntity.zoneIdx,
+        bodyIdx: selectedEntity.bodyIdx,
+        moonIdx: selectedEntity.kind === 'moon' ? selectedEntity.moonIdx : undefined,
+      });
+    }
+  }, [trackedTarget, selectedEntity]);
+
+  // Set default activeHierarchyPlanet when a new system is loaded (habitable first, else first planet)
+  useEffect(() => {
+    if (!systemResult) return;
+    let bestTarget: { zoneIdx: number; bodyIdx: number } | null = null;
+    let foundHabitable = false;
+    for (let zIdx = 0; zIdx < systemResult.zones.length; zIdx++) {
+      const zone = systemResult.zones[zIdx];
+      for (let bIdx = 0; bIdx < zone.bodies.length; bIdx++) {
+        const b = zone.bodies[bIdx];
+        if (b.kind === 'planet') {
+          if (!bestTarget) bestTarget = { zoneIdx: zIdx, bodyIdx: bIdx };
+          if (b.hydrosphere?.biosphere && b.hydrosphere.biosphere !== 'none') {
+            bestTarget = { zoneIdx: zIdx, bodyIdx: bIdx };
+            foundHabitable = true;
+            break;
+          }
+        }
+      }
+      if (foundHabitable) break;
+    }
+    if (bestTarget) {
+      setActiveHierarchyPlanet({
+        kind: 'planet',
+        zoneIdx: bestTarget.zoneIdx,
+        bodyIdx: bestTarget.bodyIdx,
+      });
+    }
+  }, [systemResult?.step1?.id, systemResult?.roll]);
+
+  // Resolve active planet data object for the hierarchy footer
+  const resolvedActivePlanet = useMemo(() => {
+    if (!systemResult) return null;
+    let target = activeHierarchyPlanet;
+
+    if (!target || !systemResult.zones[target.zoneIdx]?.bodies[target.bodyIdx]) {
+      for (let zIdx = 0; zIdx < systemResult.zones.length; zIdx++) {
+        const zone = systemResult.zones[zIdx];
+        for (let bIdx = 0; bIdx < zone.bodies.length; bIdx++) {
+          if (zone.bodies[bIdx].kind === 'planet') {
+            target = { kind: 'planet', zoneIdx: zIdx, bodyIdx: bIdx };
+            break;
+          }
+        }
+        if (target) break;
+      }
+    }
+
+    if (!target) return null;
+    const zone = systemResult.zones[target.zoneIdx];
+    const planet = zone?.bodies[target.bodyIdx] as RealisticPlanetBody | undefined;
+    if (!planet || planet.kind !== 'planet') return null;
+
+    const moon =
+      target.kind === 'moon' && target.moonIdx !== undefined
+        ? planet.moons?.[target.moonIdx] ?? null
+        : null;
+
+    return {
+      kind: target.kind,
+      zoneIdx: target.zoneIdx,
+      bodyIdx: target.bodyIdx,
+      moonIdx: target.moonIdx,
+      zone,
+      planet,
+      moon,
+    };
+  }, [systemResult, activeHierarchyPlanet]);
+
+  // "Entering <System>" Briefing Overlay State (docked at top, fades immediately)
   const [showEnteringOverlay, setShowEnteringOverlay] = useState<boolean>(true);
   const [isEnteringFading, setIsEnteringFading] = useState<boolean>(false);
   const enteringTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -231,13 +328,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
     setShowEnteringOverlay(true);
     setIsEnteringFading(false);
 
-    // Stays solid for 5.0 seconds, then begins 700ms smooth fade-out
+    // Stays solid briefly for 750ms, then fades smoothly out immediately (1000ms transition)
     enteringTimerRef.current = setTimeout(() => {
       setIsEnteringFading(true);
       enteringFadeTimerRef.current = setTimeout(() => {
         setShowEnteringOverlay(false);
-      }, 700);
-    }, 5000);
+      }, 1000);
+    }, 750);
 
     return () => {
       if (enteringTimerRef.current) clearTimeout(enteringTimerRef.current);
@@ -2575,7 +2672,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             </button>
           </div>
 
-          {/* "Entering <System>" Briefing Table Overlay (Fades out after 5 seconds, centered and bigger) */}
+          {/* "Entering <System>" Briefing Table Overlay (Docked at top of UI, fades out immediately) */}
           {showEnteringOverlay && systemBriefingStats && (
             <div
               onMouseEnter={() => {
@@ -2588,13 +2685,13 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                   setIsEnteringFading(true);
                   enteringFadeTimerRef.current = setTimeout(() => {
                     setShowEnteringOverlay(false);
-                  }, 700);
-                }, 2500);
+                  }, 800);
+                }, 400);
               }}
-              className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 w-[94%] sm:w-[500px] md:w-[540px] max-h-[85vh] overflow-y-auto p-5 sm:p-6 rounded-2xl bg-[#080d1a]/95 backdrop-blur-lg border border-slate-700/90 shadow-[0_0_50px_rgba(0,0,0,0.85)] text-sm font-mono space-y-3 select-none pointer-events-auto transition-all duration-700 ${
+              className={`absolute top-3 left-1/2 -translate-x-1/2 z-40 w-[94%] sm:w-[480px] md:w-[520px] max-h-[82vh] overflow-y-auto p-4 sm:p-5 rounded-2xl bg-[#080d1a]/95 backdrop-blur-lg border border-slate-700/90 shadow-[0_4px_30px_rgba(0,0,0,0.85)] text-xs sm:text-sm font-mono space-y-2.5 select-none pointer-events-auto transition-all duration-1000 ease-out ${
                 isEnteringFading
-                  ? 'opacity-0 scale-95 pointer-events-none'
-                  : 'opacity-100 scale-100'
+                  ? 'opacity-0 -translate-y-3 pointer-events-none'
+                  : 'opacity-100 translate-y-0'
               }`}
             >
               <div className="text-xs sm:text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center justify-between pb-2.5 border-b border-slate-800">
@@ -2869,14 +2966,30 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                               selectedEntity?.kind === 'planet' &&
                               selectedEntity.zoneIdx === sZoneIdx &&
                               selectedEntity.bodyIdx === bIdx;
+                            const isActive =
+                              resolvedActivePlanet?.kind === 'planet' &&
+                              resolvedActivePlanet.zoneIdx === sZoneIdx &&
+                              resolvedActivePlanet.bodyIdx === bIdx;
 
                               return (
                                 <div
                                   key={`tree-planet-${sZoneIdx}-${bIdx}`}
                                   className="space-y-0.5"
+                                  onClick={() => {
+                                    setActiveHierarchyPlanet({
+                                      kind: 'planet',
+                                      zoneIdx: sZoneIdx,
+                                      bodyIdx: bIdx,
+                                    });
+                                  }}
                                   onContextMenu={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
+                                    setActiveHierarchyPlanet({
+                                      kind: 'planet',
+                                      zoneIdx: sZoneIdx,
+                                      bodyIdx: bIdx,
+                                    });
                                     setSelectedEntity({
                                       kind: 'planet',
                                       zoneIdx: sZoneIdx,
@@ -2886,8 +2999,8 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                 >
                                   <div
                                     className={`flex items-center justify-between px-2 py-1 rounded-lg border transition ${
-                                      isTracked
-                                        ? 'bg-sky-950/80 border-sky-500 text-sky-200'
+                                      isTracked || isActive
+                                        ? 'bg-sky-950/80 border-sky-500 text-sky-200 shadow-sm shadow-sky-950'
                                         : isDossier
                                         ? 'bg-slate-800/90 border-slate-600 text-white'
                                         : 'bg-slate-950/50 hover:bg-slate-900 border-transparent hover:border-slate-800 text-slate-300'
@@ -2897,6 +3010,11 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                       type="button"
                                       onClick={(e) => {
                                         e.stopPropagation();
+                                        setActiveHierarchyPlanet({
+                                          kind: 'planet',
+                                          zoneIdx: sZoneIdx,
+                                          bodyIdx: bIdx,
+                                        });
                                         if (e.shiftKey) {
                                           handleTrackBody({
                                             kind: 'planet',
@@ -3033,18 +3151,37 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                           trackedTarget.zoneIdx === sZoneIdx &&
                                           trackedTarget.bodyIdx === bIdx &&
                                           trackedTarget.moonIdx === mIdx;
+                                        const isMoonActive =
+                                          resolvedActivePlanet?.kind === 'moon' &&
+                                          resolvedActivePlanet.zoneIdx === sZoneIdx &&
+                                          resolvedActivePlanet.bodyIdx === bIdx &&
+                                          resolvedActivePlanet.moonIdx === mIdx;
 
                                         return (
                                           <div
                                             key={`tree-moon-${sZoneIdx}-${bIdx}-${mIdx}`}
-                                            className={`flex items-center justify-between px-1.5 py-0.5 rounded text-[10px] transition ${
-                                              isMoonTracked
-                                                ? 'bg-indigo-950/80 text-indigo-200 border border-indigo-500/70'
-                                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                                            className={`flex items-center justify-between px-1.5 py-0.5 rounded text-[10px] transition cursor-pointer ${
+                                              isMoonTracked || isMoonActive
+                                                ? 'bg-indigo-950/80 text-indigo-200 border border-indigo-500/70 shadow-sm'
+                                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60 border border-transparent'
                                             }`}
+                                            onClick={() => {
+                                              setActiveHierarchyPlanet({
+                                                kind: 'moon',
+                                                zoneIdx: sZoneIdx,
+                                                bodyIdx: bIdx,
+                                                moonIdx: mIdx,
+                                              });
+                                            }}
                                             onContextMenu={(e) => {
                                               e.preventDefault();
                                               e.stopPropagation();
+                                              setActiveHierarchyPlanet({
+                                                kind: 'moon',
+                                                zoneIdx: sZoneIdx,
+                                                bodyIdx: bIdx,
+                                                moonIdx: mIdx,
+                                              });
                                               setSelectedEntity({
                                                 kind: 'moon',
                                                 zoneIdx: sZoneIdx,
@@ -3057,6 +3194,12 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                               type="button"
                                               onClick={(e) => {
                                                 e.stopPropagation();
+                                                setActiveHierarchyPlanet({
+                                                  kind: 'moon',
+                                                  zoneIdx: sZoneIdx,
+                                                  bodyIdx: bIdx,
+                                                  moonIdx: mIdx,
+                                                });
                                                 if (e.shiftKey) {
                                                   handleTrackBody({
                                                     kind: 'moon',
@@ -3178,18 +3321,34 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             trackedTarget?.kind === 'planet' &&
                             trackedTarget.zoneIdx === zIdx &&
                             trackedTarget.bodyIdx === bIdx;
+                          const isCbActive =
+                            resolvedActivePlanet?.kind === 'planet' &&
+                            resolvedActivePlanet.zoneIdx === zIdx &&
+                            resolvedActivePlanet.bodyIdx === bIdx;
 
                           return (
                             <div
                               key={`tree-cb-body-${zIdx}-${bIdx}`}
-                              className={`flex items-center justify-between px-2 py-1 rounded text-[11px] border transition ${
-                                isTracked
-                                  ? 'bg-sky-950 border-sky-500 text-sky-200'
+                              className={`flex items-center justify-between px-2 py-1 rounded text-[11px] border transition cursor-pointer ${
+                                isTracked || isCbActive
+                                  ? 'bg-sky-950/80 border-sky-500 text-sky-200 shadow-sm'
                                   : 'bg-slate-950/40 hover:bg-slate-900 border-transparent text-slate-300'
                               }`}
+                              onClick={() => {
+                                setActiveHierarchyPlanet({
+                                  kind: 'planet',
+                                  zoneIdx: zIdx,
+                                  bodyIdx: bIdx,
+                                });
+                              }}
                               onContextMenu={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
+                                setActiveHierarchyPlanet({
+                                  kind: 'planet',
+                                  zoneIdx: zIdx,
+                                  bodyIdx: bIdx,
+                                });
                                 setSelectedEntity({
                                   kind: 'planet',
                                   zoneIdx: zIdx,
@@ -3201,6 +3360,11 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  setActiveHierarchyPlanet({
+                                    kind: 'planet',
+                                    zoneIdx: zIdx,
+                                    bodyIdx: bIdx,
+                                  });
                                   if (e.shiftKey) {
                                     handleTrackBody({
                                       kind: 'planet',
@@ -3218,6 +3382,11 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                 onContextMenu={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
+                                  setActiveHierarchyPlanet({
+                                    kind: 'planet',
+                                    zoneIdx: zIdx,
+                                    bodyIdx: bIdx,
+                                  });
                                   setSelectedEntity({
                                     kind: 'planet',
                                     zoneIdx: zIdx,
@@ -3255,6 +3424,106 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                     </div>
                   ))}
               </div>
+
+              {/* Bottom Action Footer: Prominent Planet Data & Planet Surface Buttons */}
+              {resolvedActivePlanet && (
+                <div className="p-2.5 bg-[#080d1a]/95 border-t border-slate-800/90 shrink-0 space-y-2 select-none shadow-[0_-4px_16px_rgba(0,0,0,0.5)]">
+                  {/* Active Selection Badge */}
+                  <div className="flex items-center justify-between px-1 text-[11px]">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
+                        style={{
+                          backgroundColor: getPlanetVisualColor(resolvedActivePlanet.planet),
+                        }}
+                      />
+                      <span className="font-bold text-slate-200 truncate">
+                        {resolvedActivePlanet.moon
+                          ? resolvedActivePlanet.moon.name
+                          : `#${resolvedActivePlanet.bodyIdx + 1} ${shortClassLabel(resolvedActivePlanet.planet.planetClass)}`}
+                      </span>
+                      {resolvedActivePlanet.planet.hydrosphere?.biosphere &&
+                        resolvedActivePlanet.planet.hydrosphere.biosphere !== 'none' && (
+                          <span
+                            className="text-[10px]"
+                            title={`Biosphere: ${resolvedActivePlanet.planet.hydrosphere.biosphere}`}
+                          >
+                            🌱
+                          </span>
+                        )}
+                    </div>
+                    <span className="text-[10px] text-sky-400 font-mono shrink-0 ml-1">
+                      {resolvedActivePlanet.planet.a.toFixed(2)} AU
+                    </span>
+                  </div>
+
+                  {/* Prominent Action Buttons */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (
+                          resolvedActivePlanet.kind === 'moon' &&
+                          resolvedActivePlanet.moonIdx !== undefined
+                        ) {
+                          setSelectedEntity({
+                            kind: 'moon',
+                            zoneIdx: resolvedActivePlanet.zoneIdx,
+                            bodyIdx: resolvedActivePlanet.bodyIdx,
+                            moonIdx: resolvedActivePlanet.moonIdx,
+                          });
+                        } else {
+                          setSelectedEntity({
+                            kind: 'planet',
+                            zoneIdx: resolvedActivePlanet.zoneIdx,
+                            bodyIdx: resolvedActivePlanet.bodyIdx,
+                          });
+                        }
+                      }}
+                      className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white border border-slate-600/80 hover:border-sky-400 font-bold text-xs tracking-wide shadow-md transition cursor-pointer active:scale-95"
+                      title="Open Detailed Planetary Telemetry & Data Dossier"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                      <span className="truncate">Planet Data</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onOpenSurfaceGen && systemResult) {
+                          onOpenSurfaceGen({
+                            planet: resolvedActivePlanet.planet,
+                            moon: resolvedActivePlanet.moon ?? null,
+                            zone: resolvedActivePlanet.zone,
+                            stars: systemResult.hierarchy.stars,
+                          });
+                        } else if (
+                          resolvedActivePlanet.kind === 'moon' &&
+                          resolvedActivePlanet.moonIdx !== undefined
+                        ) {
+                          setSelectedEntity({
+                            kind: 'moon',
+                            zoneIdx: resolvedActivePlanet.zoneIdx,
+                            bodyIdx: resolvedActivePlanet.bodyIdx,
+                            moonIdx: resolvedActivePlanet.moonIdx,
+                          });
+                        } else {
+                          setSelectedEntity({
+                            kind: 'planet',
+                            zoneIdx: resolvedActivePlanet.zoneIdx,
+                            bodyIdx: resolvedActivePlanet.bodyIdx,
+                          });
+                        }
+                      }}
+                      className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs tracking-wide shadow-lg shadow-emerald-950/60 border border-emerald-400/50 hover:border-emerald-300 transition cursor-pointer active:scale-95"
+                      title="Open Full 3D Procedural Surface & Biosphere Explorer"
+                    >
+                      <Globe className="w-3.5 h-3.5 text-emerald-200 shrink-0" />
+                      <span className="truncate">Planet Surface</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </aside>
           )}
 
