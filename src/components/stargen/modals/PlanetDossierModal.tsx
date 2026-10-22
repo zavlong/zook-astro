@@ -16,12 +16,14 @@ import {
   Copy,
   Check,
   Sprout,
+  Disc,
   ArrowRight,
 } from 'lucide-react';
 import { PlanetarySurfaceExplorer } from '../surface/PlanetarySurfaceExplorer';
 import { PlanetaryChemistrySection } from '../surface/PlanetaryChemistrySection';
 import { BotanicalSpecimenPlate } from '../surface/BotanicalSpecimenPlate';
 import { generatePlantEcosystem } from '../../../core/xenobiology/floraGen';
+import { generateFungiEcosystem } from '../../../core/xenobiology/fungiGen';
 import {
   ExportFormatType,
   exportSingleEntityInFormat,
@@ -158,6 +160,29 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
     const hasLiquid = covPct > 0;
 
     return generatePlantEcosystem({
+      seed,
+      hasBiosphere: Boolean(hydro?.biosphere),
+      biosphereDescription: hydro?.biosphere || undefined,
+      systemAgeGyr: sysAge,
+      starTeff: systemResult.hierarchy.stars[0]?.Teff,
+      gravityG: isMoon && activeMoon ? activeMoon.gravityG : hostPlanet.gravityG,
+      pressureBar: pBar,
+      solventKey: hydro?.solvent || 'H2O',
+      hasLiquid,
+      hasLand,
+      coveragePct: covPct,
+    });
+  }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, systemResult, pBar]);
+
+  const planetFungi = useMemo(() => {
+    const seed = isMoon && activeMoon
+      ? Math.round(activeMoon.radiusKm * 31 + (activeMoon.surfaceTempK || 200))
+      : Math.round(hostPlanet.a * 1000 + hostPlanet.massEarth * 100);
+    const covPct = hydro?.coveragePct ?? (hostPlanet.planetClass.includes('Ocean') ? 100 : 0);
+    const hasLand = covPct < 100 && !hostPlanet.planetClass.includes('Gas') && !hostPlanet.planetClass.includes('Supercritical');
+    const hasLiquid = covPct > 0;
+
+    return generateFungiEcosystem({
       seed,
       hasBiosphere: Boolean(hydro?.biosphere),
       biosphereDescription: hydro?.biosphere || undefined,
@@ -897,15 +922,16 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                   </div>
                 </div>
 
-                {/* Visual Plant Species Gallery Chips */}
+                {/* Visual Flora & Fungi Species Gallery Chips */}
                 {planetEcosystem.speciesList.length > 0 && (
                   <div className="pt-2 border-t border-slate-800/80">
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-slate-400 block text-[9px] uppercase font-semibold">
-                        Dominant Plant Species Plates (Click to Inspect)
+                      <span className="text-slate-400 block text-[9px] uppercase font-semibold flex items-center gap-1.5">
+                        <Sprout className="w-3 h-3 text-emerald-400" />
+                        Dominant Plant Species ({planetEcosystem.speciesList.length} taxa)
                       </span>
                       <span className="text-[9px] text-emerald-400/80">
-                        {planetEcosystem.speciesList.length} taxa identified
+                        Click to Inspect Plate
                       </span>
                     </div>
                     <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
@@ -917,6 +943,38 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                           <BotanicalSpecimenPlate species={sp} size="thumb" interactive={true} />
                           <div className="pr-1 text-left">
                             <span className="text-white group-hover:text-emerald-300 font-bold block text-[10px] truncate max-w-[110px]">
+                              {sp.commonName}
+                            </span>
+                            <span className="text-slate-400 text-[9px] block">
+                              {sp.growthForm.split(' ')[0]} · {sp.averageHeightM < 0.1 ? `${(sp.averageHeightM * 100).toFixed(0)}cm` : `${sp.averageHeightM.toFixed(1)}m`}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {planetFungi.speciesList.length > 0 && (
+                  <div className="pt-2 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-slate-400 block text-[9px] uppercase font-semibold flex items-center gap-1.5">
+                        <Disc className="w-3 h-3 text-fuchsia-400" />
+                        Dominant Fungi & Mycota ({planetFungi.speciesList.length} taxa)
+                      </span>
+                      <span className="text-[9px] text-fuchsia-400/80">
+                        Click to Inspect Plate
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                      {planetFungi.speciesList.slice(0, 5).map((sp) => (
+                        <div
+                          key={sp.id}
+                          className="flex items-center gap-2 p-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-fuchsia-500/50 transition flex-shrink-0 group"
+                        >
+                          <BotanicalSpecimenPlate species={sp} size="thumb" interactive={true} />
+                          <div className="pr-1 text-left">
+                            <span className="text-white group-hover:text-fuchsia-300 font-bold block text-[10px] truncate max-w-[110px]">
                               {sp.commonName}
                             </span>
                             <span className="text-slate-400 text-[9px] block">

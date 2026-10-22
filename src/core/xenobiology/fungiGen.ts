@@ -315,21 +315,43 @@ export function generateCoherentFungiName(params: {
       ? chosenEpithet.fem
       : chosenEpithet.neut;
 
-  const scientificName = `${genus} ${epithetLatin}`;
+  let finalScientificName = `${genus} ${epithetLatin}`;
 
   // 3. English common name strictly reflecting Latin parts
   const englishNoun = pickRandom(formEntry.englishNouns, rng);
-  let commonName: string;
+  let finalCommonName: string;
   if (englishNoun.toLowerCase().includes(chosenEpithet.english.toLowerCase())) {
-    commonName = `${colorEntry.englishAdj} ${englishNoun}`;
+    finalCommonName = `${colorEntry.englishAdj} ${englishNoun}`;
   } else {
-    commonName = `${chosenEpithet.english} ${colorEntry.englishAdj} ${englishNoun}`;
+    finalCommonName = `${chosenEpithet.english} ${colorEntry.englishAdj} ${englishNoun}`;
   }
 
-  if (usedScientificNames) usedScientificNames.add(scientificName);
-  if (usedCommonNames) usedCommonNames.add(commonName);
+  // Ensure absolute collision-free uniqueness when generating larger species counts (up to 20)
+  if (usedScientificNames && usedScientificNames.has(finalScientificName)) {
+    for (let sIdx = 1; sIdx < suffixList.length; sIdx++) {
+      const altForm = suffixList[(speciesIndex + sIdx) % suffixList.length];
+      const altGenus = `${colorEntry.prefix}${altForm.suffix}`;
+      const altSci = `${altGenus} ${epithetLatin}`;
+      if (!usedScientificNames.has(altSci)) {
+        finalScientificName = altSci;
+        finalCommonName = `${chosenEpithet.english} ${colorEntry.englishAdj} ${pickRandom(altForm.englishNouns, rng)}`;
+        break;
+      }
+    }
+    if (usedScientificNames.has(finalScientificName)) {
+      let counter = 2;
+      while (usedScientificNames.has(`${finalScientificName} ${counter}`)) {
+        counter++;
+      }
+      finalScientificName = `${finalScientificName} ${counter}`;
+      finalCommonName = `${finalCommonName} Type ${counter}`;
+    }
+  }
 
-  return { scientificName, commonName };
+  if (usedScientificNames) usedScientificNames.add(finalScientificName);
+  if (usedCommonNames) usedCommonNames.add(finalCommonName);
+
+  return { scientificName: finalScientificName, commonName: finalCommonName };
 }
 
 interface FungiArchetypeConfig {
@@ -431,17 +453,18 @@ export function generateFungiEcosystem(params: {
     structuralPolymer = 'Silica-Sclerotized Polycyclic Chitin';
   }
 
+  // Number of fungal species to generate: randomly between 5 and 20 species
+  const speciesCount = clamp(Math.floor(5 + rng() * 16), 5, 20);
+
   // Fungal diversity tier
   let diversityTier: PlanetaryFungiSummary['diversityTier'] = 'Developed Mycota';
   if (!isMulticellular) {
     diversityTier = 'Microbial Yeasts';
-  } else if (systemAgeGyr < 3.2) {
+  } else if (speciesCount < 8) {
     diversityTier = 'Pioneer Mold';
-  } else if (systemAgeGyr > 5.5 && hasLiquid && hasLand) {
+  } else if (speciesCount >= 15 && hasLiquid && hasLand) {
     diversityTier = 'Hyper-Diverse Mycelial Web';
   }
-
-  const speciesCount = !isMulticellular ? clamp(Math.round(3 + rng() * 2), 3, 5) : clamp(Math.round(4 + rng() * 3), 4, 7);
 
   // Archetypes pool
   const archetypes: FungiArchetypeConfig[] = [
@@ -740,7 +763,14 @@ export function generateFungiEcosystem(params: {
     return true;
   });
 
-  const selectedArchetypes = candidatePool.slice(0, speciesCount);
+  // Pick diverse archetypes deterministically for this seed (supports up to 20 species)
+  const selectedArchetypes: FungiArchetypeConfig[] = [];
+  if (candidatePool.length > 0) {
+    for (let i = 0; i < speciesCount; i++) {
+      const arch = candidatePool[(i + Math.floor(rng() * candidatePool.length)) % candidatePool.length];
+      selectedArchetypes.push(arch);
+    }
+  }
 
   const speciesList: XenofungiSpecies[] = [];
   const usedScientificNames = new Set<string>();
