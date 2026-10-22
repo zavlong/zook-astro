@@ -173,7 +173,7 @@ const getBiosphereDisplay = (sys: SectorHexSystem): string => {
             if (bio.includes('multicellular')) {
               hasMultiBio = true;
             }
-            if (hasTerrestrialBiosphere(body.planetClass, body.hydrosphere)) {
+            if (hasTerrestrialBiosphere(body.planetClass, body.hydrosphere, body)) {
               hasTerrestrialBio = true;
             }
           }
@@ -191,7 +191,7 @@ const getBiosphereDisplay = (sys: SectorHexSystem): string => {
                 if (bio.includes('multicellular')) {
                   hasMultiBio = true;
                 }
-                if (hasTerrestrialBiosphere(moon.moonClass, moon.hydrosphere)) {
+                if (hasTerrestrialBiosphere(moon.moonClass, moon.hydrosphere, moon)) {
                   hasTerrestrialBio = true;
                 }
               }
@@ -2574,7 +2574,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   { id: 'water-world', label: 'Water Worlds', color: 'text-sky-400', title: 'Systems with liquid-water (H2O / aqueous brine) worlds or moons' },
                   { id: 'ammonia-world', label: 'Ammonia Worlds', color: 'text-teal-300', title: 'Systems with Cryo-Ammonia (NH3-H2O) worlds or moons' },
                   { id: 'multicellular', label: 'Multicellular Life', color: 'text-emerald-400', title: 'Systems harboring worlds or moons with active multicellular biospheres' },
-                  { id: 'terrestrial-life', label: 'Terrestrial Life', color: 'text-lime-400', title: 'Systems harboring worlds or moons with active land-based / continental terrestrial life' },
+                  { id: 'terrestrial-life', label: 'Terrestrial Life', color: 'text-lime-400', title: 'Systems harboring worlds or moons with active land-based terrestrial life and non-frozen land (majority rocky composition; excludes ocean worlds)' },
                 ] as const
               ).map((f) => {
                 const isSelected = f.id === 'all' ? !hasActiveFilters : activeFilterCats.has(f.id);

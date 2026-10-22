@@ -554,6 +554,9 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
             if (isMulticellular) {
               habitableTypesSet.add('Multicellular Life');
             }
+            if (hasTerrestrialBiosphere(body.planetClass, body.hydrosphere, body)) {
+              habitableTypesSet.add('Terrestrial Life');
+            }
           }
 
           // Also inspect moons for habitable / cryo-ammonia / multicellular worlds
@@ -561,7 +564,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
             for (const moon of body.moons) {
               const isMoonWaterHZ = isWaterWorldBody(moon.moonClass, moon.surfaceTempK, moon.hydrosphere);
               const isMoonAmmonia = isAmmoniaWorldBody(moon.moonClass, moon.surfaceTempK, moon.hydrosphere);
-              const moonHasBio = Boolean(moon.hydrosphere?.biosphere);
+              const moonHasBio = Boolean(moon.hydrosphere?.biosphere && moon.hydrosphere.biosphere !== 'none');
               const isMoonMulticellular = hasMulticellularBiosphere(moon.hydrosphere);
 
               if (isMoonWaterHZ || isMoonAmmonia || moonHasBio) {
@@ -574,6 +577,9 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
                 }
                 if (isMoonMulticellular) {
                   habitableTypesSet.add('Multicellular Life');
+                }
+                if (hasTerrestrialBiosphere(moon.moonClass, moon.hydrosphere, moon)) {
+                  habitableTypesSet.add('Terrestrial Life');
                 }
               }
             }
@@ -1138,23 +1144,49 @@ export function hasMulticellularBiosphere(hydro?: RealisticHydrosphere | null): 
 
 /**
  * Evaluates whether a planet or moon harbors active terrestrial life (land-based / continental / subaerial biosphere).
+ * Requirements:
+ * 1. Must have an active biosphere (not 'none').
+ * 2. Ocean worlds CANNOT host terrestrial life (hard disqualifier for pure ocean worlds, pelagic worlds, or 100% liquid coverage).
+ * 3. Must have non-frozen land (or a majority rocky composition, as a simplification):
+ *    - coveragePct < 100% (dry emergent land exists)
+ *    - not completely glaciated/frozen ice world
+ *    - majority rocky composition (rockFrac > 0.5 or rockFrac > iceFrac, or rocky/terrestrial class) OR non-frozen surface temp (>= 240 K).
+ * 4. The biosphere must include terrestrial/continental/land life (not purely pelagic or deep-water marine).
  */
 export function hasTerrestrialBiosphere(
   planetOrMoonClass?: string,
-  hydro?: RealisticHydrosphere | null
+  hydro?: RealisticHydrosphere | null,
+  bodyProps?: {
+    rockFrac?: number;
+    iceFrac?: number;
+    surfaceTempK?: number;
+  } | null
 ): boolean {
   if (!hydro?.biosphere || hydro.biosphere === 'none') return false;
   const bio = hydro.biosphere.toLowerCase();
+  const pClass = (planetOrMoonClass || '').toLowerCase();
+  const state = (hydro.state || '').toLowerCase();
+  const covPct = hydro.coveragePct;
 
-  // 1. Explicit terrestrial / continental / land / crust markers
-  if (
-    bio.includes('terrestrial') ||
-    bio.includes('continental') ||
-    bio.includes('land') ||
-    bio.includes('crust') ||
-    bio.includes('algal mat')
-  ) {
-    return true;
+  // 1. Ocean worlds, pelagic worlds, water worlds, and non-surface worlds CANNOT host terrestrial life
+  const isOceanWorld =
+    pClass.includes('ocean') ||
+    pClass.includes('pelagic') ||
+    pClass.includes('water world') ||
+    pClass.includes('aquatic') ||
+    pClass.includes('gas') ||
+    pClass.includes('supercritical') ||
+    pClass.includes('steam') ||
+    pClass.includes('water giant') ||
+    (covPct !== undefined && covPct >= 99.5) ||
+    state.includes('global ocean') ||
+    state.includes('global sea') ||
+    state.includes('global water') ||
+    state.includes('100% ocean') ||
+    state.includes('100% liquid');
+
+  if (isOceanWorld) {
+    return false;
   }
 
   // 2. Disqualify pure pelagic / deep-water / ocean-only biospheres
@@ -1162,35 +1194,69 @@ export function hasTerrestrialBiosphere(
     bio.includes('deep-water') ||
     bio.includes('deep-pelagic') ||
     bio.includes('sub-iceberg') ||
-    bio.includes('cosmic ray attenuation')
+    bio.includes('cosmic ray attenuation') ||
+    (bio.includes('pelagic') &&
+      !bio.includes('continental') &&
+      !bio.includes('terrestrial') &&
+      !bio.includes('land'))
   ) {
     return false;
   }
 
-  // 3. Planet/moon class and hydrosphere checks for emergent land
-  const pClass = (planetOrMoonClass || '').toLowerCase();
-  const state = (hydro.state || '').toLowerCase();
-  const isPureOcean =
-    pClass.includes('ocean') ||
-    pClass.includes('pelagic') ||
-    pClass.includes('gas') ||
-    pClass.includes('supercritical') ||
-    pClass.includes('steam') ||
-    pClass.includes('water giant') ||
-    hydro.coveragePct === 100 ||
-    state.includes('global') ||
-    state.includes('100%');
+  // 3. Must have non-frozen land (or a majority rocky composition, as a simplification)
+  const isFrozenWorld =
+    pClass.includes('frozen') ||
+    pClass.includes('ice world') ||
+    pClass.includes('glacial');
 
-  if (isPureOcean) return false;
+  if (isFrozenWorld) {
+    return false;
+  }
 
-  // Has continents, landmasses, or emergent crust
-  const hasLand =
-    state.includes('continent') ||
-    state.includes('crust') ||
-    state.includes('land') ||
-    (hydro.coveragePct !== undefined && hydro.coveragePct > 0 && hydro.coveragePct < 100);
+  // Majority rocky composition check
+  const hasMajorityRocky =
+    (bodyProps?.rockFrac !== undefined && bodyProps.rockFrac > 0.5) ||
+    (bodyProps?.rockFrac !== undefined &&
+      bodyProps?.iceFrac !== undefined &&
+      bodyProps.rockFrac > bodyProps.iceFrac) ||
+    pClass.includes('terrestrial') ||
+    pClass.includes('rocky') ||
+    pClass.includes('continental') ||
+    pClass.includes('arid') ||
+    pClass.includes('desert') ||
+    pClass.includes('savannah') ||
+    pClass.includes('tropical') ||
+    pClass.includes('alpine') ||
+    pClass.includes('steppe');
 
-  return hasLand;
+  // Non-frozen surface temperature check
+  const hasNonFrozenSurface =
+    bodyProps?.surfaceTempK !== undefined && bodyProps.surfaceTempK >= 240;
+
+  // Has emergent non-frozen land or majority rocky composition
+  const hasNonFrozenLand =
+    (covPct === undefined || covPct < 99.5) &&
+    (hasMajorityRocky || hasNonFrozenSurface || state.includes('continent') || state.includes('land'));
+
+  if (!hasNonFrozenLand) {
+    return false;
+  }
+
+  // 4. Must have terrestrial / continental life markers or general terrestrial biosphere on a rocky world
+  const hasExplicitTerrestrial =
+    bio.includes('terrestrial') ||
+    bio.includes('continental') ||
+    bio.includes('land') ||
+    bio.includes('crust') ||
+    bio.includes('algal mat') ||
+    bio.includes('subaerial') ||
+    bio.includes('soil');
+
+  const isGeneralTerrestrialOnRockyLand =
+    !bio.includes('marine only') &&
+    (hasMajorityRocky || pClass.includes('terrestrial') || state.includes('continent'));
+
+  return hasExplicitTerrestrial || isGeneralTerrestrialOnRockyLand;
 }
 
 /**
@@ -1284,12 +1350,12 @@ export function hasTerrestrialLife(system: SectorHexSystem): boolean {
     for (const zone of zones) {
       for (const body of zone.bodies) {
         if (body.kind === 'planet') {
-          if (hasTerrestrialBiosphere(body.planetClass, body.hydrosphere)) {
+          if (hasTerrestrialBiosphere(body.planetClass, body.hydrosphere, body)) {
             return true;
           }
           if (body.moons) {
             for (const moon of body.moons) {
-              if (hasTerrestrialBiosphere(moon.moonClass, moon.hydrosphere)) {
+              if (hasTerrestrialBiosphere(moon.moonClass, moon.hydrosphere, moon)) {
                 return true;
               }
             }
@@ -1297,11 +1363,12 @@ export function hasTerrestrialLife(system: SectorHexSystem): boolean {
         }
       }
     }
+    return false;
   }
   return Boolean(
     system.habitableTypes?.some((t) => {
       const lower = t.toLowerCase();
-      return lower.includes('terrestrial') || lower.includes('continental');
+      return lower.includes('terrestrial life');
     })
   );
 }
