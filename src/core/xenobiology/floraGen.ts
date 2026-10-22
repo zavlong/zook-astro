@@ -480,6 +480,119 @@ export const BIOME_NAMES: Record<number, string> = {
 };
 
 /**
+ * Calculates a biologically grounded species count between 5 and 20,
+ * dynamically weighted by evolutionary age and planetary habitability.
+ */
+export function calculateWeightedSpeciesCount(params: {
+  systemAgeGyr?: number;
+  hasLiquid?: boolean;
+  hasLand?: boolean;
+  solventKey?: string;
+  surfaceTempK?: number;
+  pressureBar?: number | null;
+  isMulticellular: boolean;
+  biosphereDescription?: string;
+  presentBiomeCount?: number;
+  rng: () => number;
+}): number {
+  const {
+    systemAgeGyr = 4.5,
+    hasLiquid = true,
+    hasLand = true,
+    solventKey = 'H2O',
+    surfaceTempK = 288,
+    pressureBar = 1.0,
+    isMulticellular,
+    biosphereDescription = '',
+    presentBiomeCount = 4,
+    rng,
+  } = params;
+
+  // 1. Age Factor: Evolutionary diversification timeline
+  // Young biospheres (<2.0 Gyr) are simple and sparsely diversified.
+  // Mature biospheres (4.0+ Gyr) have evolved numerous specialized ecological niches.
+  let ageScore = clamp((systemAgeGyr - 1.2) / 3.8, 0.05, 1.0);
+  if (!isMulticellular) {
+    // Unicellular biospheres have limited macro-morphological speciation
+    ageScore = Math.min(ageScore, 0.35);
+  }
+
+  // 2. Solvent Habitability
+  const solvLower = solventKey.toLowerCase();
+  const isWater = solvLower.includes('h2o') || solvLower.includes('water') || solvLower.includes('brine');
+  const isAmmonia = solvLower.includes('nh3') || solvLower.includes('ammonia');
+  const solventScore = isWater ? 1.0 : isAmmonia ? 0.62 : 0.45;
+
+  // 3. Hydrosphere & Land Geomorphology (Ecotonal Niches)
+  let hydroScore = 0.5;
+  if (hasLiquid && hasLand) {
+    // Maximum ecotone diversity: terrestrial, riverine, littoral, benthic, pelagic
+    hydroScore = 1.0;
+  } else if (hasLiquid && !hasLand) {
+    // Pelagic ocean world: rich marine life, but no terrestrial clades
+    hydroScore = 0.68;
+  } else if (!hasLiquid && hasLand) {
+    // Arid / desert world without open standing liquid
+    hydroScore = 0.48;
+  }
+
+  // 4. Thermodynamic Temperature Habitability
+  let tempScore = 0.5;
+  if (isWater) {
+    if (surfaceTempK >= 273 && surfaceTempK <= 318) {
+      tempScore = 1.0; // Optimal Goldilocks temperate climate
+    } else if (surfaceTempK >= 250 && surfaceTempK <= 340) {
+      tempScore = 0.72; // Moderate psychrophilic or thermophilic stress
+    } else {
+      tempScore = 0.35; // Severe thermal stress
+    }
+  } else if (isAmmonia) {
+    if (surfaceTempK >= 180 && surfaceTempK <= 245) {
+      tempScore = 1.0; // Cryogenic ammonia-water optimum
+    } else {
+      tempScore = 0.5;
+    }
+  } else {
+    tempScore = 0.6;
+  }
+
+  // 5. Atmospheric Pressure Habitability
+  const p = pressureBar ?? 1.0;
+  let pressScore = 0.5;
+  if (p >= 0.4 && p <= 2.8) {
+    pressScore = 1.0; // Ample gas density for respiration, spore flight, and thermal buffering
+  } else if (p >= 0.1 && p <= 6.0) {
+    pressScore = 0.75;
+  } else {
+    pressScore = 0.4; // Vacuum-like (<0.1 bar) or crushing (>6 bar)
+  }
+
+  // 6. Biome Niches Variety
+  const biomeScore = clamp(presentBiomeCount / 6, 0.4, 1.0);
+
+  // 7. Relic / White Dwarf Environmental Stress Penalty
+  const isRelicBio =
+    biosphereDescription.toLowerCase().includes('relic') ||
+    biosphereDescription.toLowerCase().includes('white dwarf');
+  const relicMultiplier = isRelicBio ? 0.5 : 1.0;
+
+  // Composite Habitability Score (0.1 to 1.0)
+  const habScore = clamp(
+    (solventScore * 0.3 + hydroScore * 0.25 + tempScore * 0.25 + pressScore * 0.1 + biomeScore * 0.1) * relicMultiplier,
+    0.1,
+    1.0
+  );
+
+  // Balanced weighting: 50% evolutionary age, 50% environmental habitability
+  const combinedFactor = clamp(0.5 * ageScore + 0.5 * habScore, 0.05, 1.0);
+
+  // Map to [5, 20] range with gentle stochastic variation
+  const baseTarget = 5 + combinedFactor * 15;
+  const jitter = (rng() - 0.5) * 3.0;
+  return clamp(Math.round(baseTarget + jitter), 5, 20);
+}
+
+/**
  * Generate the plant ecosystem summary and species catalog for a world.
  */
 export function generatePlantEcosystem(params: {
@@ -603,8 +716,19 @@ export function generatePlantEcosystem(params: {
     structuralBase = 'Silica-Reinforced Biomineralized Cellulose';
   }
 
-  // Number of plant species to generate: randomly between 5 and 20 species
-  const speciesCount = clamp(Math.floor(5 + rng() * 16), 5, 20);
+  // Number of plant species to generate: weighted by evolutionary age and planetary habitability (5 to 20 species)
+  const speciesCount = calculateWeightedSpeciesCount({
+    systemAgeGyr,
+    hasLiquid,
+    hasLand,
+    solventKey,
+    surfaceTempK,
+    pressureBar: pBar,
+    isMulticellular,
+    biosphereDescription,
+    presentBiomeCount: presentBiomeIds.size,
+    rng,
+  });
 
   // Diversity tier
   let diversityTier: PlanetaryEcosystemSummary['diversityTier'] = 'Developing Flora';

@@ -194,6 +194,7 @@ import {
   SOLID_LAND_BIOME_IDS,
   WATER_BIOME_IDS,
   BIOME_NAMES,
+  calculateWeightedSpeciesCount,
 } from './floraGen';
 
 function createSeedRng(seed: number) {
@@ -206,10 +207,6 @@ function createSeedRng(seed: number) {
 
 function pickRandom<T>(arr: T[], rng: () => number): T {
   return arr[Math.floor(rng() * arr.length)];
-}
-
-function clamp(v: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, v));
 }
 
 /**
@@ -372,9 +369,10 @@ export function generateFungiEcosystem(params: {
   const {
     seed,
     hasBiosphere,
+    biosphereDescription = '',
     systemAgeGyr = 4.5,
     gravityG = 1.0,
-    pressureBar: _pressureBar = 1.0,
+    pressureBar = 1.0,
     solventKey = 'H2O',
     biomeGrid,
     surfaceTempK,
@@ -433,7 +431,9 @@ export function generateFungiEcosystem(params: {
   }
 
   const rng = createSeedRng((seed * 37 + 0x8a1d7f4b) >>> 0);
-  const isMulticellular = systemAgeGyr >= 2.5;
+  const bioDescLower = biosphereDescription.toLowerCase();
+  const isMulticellular = bioDescLower.includes('multicellular') || 
+    (!bioDescLower.includes('unicellular') && !bioDescLower.includes('microbial') && systemAgeGyr >= 2.8);
   const g = Math.max(0.15, gravityG);
   const heightMultiplier = Math.pow(1.0 / g, 0.55);
 
@@ -452,8 +452,19 @@ export function generateFungiEcosystem(params: {
       : 'Thermophilic Mineral Biofilm';
   }
 
-  // Number of fungal species to generate: randomly between 5 and 20 species
-  const speciesCount = clamp(Math.floor(5 + rng() * 16), 5, 20);
+  // Number of fungal species to generate: weighted by evolutionary age and planetary habitability (5 to 20 species)
+  const speciesCount = calculateWeightedSpeciesCount({
+    systemAgeGyr,
+    hasLiquid,
+    hasLand,
+    solventKey,
+    surfaceTempK,
+    pressureBar,
+    isMulticellular,
+    biosphereDescription,
+    presentBiomeCount: presentBiomeIds.size,
+    rng,
+  });
 
   // Fungal diversity tier
   let diversityTier: PlanetaryFungiSummary['diversityTier'] = 'Developed Mycota';
