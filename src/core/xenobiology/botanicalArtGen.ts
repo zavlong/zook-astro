@@ -706,11 +706,115 @@ export function generateBotanicalSvg(
       `;
       break;
     }
+
+    case 'Yeast': {
+      // Unicellular Budding Yeast & Zoosporic Micro-Chytrid
+      const motherX = centerX;
+      const motherY = groundY - height * 0.34;
+      const motherRx = width * 0.17;
+      const motherRy = height * 0.21;
+
+      const daughterX = centerX + width * 0.14;
+      const daughterY = groundY - height * 0.48;
+      const daughterRx = width * 0.10;
+      const daughterRy = height * 0.12;
+
+      const satelliteX = centerX - width * 0.15;
+      const satelliteY = groundY - height * 0.26;
+      const satelliteRx = width * 0.08;
+      const satelliteRy = height * 0.10;
+
+      floraShapesSvg = `
+        <!-- Biofilm Matrix / Zoospore Flagella -->
+        <ellipse cx="${centerX}" cy="${groundY}" rx="${width * 0.4}" ry="9" fill="url(#${uniqueId}_plume)" opacity="0.3" />
+        <path d="M ${motherX} ${motherY + motherRy * 0.8} Q ${motherX - 15} ${groundY - 10} ${motherX - 8} ${groundY + 3}" stroke="${stipeHighlight}" stroke-width="1.2" fill="none" opacity="0.75" />
+        <path d="M ${motherX + 6} ${motherY + motherRy * 0.85} Q ${motherX + 20} ${groundY - 12} ${motherX + 16} ${groundY + 4}" stroke="${stipeHighlight}" stroke-width="1.0" fill="none" opacity="0.6" />
+
+        <!-- Satellite Spore Cell -->
+        <g>
+          <ellipse cx="${satelliteX}" cy="${satelliteY}" rx="${satelliteRx}" ry="${satelliteRy}" fill="url(#${uniqueId}_pigment)" stroke="${stipeHighlight}" stroke-width="0.8" />
+          <ellipse cx="${satelliteX - satelliteRx * 0.25}" cy="${satelliteY - satelliteRy * 0.3}" rx="${satelliteRx * 0.45}" ry="${satelliteRy * 0.45}" fill="${pigmentLight}" opacity="0.35" />
+          <circle cx="${satelliteX + 2}" cy="${satelliteY + 3}" r="${satelliteRx * 0.35}" fill="${pigmentDark}" opacity="0.5" />
+        </g>
+
+        <!-- Mother Yeast Cell -->
+        <g>
+          <!-- Cell Wall Glow -->
+          <ellipse cx="${motherX}" cy="${motherY}" rx="${motherRx * 1.15}" ry="${motherRy * 1.15}" fill="${pigmentLight}" opacity="0.2" />
+          <!-- Cytoplasm Body -->
+          <ellipse cx="${motherX}" cy="${motherY}" rx="${motherRx}" ry="${motherRy}" fill="url(#${uniqueId}_pigment)" stroke="${stipeHighlight}" stroke-width="1.2" />
+          <!-- Highlighting Rim -->
+          <ellipse cx="${motherX - motherRx * 0.2}" cy="${motherY - motherRy * 0.25}" rx="${motherRx * 0.55}" ry="${motherRy * 0.5}" fill="${pigmentLight}" opacity="0.3" />
+          <!-- Large Intracellular Vacuole / Lipid Globule -->
+          <ellipse cx="${motherX + 3}" cy="${motherY + 4}" rx="${motherRx * 0.45}" ry="${motherRy * 0.45}" fill="${pigmentDark}" opacity="0.6" />
+          <circle cx="${motherX + 1}" cy="${motherY + 2}" r="${motherRx * 0.2}" fill="#ffffff" opacity="0.5" />
+          <!-- Bud Scar Ring -->
+          <ellipse cx="${motherX + motherRx * 0.7}" cy="${motherY - motherRy * 0.6}" rx="5" ry="3" fill="none" stroke="${stipeHighlight}" stroke-width="1.0" transform="rotate(35, ${motherX + motherRx * 0.7}, ${motherY - motherRy * 0.6})" />
+        </g>
+
+        <!-- Budding Daughter Cell -->
+        <g>
+          <!-- Bud Neck Isthmus -->
+          <path d="M ${motherX + motherRx * 0.65} ${motherY - motherRy * 0.5} Q ${(motherX + daughterX) * 0.5} ${(motherY + daughterY) * 0.5} ${daughterX - daughterRx * 0.6} ${daughterY + daughterRy * 0.5}" stroke="${stipeHighlight}" stroke-width="2" fill="none" opacity="0.8" />
+          <!-- Daughter Body -->
+          <ellipse cx="${daughterX}" cy="${daughterY}" rx="${daughterRx}" ry="${daughterRy}" fill="url(#${uniqueId}_pigment)" stroke="${stipeHighlight}" stroke-width="1.0" />
+          <ellipse cx="${daughterX - daughterRx * 0.2}" cy="${daughterY - daughterRy * 0.2}" rx="${daughterRx * 0.45}" ry="${daughterRy * 0.45}" fill="${pigmentLight}" opacity="0.4" />
+          <circle cx="${daughterX + 2}" cy="${daughterY + 2}" r="${daughterRx * 0.3}" fill="${pigmentDark}" opacity="0.5" />
+        </g>
+      `;
+      break;
+    }
+
+    case 'MicroMold': {
+      // Unicellular/Microbial Pin-Mold & Conidiophore Filament Heads
+      const moldStalks = [
+        `M ${centerX - 24} ${groundY} Q ${centerX - 35} ${groundY - height * 0.25} ${centerX - 30} ${height * 0.32}`,
+        `M ${centerX - 10} ${groundY} Q ${centerX - 12} ${groundY - height * 0.3} ${centerX - 8} ${height * 0.24}`,
+        `M ${centerX + 8} ${groundY} Q ${centerX + 15} ${groundY - height * 0.28} ${centerX + 18} ${height * 0.27}`,
+        `M ${centerX + 26} ${groundY} Q ${centerX + 36} ${groundY - height * 0.22} ${centerX + 38} ${height * 0.36}`,
+      ];
+
+      const pinHeads = [
+        { cx: centerX - 30, cy: height * 0.32, r: 8.5 },
+        { cx: centerX - 8, cy: height * 0.24, r: 10.5 },
+        { cx: centerX + 18, cy: height * 0.27, r: 9.5 },
+        { cx: centerX + 38, cy: height * 0.36, r: 7.5 },
+      ];
+
+      floraShapesSvg = `
+        <!-- Basal Hyphal Web Mat -->
+        <ellipse cx="${centerX}" cy="${groundY}" rx="${width * 0.38}" ry="8" fill="url(#${uniqueId}_stipe)" opacity="0.6" />
+        <path d="M ${centerX - width * 0.35} ${groundY + 1} Q ${centerX} ${groundY - 6} ${centerX + width * 0.35} ${groundY + 1}" stroke="${stipeHighlight}" stroke-width="1.2" fill="none" opacity="0.7" />
+
+        <!-- Upright Micro-Conidiophore Stalks -->
+        ${moldStalks.map(d => `<path d="${d}" stroke="${stipeHighlight}" stroke-width="1.8" stroke-linecap="round" fill="none" />`).join('\n')}
+
+        <!-- Spherical Sporangial Pinheads & Micro-Conidia Dust -->
+        ${pinHeads.map(h => `
+          <g>
+            <!-- Spore Halo -->
+            <circle cx="${h.cx}" cy="${h.cy}" r="${h.r * 1.8}" fill="${pigmentLight}" opacity="0.25" />
+            <!-- Central Sporangium -->
+            <circle cx="${h.cx}" cy="${h.cy}" r="${h.r}" fill="url(#${uniqueId}_pigment)" stroke="${stipeHighlight}" stroke-width="0.8" />
+            <!-- Highlight -->
+            <circle cx="${h.cx - h.r * 0.3}" cy="${h.cy - h.r * 0.3}" r="${h.r * 0.35}" fill="#ffffff" opacity="0.6" />
+            <!-- Radiating Micro-Spore Dots -->
+            <circle cx="${h.cx - h.r * 1.3}" cy="${h.cy - 2}" r="1.4" fill="${pigmentLight}" />
+            <circle cx="${h.cx + h.r * 1.3}" cy="${h.cy + 3}" r="1.3" fill="${pigmentLight}" />
+            <circle cx="${h.cx + 2}" cy="${h.cy - h.r * 1.3}" r="1.4" fill="${pigmentLight}" />
+            <circle cx="${h.cx - 3}" cy="${h.cy + h.r * 1.3}" r="1.2" fill="${pigmentLight}" />
+          </g>
+        `).join('\n')}
+      `;
+      break;
+    }
   }
 
   // Format height string for scale bar
-  const heightStr = species.averageHeightM < 0.1
-    ? `${(species.averageHeightM * 100).toFixed(0)}cm`
+  const heightStr = species.averageHeightM < 0.01
+    ? `${(species.averageHeightM * 1000).toFixed(1)}mm`
+    : species.averageHeightM < 0.1
+    ? `${(species.averageHeightM * 100).toFixed(1)}cm`
     : species.averageHeightM >= 1000
     ? `${(species.averageHeightM / 1000).toFixed(1)}km`
     : `${species.averageHeightM.toFixed(1)}m`;

@@ -9,7 +9,7 @@
  * - Planetary hydrology -> Terrestrial vs. Pelagic marine ocean fungi
  */
 
-export type FungiFormCategory = 'Cap' | 'Bracket' | 'Puffball' | 'Cup' | 'Coral' | 'MycelialNet';
+export type FungiFormCategory = 'Cap' | 'Bracket' | 'Puffball' | 'Cup' | 'Coral' | 'MycelialNet' | 'Yeast' | 'MicroMold';
 
 export interface XenofungiSpecies {
   id: string;
@@ -148,6 +148,16 @@ export const FUNGI_FORM_SUFFIXES: Record<FungiFormCategory, FungiFormSuffixEntry
     { suffix: 'mycelium', gender: 'neut', englishNouns: ['Hyphal-Net', 'Mycelial-Weave'] },
     { suffix: 'thrix', gender: 'fem', englishNouns: ['Mold-Filament', 'Cobweb-Mold'] },
     { suffix: 'rhiza', gender: 'fem', englishNouns: ['Rhizomorph-Web', 'Spore-Lace'] },
+  ],
+  Yeast: [
+    { suffix: 'zyma', gender: 'fem', englishNouns: ['Budding-Yeast', 'Ferment-Yeast'] },
+    { suffix: 'saccharo', gender: 'masc', englishNouns: ['Sugar-Yeast', 'Biofilm-Yeast'] },
+    { suffix: 'chytris', gender: 'fem', englishNouns: ['Micro-Chytrid', 'Flagellated-Zoosporoid'] },
+  ],
+  MicroMold: [
+    { suffix: 'mucor', gender: 'masc', englishNouns: ['Pin-Mold', 'Spore-Head'] },
+    { suffix: 'monilia', gender: 'fem', englishNouns: ['Chain-Mold', 'Beaded-Hypha'] },
+    { suffix: 'penicillus', gender: 'masc', englishNouns: ['Brush-Mold', 'Micro-Spike'] },
   ],
 };
 
@@ -365,6 +375,7 @@ export function generateFungiEcosystem(params: {
   coveragePct?: number;
   biomeGrid?: Uint8Array;
   surfaceTempK?: number;
+  plantMulticellular?: boolean;
 }): PlanetaryFungiSummary {
   const {
     seed,
@@ -376,6 +387,7 @@ export function generateFungiEcosystem(params: {
     solventKey = 'H2O',
     biomeGrid,
     surfaceTempK,
+    plantMulticellular,
   } = params;
 
   if (!hasBiosphere) {
@@ -432,8 +444,12 @@ export function generateFungiEcosystem(params: {
 
   const rng = createSeedRng((seed * 37 + 0x8a1d7f4b) >>> 0);
   const bioDescLower = biosphereDescription.toLowerCase();
-  const isMulticellular = bioDescLower.includes('multicellular') || 
-    (!bioDescLower.includes('unicellular') && !bioDescLower.includes('microbial') && systemAgeGyr >= 2.8);
+  // Ecological constraint: Heterotrophic fungi cannot be multicellular if autotrophic primary producers are strictly unicellular
+  const plantIsUnicellular = plantMulticellular === false;
+  const isMulticellular = !plantIsUnicellular && (
+    bioDescLower.includes('multicellular') || 
+    (!bioDescLower.includes('unicellular') && !bioDescLower.includes('microbial') && systemAgeGyr >= 2.8)
+  );
   const g = Math.max(0.15, gravityG);
   const heightMultiplier = Math.pow(1.0 / g, 0.55);
 
@@ -476,8 +492,222 @@ export function generateFungiEcosystem(params: {
     diversityTier = 'Hyper-Diverse Mycelial Web';
   }
 
-  // Archetypes pool
-  const archetypes: FungiArchetypeConfig[] = [
+  // Unicellular / Microbial Fungal Archetypes (For worlds with microbial/unicellular biospheres)
+  const unicellularArchetypes: FungiArchetypeConfig[] = [
+    // 1. Soil Biofilm Sugar-Fermenting Yeast (Land only: 3, 4, 5, 12)
+    {
+      formCategory: 'Yeast',
+      growthForm: 'Soil Biofilm Budding Sugar-Yeast',
+      habitatType: 'land',
+      baseHeightM: 0.003,
+      baseSpreadM: 1.5,
+      trophicType: 'Saprotrophic Biofilm Sugar Fermenter',
+      nativeBiomes: [
+        { id: 4, name: 'Lowland Silicate Plains' },
+        { id: 5, name: 'Temperate Continental Basin' },
+      ],
+      compatibleBiomeIds: [3, 4, 5, 6, 12],
+      reproductionMethod: 'Asexual budding and thick-walled desiccation-tolerant chlamydospores',
+      fieldNote: (biomes) => `Microscopic colonies forming sticky, gelatinous biofilms across moist soil in ${biomes}, fermenting algal exudates.`,
+      adaptations: [
+        'Rapid colonial budding consuming simple monosaccharides exuded by microbial mats',
+        'Extracellular slime secretion binding mineral grains into cohesive moisture-retaining crusts',
+        'Enzymatic invertases hydrolyzing foreign polysaccharide chains under low oxygen',
+      ],
+    },
+    // 2. Endolithic Basalt Micro-Fungus (Arid / Rocky Land: 4, 9, 10, 11, 16)
+    {
+      formCategory: 'MicroMold',
+      growthForm: 'Endolithic Rock-Dissolving Pin-Mold',
+      habitatType: 'land',
+      baseHeightM: 0.0015,
+      baseSpreadM: 0.8,
+      trophicType: 'Chemolithotrophic Mineral Dissolver',
+      nativeBiomes: [
+        { id: 9, name: 'Arid Steppe / Scrub' },
+        { id: 11, name: 'High Plateau / Badlands' },
+      ],
+      compatibleBiomeIds: [4, 9, 10, 11, 16],
+      reproductionMethod: 'Micro-conidial fragmentation through microscopic rock fissures',
+      fieldNote: (biomes) => `Shelters within microscopic pores of basalt and mineral rocks in ${biomes}, etching stone surfaces.`,
+      adaptations: [
+        'Oxalic and citric acid exosecretion dissolving mineral silicates to release trace phosphorus',
+        'Endolithic hyphal tunneling protecting delicate cell membranes from harsh solar radiation',
+        'Anhydrous dormancy states surviving centuries of complete desiccation',
+      ],
+    },
+    // 3. Aquatic Zoosporic Chytrid (Aquatic only: 1, 2, 17, 23)
+    {
+      formCategory: 'Yeast',
+      growthForm: 'Pelagic Zoosporic Flagellated Chytrid',
+      habitatType: 'aquatic',
+      baseHeightM: 0.002,
+      baseSpreadM: 2.2,
+      trophicType: 'Pelagic Micro-Algal Saprobe & Parasitoid',
+      nativeBiomes: [
+        { id: 23, name: 'Algal Sea' },
+        { id: 1, name: 'Deep Ocean' },
+      ],
+      compatibleBiomeIds: [1, 2, 17, 23],
+      reproductionMethod: 'Chemotactic uniflagellate zoospores swarming photic algal blooms',
+      fieldNote: (biomes) => `Microscopic uniflagellated fungi swimming through oceanic waters in ${biomes}, recycling dead phytoplankton.`,
+      adaptations: [
+        'Single posterior whiplash flagellum granting active directional motility in the photic zone',
+        'Rhizoidal anchoring tufts penetrating unicellular algal cell walls to digest cytoplasm',
+        'Resting sporangia sinking to oceanic benthos during nutrient depletion',
+      ],
+    },
+    // 4. Hydrothermal Chemosynthetic Vent Yeast (Aquatic: 1, 14, 15, 23)
+    {
+      formCategory: 'Yeast',
+      growthForm: 'Barophilic Abyssal Chimney Yeast',
+      habitatType: 'aquatic',
+      baseHeightM: 0.006,
+      baseSpreadM: 1.0,
+      trophicType: 'Barophilic Chemosynthetic Sulfur-Saprobe',
+      nativeBiomes: [
+        { id: 1, name: 'Deep Ocean' },
+        { id: 14, name: 'Active Volcanic Caldera' },
+      ],
+      compatibleBiomeIds: [1, 14, 15, 23],
+      reproductionMethod: 'Thermal-tolerant budding clusters coating superheated mineral crusts',
+      fieldNote: (biomes) => `Dense microbial mats encrusting hydrothermal chimneys and seafloor vents in ${biomes}.`,
+      adaptations: [
+        'Thermostable heat-shock chaperones maintaining enzymatic folding up to 395 Kelvin',
+        'Enzymatic hydrogen-sulfide oxidation providing ATP in pitch-black abyssal depths',
+        'Heavy barophilic membrane lipids rigid under hundreds of atmospheres of hydrostatic pressure',
+      ],
+    },
+    // 5. Cryophilic Ice-Slush Yeast (Amphibious/Cryo: 6, 7, 8, 13, 18, 21)
+    {
+      formCategory: 'Yeast',
+      growthForm: 'Cryophilic Brine-Slush Micro-Yeast',
+      habitatType: 'amphibious',
+      baseHeightM: 0.002,
+      baseSpreadM: 2.8,
+      trophicType: 'Cryotrophic Brine-Channel Decomposer',
+      nativeBiomes: [
+        { id: 8, name: 'Polar Glacial Ice' },
+        { id: 7, name: 'Tundra / Permafrost' },
+      ],
+      compatibleBiomeIds: [6, 7, 8, 13, 18, 21],
+      reproductionMethod: 'Cryo-dormant spore encapsulation in microscopic interstitial brine pockets',
+      fieldNote: (biomes) => `Survives within liquid brine veins inside polar ice sheets and permafrost in ${biomes}.`,
+      adaptations: [
+        'High intracellular concentrations of trehalose and glycerol acting as non-toxic biological antifreeze',
+        'Polyunsaturated membrane phospholipids preserving fluid transport at sub-zero temperatures',
+        'Extracellular ice-binding proteins preventing recrystallization from shearing cellular membranes',
+      ],
+    },
+    // 6. Volcanic Regolith Radiotrophic Mold (Land: 4, 11, 14, 15)
+    {
+      formCategory: 'MicroMold',
+      growthForm: 'Melanized Radiotrophic Ash-Mold',
+      habitatType: 'land',
+      baseHeightM: 0.005,
+      baseSpreadM: 0.9,
+      trophicType: 'Radiotrophic Regolith Micro-Decomposer',
+      nativeBiomes: [
+        { id: 14, name: 'Active Volcanic Caldera' },
+        { id: 15, name: 'Basaltic Volcanic Field' },
+      ],
+      compatibleBiomeIds: [4, 11, 14, 15],
+      reproductionMethod: 'High-altitude micro-spores carried in volcanic convection columns',
+      fieldNote: (biomes) => `Velvety black micro-mold coating volcanic scoria and radioactive mineral deposits in ${biomes}.`,
+      adaptations: [
+        'Dense cross-linked melanins converting ionizing gamma and UV flux into metabolic electron transport',
+        'High sulfur-dioxide tolerance allowing colonization of active fumaroles and cinder fields',
+        'Rapid scavenging of heavy metals to immobilize toxic ions in insoluble chitinous complexes',
+      ],
+    },
+    // 7. Intertidal Coastal Mucilage Yeast (Amphibious: 2, 3, 22)
+    {
+      formCategory: 'Yeast',
+      growthForm: 'Intertidal Halotolerant Mucilage-Yeast',
+      habitatType: 'amphibious',
+      baseHeightM: 0.004,
+      baseSpreadM: 3.5,
+      trophicType: 'Halophilic Mucilage Fermenter',
+      nativeBiomes: [
+        { id: 3, name: 'Coastal Alluvial Basin' },
+        { id: 2, name: 'Shallow Inland Sea' },
+      ],
+      compatibleBiomeIds: [2, 3, 22],
+      reproductionMethod: 'Tide-swept colonial slime fragmentation along intertidal mudflats',
+      fieldNote: (biomes) => `Forms shimmering, iridescent slicks over tidal flats and coastal lagoons in ${biomes}.`,
+      adaptations: [
+        'High potassium-accumulation pumps equilibrating intracellular osmotic pressure against brine',
+        'Mucilaginous biofilm sheath resisting tidal scour and periodic atmospheric desiccation',
+        'Metabolism tuned to ferment complex polysaccharides produced by shallow-water microbial mats',
+      ],
+    },
+    // 8. Sub-Surface Sediment Micro-Mold (Land: 3, 4, 5)
+    {
+      formCategory: 'MicroMold',
+      growthForm: 'Interstitial Sediment Beaded Micro-Mold',
+      habitatType: 'land',
+      baseHeightM: 0.003,
+      baseSpreadM: 1.6,
+      trophicType: 'Humic Acid Micro-Saprotroph',
+      nativeBiomes: [
+        { id: 5, name: 'Temperate Continental Basin' },
+        { id: 4, name: 'Lowland Silicate Plains' },
+      ],
+      compatibleBiomeIds: [3, 4, 5],
+      reproductionMethod: 'Beaded hyphal chains dispersing via soil pore water capillary action',
+      fieldNote: (biomes) => `Creeps through subterranean pore networks and moist sedimentary grains across ${biomes}.`,
+      adaptations: [
+        'Sub-millimeter hyphal filaments navigating microscopic void spaces between silicate grains',
+        'Excretion of non-specific peroxidases breaking down refractory abiotic and biotic organic matter',
+        'Facultative anaerobic metabolism operating efficiently in oxygen-depleted sub-surface layers',
+      ],
+    },
+    // 9. Pelagic Planktonic Colonial Chytrid (Aquatic: 1, 2, 23)
+    {
+      formCategory: 'Yeast',
+      growthForm: 'Pelagic Colonial Micro-Chytrid Sphere',
+      habitatType: 'aquatic',
+      baseHeightM: 0.0025,
+      baseSpreadM: 3.8,
+      trophicType: 'Marine Planktonic Detrital Saprobe',
+      nativeBiomes: [
+        { id: 23, name: 'Algal Sea' },
+        { id: 1, name: 'Deep Ocean' },
+      ],
+      compatibleBiomeIds: [1, 2, 23],
+      reproductionMethod: 'Synchronous zoospore liberation keyed to diurnal planetary illumination',
+      fieldNote: (biomes) => `Drifts in open ocean waters throughout ${biomes}, breaking down sinking microbial detritus.`,
+      adaptations: [
+        'Microscopic lipid droplet accumulation providing neutral buoyancy within the upper water column',
+        'Esterase and protease secretion dissolving floating organic particulate carbon before it sinks',
+        'Chemoreceptive surface proteins detecting chemical plumes trailing behind microbial colonies',
+      ],
+    },
+    // 10. Desiccation-Resistant Desert Micro-Mold (Land: 4, 9, 10, 11, 16)
+    {
+      formCategory: 'MicroMold',
+      growthForm: 'Xerophilic Desert Crust Micro-Mold',
+      habitatType: 'land',
+      baseHeightM: 0.0018,
+      baseSpreadM: 1.1,
+      trophicType: 'Xerophilic Desiccation-Resistant Micro-Saprobe',
+      nativeBiomes: [
+        { id: 9, name: 'Arid Steppe / Scrub' },
+        { id: 10, name: 'Hyper-Arid Sand Dunes' },
+      ],
+      compatibleBiomeIds: [4, 9, 10, 11, 16],
+      reproductionMethod: 'Extremely durable micro-spores carried on planetary dust storms',
+      fieldNote: (biomes) => `Binds with desert varnishes and windblown dust in ${biomes}, surviving prolonged droughts.`,
+      adaptations: [
+        'Vitreous glassy cytoplasmic state during desiccation preventing protein denaturation',
+        'Hydrophobic spore walls allowing years of suspended animation in dry sand dunes',
+        'Rapid metabolic restart within minutes of atmospheric dew condensation or rare rain events',
+      ],
+    },
+  ];
+
+  // Multicellular Macro-Fungi Archetypes (Only available when planetary flora is multicellular)
+  const multicellularArchetypes: FungiArchetypeConfig[] = [
     // 1. Bioluminescent Forest Gilled Parasol (Temperate Land: 3, 4, 5, 12)
     {
       formCategory: 'Cap',
@@ -937,6 +1167,9 @@ export function generateFungiEcosystem(params: {
     },
   ];
 
+  // Select pool based on multicellularity constraint
+  const archetypes = isMulticellular ? multicellularArchetypes : unicellularArchetypes;
+
   // Strict planetary habitat and ecological biome filtering:
   // - If planet has NO solid land, exclude land-only fungi!
   // - If planet has NO liquid oceans, exclude aquatic-only fungi!
@@ -981,7 +1214,7 @@ export function generateFungiEcosystem(params: {
 
     const scaledHeight = isMulticellular
       ? +(arch.baseHeightM * heightMultiplier * (0.85 + specRng() * 0.3)).toFixed(2)
-      : +(arch.baseHeightM * (0.85 + specRng() * 0.3)).toFixed(3);
+      : +(arch.baseHeightM * (0.85 + specRng() * 0.3)).toFixed(4);
     const scaledSpread = +(arch.baseSpreadM * (isMulticellular ? heightMultiplier : 1.0) * (0.85 + specRng() * 0.3)).toFixed(1);
 
     // Pick color entry

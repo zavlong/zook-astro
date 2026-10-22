@@ -199,8 +199,9 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
       hasLand,
       coveragePct: covPct,
       surfaceTempK: Tsurf,
+      plantMulticellular: planetEcosystem.isMulticellular,
     });
-  }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, hostStarTeff, pBar, Tsurf]);
+  }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, hostStarTeff, pBar, Tsurf, planetEcosystem.isMulticellular]);
 
   const tauIR =
     ghK > 0 && Tatm > 10 ? Math.max(0.01, (4 / 3) * (Math.pow(Tsurf / Tatm, 4) - 1)) : 0;

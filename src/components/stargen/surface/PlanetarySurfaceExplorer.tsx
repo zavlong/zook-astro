@@ -137,8 +137,9 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       coveragePct,
       biomeGrid: surfaceModel.biomeGrid,
       surfaceTempK,
+      plantMulticellular: ecosystem.isMulticellular,
     });
-  }, [surfaceModel, planet, moon, hostStarTeff]);
+  }, [surfaceModel, planet, moon, hostStarTeff, ecosystem.isMulticellular]);
 
   // Generate Goldberg Polyhedron (480 Hexagons + 12 Pentagons) planetary tile grid
   const goldbergGrid = useMemo<PlanetaryGoldbergGrid>(() => {
