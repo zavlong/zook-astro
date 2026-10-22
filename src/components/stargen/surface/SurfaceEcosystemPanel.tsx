@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronUp,
   CheckCircle2,
+  Sparkles,
 } from 'lucide-react';
 import {
   PlanetaryEcosystemSummary,
@@ -27,6 +28,8 @@ interface SurfaceEcosystemPanelProps {
   isTileView?: boolean;
   isOpen: boolean;
   onClose: () => void;
+  onGenerateAiImage?: (species: SpecimenSpecies) => void;
+  onGenerateAiSurface?: () => void;
 }
 
 export const SurfaceEcosystemPanel: React.FC<SurfaceEcosystemPanelProps> = ({
@@ -36,6 +39,8 @@ export const SurfaceEcosystemPanel: React.FC<SurfaceEcosystemPanelProps> = ({
   isTileView = false,
   isOpen,
   onClose,
+  onGenerateAiImage,
+  onGenerateAiSurface,
 }) => {
   const [activeTab, setActiveTab] = useState<'plants' | 'fungi'>('plants');
   const [filterMode, setFilterMode] = useState<'all' | 'tile'>('all');
@@ -210,6 +215,18 @@ export const SurfaceEcosystemPanel: React.FC<SurfaceEcosystemPanelProps> = ({
                 Active Tile ({currentTileNative.length})
               </button>
             </div>
+          )}
+
+          {onGenerateAiSurface && (
+            <button
+              type="button"
+              onClick={onGenerateAiSurface}
+              className="py-1 px-2.5 rounded-lg border border-sky-500/60 bg-sky-950/70 hover:bg-sky-900/80 text-sky-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm shadow-sky-500/20"
+              title="Generate photorealistic AI landscape of this planet surface using Google Imagen 3"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+              <span>AI Surface Art</span>
+            </button>
           )}
 
           <button
@@ -545,6 +562,20 @@ export const SurfaceEcosystemPanel: React.FC<SurfaceEcosystemPanelProps> = ({
                                 size="card"
                                 interactive={true}
                               />
+                              {onGenerateAiImage && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onGenerateAiImage(species);
+                                  }}
+                                  className="w-full mt-2 py-1.5 px-3 rounded-lg bg-gradient-to-r from-sky-950 via-indigo-950 to-purple-950 border border-sky-500/50 hover:border-sky-400 text-sky-200 text-xs font-bold flex items-center justify-center gap-1.5 transition shadow-md shadow-sky-950/40 hover:brightness-110 cursor-pointer"
+                                  title="Generate High-Fidelity AI Art of this species with Google Imagen 3"
+                                >
+                                  <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                                  <span>Generate AI Image</span>
+                                </button>
+                              )}
                             </div>
 
                             {/* Field Notes & Physiological Adaptations */}

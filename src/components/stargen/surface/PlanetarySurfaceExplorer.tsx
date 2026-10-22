@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Hexagon,
   Sprout,
+  Sparkles,
 } from 'lucide-react';
 import {
   RealisticPlanetBody,
@@ -36,6 +37,8 @@ import { LocalTileTerrainView } from './LocalTileTerrainView';
 import { FirstPersonSurfaceView } from './FirstPersonSurfaceView';
 import { PlanetaryChemistrySection } from './PlanetaryChemistrySection';
 import { SurfaceEcosystemPanel } from './SurfaceEcosystemPanel';
+import { AiImageGenModal, AiImageTarget } from '../modals/AiImageGenModal';
+import { SpecimenSpecies } from '../../../core/xenobiology/botanicalArtGen';
 import { generatePlantEcosystem } from '../../../core/xenobiology/floraGen';
 import { generateFungiEcosystem } from '../../../core/xenobiology/fungiGen';
 import { resolveHostStarForBody } from '../../../core/generation/realisticStarGen';
@@ -65,6 +68,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
   const [showGrid, setShowGrid] = useState<boolean>(false);
   const [showTileGrid, setShowTileGrid] = useState<boolean>(true);
   const [showEcosystemPanel, setShowEcosystemPanel] = useState<boolean>(false);
+  const [aiGenTarget, setAiGenTarget] = useState<AiImageTarget | null>(null);
 
   // Interactive 3D Globe Rotation State
   const [globeYaw, setGlobeYaw] = useState<number>(0);
@@ -178,6 +182,52 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const coords = hoverCoords || selectedCoords;
     return sampleSurfacePoint(surfaceModel, planet, moon, coords.lat, coords.lon);
   }, [surfaceModel, planet, moon, hoverCoords, selectedCoords, showTileGrid, displayMode, activeInspectedTile]);
+
+  const handleOpenSurfaceAiGen = () => {
+    const isTidallyLocked = moon
+      ? Boolean(moon.periodDays && moon.periodDays <= 5)
+      : Boolean(planet.spinState?.toLowerCase().includes('lock') || planet.rotationHours > 1000);
+    let timeOfDay = 'midday';
+    if (timeOfDayDeg >= 315 || timeOfDayDeg < 45) timeOfDay = 'sunrise';
+    else if (timeOfDayDeg >= 45 && timeOfDayDeg < 135) timeOfDay = 'noon';
+    else if (timeOfDayDeg >= 135 && timeOfDayDeg < 225) timeOfDay = 'sunset';
+    else timeOfDay = 'night';
+
+    const planetName = moon ? `Moon ${moon.name} of ${planet.planetClass}` : planet.planetClass;
+
+    setAiGenTarget({
+      type: 'surface',
+      planetName,
+      planetClass: moon ? moon.moonClass : planet.planetClass,
+      biomeName: selectedTile ? selectedTile.biomeName : 'Planetary Terrain',
+      secondaryBiomeName: selectedTile?.secondaryBiomeName || undefined,
+      elevationMeters: currentTelemetry.elevationMeters,
+      temperatureK: currentTelemetry.temperatureK,
+      pressureBar: currentTelemetry.pressureBar,
+      solventKey: surfaceModel.seaPalette?.solventKey || (moon ? moon.hydrosphere?.solvent : planet.hydrosphere?.solvent) || 'H2O',
+      liquidCoveragePct: surfaceModel.hasLiquid ? 70 : 0,
+      cloudCoveragePct: Math.round((showTileGrid ? selectedTile.cloudCover : surfaceModel.cloudOpacity) * 100),
+      hasBiosphere: surfaceModel.hasBiosphere,
+      biosphereSummary: (moon ? moon.hydrosphere?.biosphere : planet.hydrosphere?.biosphere) || undefined,
+      hostStarTeff,
+      starColorHex: stars[0]?.colorHex || '#fff4e6',
+      timeOfDay,
+      isTidallyLocked,
+    });
+  };
+
+  const handleOpenSpeciesAiGen = (species: SpecimenSpecies) => {
+    const planetName = moon ? `Moon ${moon.name} of ${planet.planetClass}` : planet.planetClass;
+    setAiGenTarget({
+      type: 'species',
+      species,
+      planetName,
+      starTeff: hostStarTeff,
+      gravityG: moon ? moon.gravityG : planet.gravityG,
+      pressureBar: moon ? moon.pressureBar : planet.pressureBar,
+      solventKey: surfaceModel.seaPalette?.solventKey || (moon ? moon.hydrosphere?.solvent : planet.hydrosphere?.solvent) || 'H2O',
+    });
+  };
 
   const isBlankSurfaceLayer =
     surfaceModel.isNoSurface &&
@@ -518,6 +568,16 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
           >
             <Eye className="w-3.5 h-3.5" />
             First-Person View
+          </button>
+
+          <button
+            type="button"
+            onClick={handleOpenSurfaceAiGen}
+            className="px-3 py-1.5 rounded-lg border border-sky-500/60 bg-gradient-to-r from-sky-950/80 via-indigo-950/80 to-purple-950/80 text-sky-200 hover:text-white font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-sky-950/40 hover:brightness-110"
+            title="Generate a photorealistic landscape image of this planetary surface with Google Imagen 3"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+            AI Surface Art
           </button>
         </div>
 
@@ -928,10 +988,19 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         isTileView={displayMode === 'terrain' || displayMode === 'horizon'}
         isOpen={showEcosystemPanel}
         onClose={() => setShowEcosystemPanel(false)}
+        onGenerateAiImage={handleOpenSpeciesAiGen}
+        onGenerateAiSurface={handleOpenSurfaceAiGen}
       />
 
       {/* Surface & Internal Geochemistry Composition Tables */}
       <PlanetaryChemistrySection planet={planet} moon={moon} surfaceModel={surfaceModel} />
+
+      {/* AI Image Generation Modal (Google Imagen 3) */}
+      <AiImageGenModal
+        target={aiGenTarget}
+        isOpen={Boolean(aiGenTarget)}
+        onClose={() => setAiGenTarget(null)}
+      />
     </div>
   );
 };

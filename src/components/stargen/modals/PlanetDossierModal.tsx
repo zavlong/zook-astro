@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { PlanetarySurfaceExplorer } from '../surface/PlanetarySurfaceExplorer';
 import { PlanetaryChemistrySection } from '../surface/PlanetaryChemistrySection';
+import { AiImageGenModal, AiImageTarget } from './AiImageGenModal';
 import { generatePlantEcosystem } from '../../../core/xenobiology/floraGen';
 import { generateFungiEcosystem } from '../../../core/xenobiology/fungiGen';
 import {
@@ -107,6 +108,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
   const [showExportPanel, setShowExportPanel] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFormatType>('spaceengine');
   const [copiedExport, setCopiedExport] = useState(false);
+  const [aiGenTarget, setAiGenTarget] = useState<AiImageTarget | null>(null);
 
   useEffect(() => {
     if (planetClaimInfo?.designation) {
@@ -350,6 +352,54 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
           76
         );
 
+  const handleOpenAiGenSurface = () => {
+    const isTidallyLocked = isMoon
+      ? Boolean(activeMoon && activeMoon.periodDays && activeMoon.periodDays <= 5)
+      : Boolean(hostPlanet.spinState?.toLowerCase().includes('lock') || hostPlanet.rotationHours > 1000);
+    setAiGenTarget({
+      type: 'surface',
+      planetName: isMoon && activeMoon ? `Planet #${selectedEntity.bodyIdx + 1} Moon ${activeMoon.name}` : `Planet #${selectedEntity.bodyIdx + 1}`,
+      planetClass: isMoon && activeMoon ? cleanMoonClass : cleanPlanetClass,
+      biomeName: isMoon && activeMoon ? 'Lunar Surface Basin' : cleanPlanetClass,
+      elevationMeters: 0,
+      temperatureK: Tsurf,
+      pressureBar: pBar,
+      solventKey: hydro?.solvent || 'H2O',
+      liquidCoveragePct: hydro?.coveragePct ?? (cleanPlanetClass.includes('Ocean') ? 100 : 0),
+      cloudCoveragePct: cleanPlanetClass.includes('Gas') ? 100 : (pBar ?? 0) > 0.05 ? 50 : 0,
+      hasBiosphere: Boolean(hydro?.biosphere),
+      biosphereSummary: hydro?.biosphere || undefined,
+      hostStarTeff,
+      starColorHex: inspectorStar?.colorHex || '#fff4e6',
+      timeOfDay: 'afternoon',
+      isTidallyLocked,
+    });
+  };
+
+  const handleOpenAiGenBiosphere = () => {
+    const isTidallyLocked = isMoon
+      ? Boolean(activeMoon && activeMoon.periodDays && activeMoon.periodDays <= 5)
+      : Boolean(hostPlanet.spinState?.toLowerCase().includes('lock') || hostPlanet.rotationHours > 1000);
+    setAiGenTarget({
+      type: 'surface',
+      planetName: isMoon && activeMoon ? `Planet #${selectedEntity.bodyIdx + 1} Moon ${activeMoon.name}` : `Planet #${selectedEntity.bodyIdx + 1}`,
+      planetClass: isMoon && activeMoon ? cleanMoonClass : cleanPlanetClass,
+      biomeName: planetEcosystem.speciesList[0]?.nativeBiomeNames[0] || 'Alien Lowlands',
+      elevationMeters: 50,
+      temperatureK: Tsurf,
+      pressureBar: pBar,
+      solventKey: hydro?.solvent || 'H2O',
+      liquidCoveragePct: hydro?.coveragePct ?? 70,
+      cloudCoveragePct: 45,
+      hasBiosphere: true,
+      biosphereSummary: `${hydro?.biosphere || ''} Dominant vegetation: ${planetEcosystem.speciesList.map(s => s.commonName).slice(0, 3).join(', ')}.`,
+      hostStarTeff,
+      starColorHex: inspectorStar?.colorHex || '#fff4e6',
+      timeOfDay: 'afternoon',
+      isTidallyLocked,
+    });
+  };
+
   return (
     <div
       className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 md:p-6"
@@ -478,6 +528,15 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
             >
               <Download className="w-3.5 h-3.5" />
               Export
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenAiGenSurface}
+              className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-sky-950 via-indigo-950 to-purple-950 hover:brightness-110 text-sky-200 border border-sky-500/60 text-xs font-mono flex items-center gap-1.5 cursor-pointer transition shadow-sm shadow-sky-950/40"
+              title="Generate a photorealistic landscape or biosphere illustration with Google Imagen 3"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+              <span>AI Image</span>
             </button>
             <button
               type="button"
@@ -846,11 +905,22 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                Biosphere & Evolutionary Complexity
+                Biosphere &amp; Evolutionary Complexity
               </span>
-              <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-900/60 border border-emerald-500/60 text-emerald-300">
-                {sysAge >= 3.0 ? '🧬 Multicellular Life' : '🦠 Unicellular Life'}
-              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleOpenAiGenBiosphere}
+                  className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-950/80 border border-sky-500/60 text-sky-200 hover:bg-sky-900 transition flex items-center gap-1 cursor-pointer shadow-sm shadow-sky-500/20"
+                  title="Generate photorealistic AI landscape of this planet's biosphere using Google Imagen 3"
+                >
+                  <Sparkles className="w-3 h-3 text-amber-300 animate-pulse" />
+                  <span>Generate AI Biosphere</span>
+                </button>
+                <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-900/60 border border-emerald-500/60 text-emerald-300">
+                  {sysAge >= 3.0 ? '🧬 Multicellular Life' : '🦠 Unicellular Life'}
+                </span>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-[#0c121d] p-2.5 rounded-lg border border-slate-800">
@@ -1310,6 +1380,13 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
           </>
         )}
       </div>
+
+      {/* AI Image Generation Modal (Google Imagen 3) */}
+      <AiImageGenModal
+        target={aiGenTarget}
+        isOpen={Boolean(aiGenTarget)}
+        onClose={() => setAiGenTarget(null)}
+      />
     </div>
   );
 };
