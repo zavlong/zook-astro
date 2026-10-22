@@ -504,6 +504,7 @@ export function generatePlantEcosystem(params: {
     baseSpreadM: number;
     nativeBiomes: { id: number; name: string }[];
     reproductionMethod: string;
+    fieldNote: (biomes: string) => string;
     adaptations: string[];
     isAquatic?: boolean;
   }
@@ -520,10 +521,11 @@ export function generatePlantEcosystem(params: {
         { id: 4, name: 'Lowland Silicate Plains' },
       ],
       reproductionMethod: 'Asexual binary fission and windborne desiccation-tolerant micro-cysts',
+      fieldNote: (biomes) => `Spreads across exposed plains and regolith in ${biomes} as resilient, drought-tolerant biological soil crusts.`,
       adaptations: [
-        'Radiotolerant DNA-repair enzymes allowing survival under unshielded cosmic radiation',
-        'Endolithic moisture retention within silicate regolith grains',
-        'Direct atmospheric nitrogen fixation into colored soil crusts',
+        'Dormant desiccation-tolerant cysts surviving prolonged dry spells',
+        'Regolith grain adhesion trapping microscopic moisture pockets',
+        'Direct atmospheric nitrogen fixation enriching barren soil',
       ],
     },
     {
@@ -536,10 +538,11 @@ export function generatePlantEcosystem(params: {
         { id: 3, name: 'Coastal Algal Mat Basin' },
       ],
       reproductionMethod: 'Colonial budding and benthic extracellular slime accretion',
+      fieldNote: (biomes) => `Forms layered, terraced microbial mats along shallow shores and basins across ${biomes}.`,
       adaptations: [
-        'Sediment-binding polysaccharide slime sheets forming terraced ground crusts',
-        'High-density pigment layers filtering harsh ultraviolet stellar flux',
-        'Direct mineral precipitation consolidating loose regolith into organic soil',
+        'Polysaccharide slime matrices binding sediment into terraced ground crusts',
+        'Dense pigment shielding filtering solar ultraviolet radiation',
+        'Carbonate mineral precipitation consolidating loose silt into stone',
       ],
     },
     {
@@ -553,10 +556,11 @@ export function generatePlantEcosystem(params: {
         { id: 11, name: 'High Plateau / Badlands' },
       ],
       reproductionMethod: 'Microbial fragmentation and dormant spore dusting',
+      fieldNote: (biomes) => `Shelters inside microscopic rock pores and fissures throughout ${biomes}, surviving extreme surface exposure.`,
       adaptations: [
-        'Unshielded surface radiation tolerance via manganese-complex chaperone proteins',
-        'Mineral dissolution extracting phosphorus from basaltic silicate rock',
-        'Osmotic trehalose synthesis buffering extreme temperature swings',
+        'Endolithic growth within silicate grains shielding against unbuffered radiation',
+        'Extracellular enzyme secretion extracting phosphorus from basaltic rock',
+        'Osmotic sugar synthesis buffering rapid daily temperature swings',
       ],
     },
     {
@@ -569,10 +573,11 @@ export function generatePlantEcosystem(params: {
         { id: 7, name: 'Tundra / Permafrost' },
       ],
       reproductionMethod: 'Cryo-dormant spore encapsulation in permafrost pores',
+      fieldNote: (biomes) => `Cold-active microbial film colonizing snowpack, ice sheets, and permafrost in ${biomes}.`,
       adaptations: [
-        'Natural glycerol antifreeze preventing intra-cellular ice crystallization',
-        'Active sub-zero photosynthesis utilizing microscopic brine channels',
-        'Dark melanin and carotenoid pigments absorbing solar infrared heat',
+        'Cellular glycerol antifreeze preventing internal ice crystallization',
+        'Sub-zero photosynthesis utilizing microscopic brine channels within ice',
+        'Dark surface pigments absorbing solar thermal radiation to melt surrounding ice',
       ],
     },
     {
@@ -585,10 +590,11 @@ export function generatePlantEcosystem(params: {
         { id: 2, name: 'Continental Shelf / Shallows' },
       ],
       reproductionMethod: 'Exponential asexual division in photic surface waters',
+      fieldNote: (biomes) => `Free-floating micro-algae blooming in vast surface slicks across photic waters in ${biomes}.`,
       adaptations: [
-        'Gas vacuole buoyancy regulation keeping cells in optimal photic zone',
-        'Silica frustule protective shell resisting hydrodynamic shearing',
-        'Bioluminescent shock responses deterring micro-grazers',
+        'Adjustable gas vacuoles regulating buoyancy within the photic zone',
+        'Protective silica frustule shells resisting hydrodynamic shearing',
+        'Bioluminescent flash responses deterring nocturnal micro-grazers',
       ],
       isAquatic: true,
     },
@@ -602,10 +608,11 @@ export function generatePlantEcosystem(params: {
         { id: 2, name: 'Continental Shelf / Shallows' },
       ],
       reproductionMethod: 'Horizontal gliding trichome filaments across intertidal silt',
+      fieldNote: (biomes) => `Fibrous microbial mat binding tidal silt and mudflats across ${biomes}.`,
       adaptations: [
-        'Extreme salinity and evaporation buffering via mucilage sheaths',
-        'Photosynthetic pigment shifting across changing tidal depths',
-        'Facultative anoxygenic photosynthesis when buried under storm silt',
+        'Mucilage sheaths buffering extreme salinity shifts across tidal cycles',
+        'Dynamic pigment migration adapting to changing water depths',
+        'Facultative anoxygenic metabolism when buried under storm silt',
       ],
     },
   ];
@@ -627,10 +634,17 @@ export function generatePlantEcosystem(params: {
         : pBar < 0.4 
         ? 'Explosive ballistic dehiscence launching hardened seed-casings' 
         : 'Hydro-pneumatic spore capsules dispersed on seasonal trade winds',
+      fieldNote: (biomes) => `Forms expansive forest canopies across ${biomes}, supporting heavy upper foliage with deep anchoring root networks.`,
       adaptations: [
-        `Vascular stipe scaled for ${g.toFixed(2)}g surface gravity`,
-        `Parabolic leaf canopy angled for ${starTeff}K host star spectrum`,
-        pBar > 2.0 ? 'Aerodynamic cuticular flutes to resist dense atmospheric wind shear' : 'Thick waxy cuticle minimizing transpiration water loss',
+        g > 1.2
+          ? 'Broad buttressed base and dense fibrous stipe supporting high lateral load'
+          : g < 0.7
+          ? 'Slender, towering trunk architecture taking advantage of low gravity'
+          : 'Thick fibrous trunk buttressing supporting heavy upper canopy boughs',
+        'Layered horizontal foliage tiers maximizing diffuse light capture',
+        pBar > 2.0
+          ? 'Aerodynamic cuticular flutes resisting dense atmospheric wind shear'
+          : 'Waxy outer cuticle minimizing transpiration moisture loss',
       ],
     },
     // 2. Understory Frond / Shrub
@@ -644,10 +658,11 @@ export function generatePlantEcosystem(params: {
         { id: 3, name: 'Coastal Marsh & Mangrove Forest' },
       ],
       reproductionMethod: 'Hydraulic siphon-gametes released in riparian humidity',
+      fieldNote: (biomes) => `A shade-tolerant understory shrub widespread in ${biomes}, colonizing forest floors through creeping root systems.`,
       adaptations: [
-        'High-efficiency diffuse light capture beneath taller arboreal canopies',
-        'Interconnected subterranean rhizome communication network',
-        'Bio-synthetic alkaloids deterring native herbivorous micro-fauna',
+        'Broad, high-surface-area fronds capturing filtered understory light',
+        'Subterranean rhizome network sharing water and nutrients across colonies',
+        'Bio-synthetic alkaloids protecting tender foliage from micro-herbivores',
       ],
     },
     // 3. Resilient Ground Cover / Succulent Cushion
@@ -662,10 +677,11 @@ export function generatePlantEcosystem(params: {
         { id: 10, name: 'Hyper-Arid Dunes / Desert' },
       ],
       reproductionMethod: 'Creeping clonal runners with subterranean nutrient corms',
+      fieldNote: (biomes) => `Compact, dome-shaped succulent thriving on rocky outcrops and arid plains in ${biomes}.`,
       adaptations: [
-        'Compact geometric cushion shape minimizing thermal and desiccation stress',
-        'Endolithic root-hairs capable of dissolving mineral silicate nutrients',
-        'Internal water-storage parenchyma maintaining hydraulic turgor',
+        'Geometric cushion dome minimizing thermal stress and moisture loss',
+        'Acid-secreting root hairs extracting mineral nutrients from silicate bedrock',
+        'Internal water-storage tissue maintaining turgor through extended droughts',
       ],
     },
     // 4. Boreal / Cold Plateau Conifer-Equivalent
@@ -679,10 +695,11 @@ export function generatePlantEcosystem(params: {
         { id: 7, name: 'Tundra / Permafrost' },
       ],
       reproductionMethod: 'Hardened cryo-dormant spore nodules buried in permafrost',
+      fieldNote: (biomes) => `Tall columnar autotroph inhabiting cold taiga and permafrost in ${biomes}, built to shed heavy precipitation.`,
       adaptations: [
-        'Natural glycerol & polyol antifreeze metabolites resisting cell lysis',
-        'Narrow spire architecture shedding heavy snow and cryo-precipitation',
-        'High-density cellular sap maintaining active photosynthesis at sub-zero temperatures',
+        'Glycerol-based antifreeze metabolites preventing intra-cellular ice damage',
+        'Narrow spire silhouette shedding accumulated snow and frozen precipitation',
+        'Resin-coated needle cuticle resisting frostbite and drying winds',
       ],
     },
     // 5. Pioneer Mat Lichen / Biofilm
@@ -697,10 +714,11 @@ export function generatePlantEcosystem(params: {
         { id: 11, name: 'High Plateau / Badlands' },
       ],
       reproductionMethod: 'Direct fragmentation and desiccated windborne soredia dust',
+      fieldNote: (biomes) => `Resilient ground-hugging lichen carpeting exposed rock and regolith in ${biomes}, establishing early organic soil.`,
       adaptations: [
-        'Radiation-resistant melanin-chaperone proteins repairing UV double-strand breaks',
-        'Extreme anhydrobiosis enabling decades-long dormancy during volcanic winters',
-        'Direct atmospheric vapor adsorption without requiring liquid surface water',
+        'Radiation-repair enzymes buffering intense solar and cosmic radiation',
+        'Anhydrobiotic dormancy allowing decades-long survival in drought conditions',
+        'Direct atmospheric moisture adsorption without requiring liquid surface water',
       ],
     },
     // 6. Coastal / Marine Pelagic Kelp (If planet has liquid)
@@ -715,10 +733,11 @@ export function generatePlantEcosystem(params: {
         { id: 3, name: 'Coastal Marsh & Mangrove Forest' },
       ],
       reproductionMethod: 'Bioluminescent flagellated gametes released during planetary spring tides',
+      fieldNote: (biomes) => `Large submerged kelp forming dense floating meadows and coastal reefs throughout ${biomes}.`,
       adaptations: [
-        'Internal methane/gas flotation bladders maintaining fronds in photic surface waters',
-        'Flexible hydraulic stipe dissipating high-energy coastal wave turbulence',
-        'Active iodine and heavy element bio-accumulation from planetary seawater',
+        'Internal gas bladders keeping photosynthetic fronds buoyant in surface waters',
+        'Elastic hydraulic stipe dissipating high-energy coastal wave turbulence',
+        'Active cellular filtration concentrating trace dissolved minerals from seawater',
       ],
       isAquatic: true,
     },
@@ -733,10 +752,11 @@ export function generatePlantEcosystem(params: {
         { id: 2, name: 'Continental Shelf / Shallows' },
       ],
       reproductionMethod: 'Viviparous hydrochorous propagules drifting on estuary tides',
+      fieldNote: (biomes) => `Stilt-rooted shoreline shrub stabilizing tidal mudflats and coastal estuaries in ${biomes}.`,
       adaptations: [
-        'Pneumatophores (aerial breathing roots) extracting gases from waterlogged silt',
-        'Ultrafiltration salt/mineral excretion glands on dorsal leaf surfaces',
-        'Extensive sediment-anchoring stilt root matrix preventing shoreline erosion',
+        'Aerial breathing roots (pneumatophores) exchanging gases above waterlogged mud',
+        'Foliar salt-excretion glands purging excess minerals',
+        'Interlocking stilt-root matrix preventing shoreline sediment erosion',
       ],
     },
     // 8. Volcanic Caldera / Geothermal Extremophile Autotroph
@@ -751,10 +771,11 @@ export function generatePlantEcosystem(params: {
         { id: 22, name: 'Active Volcanic Shield & Lava Caldera' },
       ],
       reproductionMethod: 'Thermal plume convective spore dispersers triggering upon basalt fracturing',
+      fieldNote: (biomes) => `Chemosynthetic spire growing directly around geothermal vents and volcanic fissures in ${biomes}.`,
       adaptations: [
-        'Thermophilic heat-shock chaperones stable up to 395 Kelvin',
-        'Direct sulfur oxidation coupled with metallic iron ion reduction',
-        'Vitreous silica outer sleeve providing structural integrity against acidic sulfur fumes',
+        'Thermophilic chaperone proteins remaining stable up to 395 Kelvin',
+        'Chemosynthetic sulfur oxidation producing metabolic energy without light',
+        'Vitreous silica outer sleeve shielding tissues from acidic volcanic fumes',
       ],
     },
   ];
@@ -808,9 +829,7 @@ export function generatePlantEcosystem(params: {
     // Canopy coverage %
     const coverage = Math.round(10 + specRng() * 25);
 
-    const descNote = isMulticellular
-      ? `Indigenous ${arch.growthForm.toLowerCase()} adapted to ${g.toFixed(2)}g gravity and the ${starTeff}K host star spectrum. Features ${arch.adaptations[0].toLowerCase()} and thrives in ${arch.nativeBiomes.map(b => b.name).join(', ')}.`
-      : `Indigenous ${arch.growthForm.toLowerCase()} colonizing land and shallow seas as colored soil crusts under the ${starTeff}K host star spectrum. Features ${arch.adaptations[0].toLowerCase()} across ${arch.nativeBiomes.map(b => b.name).join(', ')}.`;
+    const descNote = arch.fieldNote(arch.nativeBiomes.map(b => b.name).join(', '));
 
     speciesList.push({
       id: `flora_${seed}_${i}`,
@@ -833,10 +852,10 @@ export function generatePlantEcosystem(params: {
     });
   }
 
-  // General summary text
+  // Concise planetary ecosystem summary text
   const summaryText = !isMulticellular
-    ? `${diversityTier}: ${speciesList.length} distinct unicellular autotrophic taxa identified. Autotrophs colonize land and seas as colored soil crusts and algal mats across Algal Plains (no tree models or arborescent canopies). Dominated by ${pigmentInfo.pigmentName} light harvesting under ${g.toFixed(2)}g surface gravity.`
-    : `${diversityTier}: ${speciesList.length} distinct autotrophic taxa identified. Dominated by ${pigmentInfo.pigmentName} light harvesting under ${g.toFixed(2)}g surface gravity. Canopy heights reach up to ${maxCanopyH}m with ${structuralBase.toLowerCase()} cellular architecture.`;
+    ? `${diversityTier}: ${speciesList.length} distinct unicellular autotrophic taxa colonizing land and shallow seas as colored soil crusts and algal mats with ${pigmentInfo.pigmentName.toLowerCase()} pigments.`
+    : `${diversityTier}: ${speciesList.length} distinct autotrophic taxa dominated by ${pigmentInfo.pigmentName.toLowerCase()} light harvesting, with canopy heights reaching up to ${maxCanopyH}m.`;
 
   return {
     hasPlantLife: true,
