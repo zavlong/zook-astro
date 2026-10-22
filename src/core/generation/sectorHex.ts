@@ -1306,6 +1306,113 @@ export function hasTerrestrialLife(system: SectorHexSystem): boolean {
   );
 }
 
+export type SectorFilterCategory =
+  | 'all'
+  | SpectralCategory
+  | 'habitable'
+  | 'water-world'
+  | 'ammonia-world'
+  | 'multicellular'
+  | 'terrestrial-life'
+  | 'non-ms'
+  | 'mass';
+
+export type MassFilterBracket =
+  | 'all'
+  | 'low' // < 0.8 M☉
+  | 'solar' // 0.8 - 2.0 M☉
+  | 'intermediate' // 2.0 - 8.0 M☉
+  | 'massive' // > 8.0 M☉
+  | 'giant' // 10 - 50 M☉
+  | 'supermassive' // > 999,999 M☉
+  | 'custom';
+
+/**
+ * Evaluates whether a SectorHexSystem satisfies a combined set of active sector filters.
+ */
+export function checkSystemMatchesFilters(
+  system: SectorHexSystem,
+  activeFilterCats: Set<SectorFilterCategory>,
+  massBracket: MassFilterBracket = 'all',
+  customMinMass = '',
+  customMaxMass = '',
+  traits?: {
+    hasWater?: boolean;
+    hasAmmonia?: boolean;
+    hasMulti?: boolean;
+    hasTerrestrial?: boolean;
+    isNonMs?: boolean;
+  }
+): boolean {
+  if (activeFilterCats.size === 0 && massBracket === 'all') {
+    return true;
+  }
+
+  // 1. Spectral classes (logical OR among any active stellar spectral categories)
+  const activeSpectral: SpectralCategory[] = [];
+  if (activeFilterCats.has('ob')) activeSpectral.push('ob');
+  if (activeFilterCats.has('af')) activeSpectral.push('af');
+  if (activeFilterCats.has('g')) activeSpectral.push('g');
+  if (activeFilterCats.has('km')) activeSpectral.push('km');
+  if (activeFilterCats.has('remnant')) activeSpectral.push('remnant');
+
+  if (activeSpectral.length > 0 && !activeSpectral.includes(system.spectralCat)) {
+    return false;
+  }
+
+  // 2. Non-Main Sequence Stars (Luminosity class NOT V)
+  if (activeFilterCats.has('non-ms')) {
+    const isNonMs = traits?.isNonMs ?? isNonMainSequenceSystem(system);
+    if (!isNonMs) return false;
+  }
+
+  // 3. Habitable
+  if (activeFilterCats.has('habitable')) {
+    if (!system.candidateHabitable) return false;
+  }
+
+  // 4. Water Worlds
+  if (activeFilterCats.has('water-world')) {
+    const hasWater = traits?.hasWater ?? hasWaterWorld(system);
+    if (!hasWater) return false;
+  }
+
+  // 5. Ammonia Worlds
+  if (activeFilterCats.has('ammonia-world')) {
+    const hasAmmonia = traits?.hasAmmonia ?? hasAmmoniaWorld(system);
+    if (!hasAmmonia) return false;
+  }
+
+  // 6. Multicellular Life
+  if (activeFilterCats.has('multicellular')) {
+    const hasMulti = traits?.hasMulti ?? hasMulticellularLife(system);
+    if (!hasMulti) return false;
+  }
+
+  // 7. Terrestrial Life
+  if (activeFilterCats.has('terrestrial-life')) {
+    const hasTerrestrial = traits?.hasTerrestrial ?? hasTerrestrialLife(system);
+    if (!hasTerrestrial) return false;
+  }
+
+  // 8. Stellar Mass Range
+  if (massBracket !== 'all') {
+    if (massBracket === 'low' && !(system.mass < 0.8)) return false;
+    if (massBracket === 'solar' && !(system.mass >= 0.8 && system.mass <= 2.0)) return false;
+    if (massBracket === 'intermediate' && !(system.mass > 2.0 && system.mass <= 8.0)) return false;
+    if (massBracket === 'massive' && !(system.mass > 8.0 && system.mass <= 999999)) return false;
+    if (massBracket === 'giant' && !(system.isGiantSystem || (system.mass >= 10.0 && system.mass <= 50.0))) return false;
+    if (massBracket === 'supermassive' && !(system.mass > 999999)) return false;
+    if (massBracket === 'custom') {
+      const minM = parseFloat(customMinMass) || 0;
+      const maxM = parseFloat(customMaxMass) || 1000000;
+      if (!(system.mass >= minM && system.mass <= maxM)) return false;
+    }
+  }
+
+  return true;
+}
+
 /**
  * Squared perpendicular distance from point (px, py) to line segment (x1, y1)-(x2, y2)
  */

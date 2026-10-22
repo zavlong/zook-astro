@@ -43,6 +43,9 @@ import {
   hasMulticellularLife,
   hasTerrestrialLife,
   hasTerrestrialBiosphere,
+  checkSystemMatchesFilters,
+  type SectorFilterCategory,
+  type MassFilterBracket,
 } from '../../core/generation/sectorHex';
 import {
   getProceduralStarSpriteDataUrl,
@@ -65,7 +68,6 @@ import { SpawnEmpireModal } from './SpawnEmpireModal';
 import { SectorExportImportModal } from './SectorExportImportModal';
 import { ParsedSectorImportResult } from '../../core/export/sectorFormatExporters';
 import { StarGenParams } from '../../core/generation/realisticStarGen';
-import { SpectralCategory } from '../../types/astrophysics';
 import { universeCache } from '../../core/storage/universeCache';
 
 interface SectorHexAppProps {
@@ -77,26 +79,7 @@ interface SectorHexAppProps {
   showUI?: boolean;
 }
 
-export type SectorFilterCategory =
-  | 'all'
-  | SpectralCategory
-  | 'habitable'
-  | 'water-world'
-  | 'ammonia-world'
-  | 'multicellular'
-  | 'terrestrial-life'
-  | 'non-ms'
-  | 'mass';
-
-export type MassFilterBracket =
-  | 'all'
-  | 'low' // < 0.8 M☉
-  | 'solar' // 0.8 - 2.0 M☉
-  | 'intermediate' // 2.0 - 8.0 M☉
-  | 'massive' // > 8.0 M☉
-  | 'giant' // 10 - 50 M☉
-  | 'supermassive' // > 999,999 M☉
-  | 'custom';
+export type { SectorFilterCategory, MassFilterBracket };
 
 type SectorPresetKey = 'disk' | 'young-cluster' | 'old-halo' | 'dense-core' | 'galactic-nucleus';
 
@@ -278,11 +261,30 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
 
   const [activePreset, setActivePreset] = useState<SectorPresetKey>('disk');
   const [searchCoord, setSearchCoord] = useState<string>('');
-  const [filterCat, setFilterCat] = useState<SectorFilterCategory>('all');
+  const [activeFilterCats, setActiveFilterCats] = useState<Set<SectorFilterCategory>>(new Set());
   const [massBracket, setMassBracket] = useState<MassFilterBracket>('all');
   const [customMinMass, setCustomMinMass] = useState<string>('0.1');
   const [customMaxMass, setCustomMaxMass] = useState<string>('50.0');
   const [showMassMenu, setShowMassMenu] = useState<boolean>(false);
+
+  const hasActiveFilters = activeFilterCats.size > 0 || massBracket !== 'all';
+
+  const toggleFilterCat = useCallback((id: SectorFilterCategory) => {
+    if (id === 'all') {
+      setActiveFilterCats(new Set());
+      setMassBracket('all');
+      return;
+    }
+    setActiveFilterCats((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
 
   // Custom Grid & Density Modal/Drawer state
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
@@ -463,42 +465,27 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   // Dynamic filter matching count
   const matchingStarsCount = useMemo(() => {
     return gridData.systems.filter((system) => {
-      if (filterCat === 'all') return true;
-      if (filterCat === 'habitable') return system.candidateHabitable;
       const traits = systemTraitsMap.get(system.id);
-      if (filterCat === 'water-world') return traits ? traits.hasWater : hasWaterWorld(system);
-      if (filterCat === 'ammonia-world') return traits ? traits.hasAmmonia : hasAmmoniaWorld(system);
-      if (filterCat === 'multicellular') return traits ? traits.hasMulti : hasMulticellularLife(system);
-      if (filterCat === 'terrestrial-life') return traits ? traits.hasTerrestrial : hasTerrestrialLife(system);
-      if (filterCat === 'non-ms') return traits ? traits.isNonMs : isNonMainSequenceSystem(system);
-      if (filterCat === 'mass') {
-        if (massBracket === 'low') return system.mass < 0.8;
-        if (massBracket === 'solar') return system.mass >= 0.8 && system.mass <= 2.0;
-        if (massBracket === 'intermediate') return system.mass > 2.0 && system.mass <= 8.0;
-        if (massBracket === 'massive') return system.mass > 8.0 && system.mass <= 999999;
-        if (massBracket === 'giant') return system.isGiantSystem || (system.mass >= 10.0 && system.mass <= 50.0);
-        if (massBracket === 'supermassive') return system.mass > 999999;
-        if (massBracket === 'custom') {
-          const minM = parseFloat(customMinMass) || 0;
-          const maxM = parseFloat(customMaxMass) || 1000000;
-          return system.mass >= minM && system.mass <= maxM;
-        }
-        return true;
-      }
-      return system.spectralCat === filterCat;
+      return checkSystemMatchesFilters(
+        system,
+        activeFilterCats,
+        massBracket,
+        customMinMass,
+        customMaxMass,
+        traits
+      );
     }).length;
-  }, [gridData.systems, systemTraitsMap, filterCat, massBracket, customMinMass, customMaxMass]);
+  }, [gridData.systems, systemTraitsMap, activeFilterCats, massBracket, customMinMass, customMaxMass]);
 
   const getMassFilterButtonLabel = () => {
-    if (filterCat !== 'mass') return 'Mass ▾';
     if (massBracket === 'low') return 'Mass: <0.8M☉';
     if (massBracket === 'solar') return 'Mass: 0.8-2M☉';
     if (massBracket === 'intermediate') return 'Mass: 2-8M☉';
     if (massBracket === 'massive') return 'Mass: >8M☉';
     if (massBracket === 'giant') return 'Mass: 10-50M☉';
-    if (massBracket === 'supermassive') return 'Mass: >999kM☉';
-    if (massBracket === 'custom') return `Mass: ${customMinMass}-${customMaxMass}M☉`;
-    return 'Mass: All ▾';
+    if (massBracket === 'supermassive') return 'Mass: >999k M☉';
+    if (massBracket === 'custom') return `Mass: ${customMinMass || '0'}–${customMaxMass || '∞'}M☉`;
+    return 'Mass ▾';
   };
 
   // Pan & Zoom Canvas Camera combined atomically
@@ -2259,45 +2246,15 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 const systemEmpire = empireMap.get(system.id);
                 const isCapital = systemEmpire != null && systemEmpire.homeworldSystemId === system.id;
 
-                // Filter check (O(1) pre-indexed traits lookup)
-                let matchesFilter = true;
-                if (filterCat !== 'all') {
-                  if (filterCat === 'habitable') {
-                    matchesFilter = system.candidateHabitable;
-                  } else if (filterCat === 'water-world') {
-                    matchesFilter = systemTraitsMap.get(system.id)?.hasWater ?? hasWaterWorld(system);
-                  } else if (filterCat === 'ammonia-world') {
-                    matchesFilter = systemTraitsMap.get(system.id)?.hasAmmonia ?? hasAmmoniaWorld(system);
-                  } else if (filterCat === 'multicellular') {
-                    matchesFilter = systemTraitsMap.get(system.id)?.hasMulti ?? hasMulticellularLife(system);
-                  } else if (filterCat === 'terrestrial-life') {
-                    matchesFilter = systemTraitsMap.get(system.id)?.hasTerrestrial ?? hasTerrestrialLife(system);
-                  } else if (filterCat === 'non-ms') {
-                    matchesFilter = systemTraitsMap.get(system.id)?.isNonMs ?? isNonMainSequenceSystem(system);
-                  } else if (filterCat === 'mass') {
-                    if (massBracket === 'low') {
-                      matchesFilter = system.mass < 0.8;
-                    } else if (massBracket === 'solar') {
-                      matchesFilter = system.mass >= 0.8 && system.mass <= 2.0;
-                    } else if (massBracket === 'intermediate') {
-                      matchesFilter = system.mass > 2.0 && system.mass <= 8.0;
-                    } else if (massBracket === 'massive') {
-                      matchesFilter = system.mass > 8.0 && system.mass <= 999999;
-                    } else if (massBracket === 'giant') {
-                      matchesFilter = system.isGiantSystem || (system.mass >= 10.0 && system.mass <= 50.0);
-                    } else if (massBracket === 'supermassive') {
-                      matchesFilter = system.mass > 999999;
-                    } else if (massBracket === 'custom') {
-                      const minM = parseFloat(customMinMass) || 0;
-                      const maxM = parseFloat(customMaxMass) || 1000000;
-                      matchesFilter = system.mass >= minM && system.mass <= maxM;
-                    } else {
-                      matchesFilter = true;
-                    }
-                  } else {
-                    matchesFilter = system.spectralCat === filterCat;
-                  }
-                }
+                // Filter check (O(1) pre-indexed traits lookup, multi-filter combination supported)
+                const matchesFilter = checkSystemMatchesFilters(
+                  system,
+                  activeFilterCats,
+                  massBracket,
+                  customMinMass,
+                  customMaxMass,
+                  systemTraitsMap.get(system.id)
+                );
 
                 const systemOpacity = matchesFilter ? 1 : 0.20;
 
@@ -2619,39 +2576,42 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                   { id: 'multicellular', label: 'Multicellular Life', color: 'text-emerald-400', title: 'Systems harboring worlds or moons with active multicellular biospheres' },
                   { id: 'terrestrial-life', label: 'Terrestrial Life', color: 'text-lime-400', title: 'Systems harboring worlds or moons with active land-based / continental terrestrial life' },
                 ] as const
-              ).map((f) => (
-                <button
-                  key={f.id}
-                  onClick={() => {
-                    setFilterCat(f.id);
-                    setShowMassMenu(false);
-                  }}
-                  title={'title' in f ? f.title : undefined}
-                  className={`px-2 py-0.5 rounded text-[10px] transition cursor-pointer ${
-                    filterCat === f.id
-                      ? 'bg-cyan-600 text-white font-bold'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                  }`}
-                >
-                  <span className={filterCat === f.id ? 'text-white' : f.color}>{f.label}</span>
-                </button>
-              ))}
+              ).map((f) => {
+                const isSelected = f.id === 'all' ? !hasActiveFilters : activeFilterCats.has(f.id);
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => {
+                      toggleFilterCat(f.id);
+                      setShowMassMenu(false);
+                    }}
+                    title={'title' in f ? f.title : undefined}
+                    className={`px-2 py-0.5 rounded text-[10px] transition cursor-pointer flex items-center gap-1 ${
+                      isSelected
+                        ? 'bg-cyan-600 text-white font-bold shadow'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className={isSelected ? 'text-white' : f.color}>{f.label}</span>
+                    {f.id !== 'all' && isSelected && (
+                      <span className="text-[9px] opacity-75 leading-none">&times;</span>
+                    )}
+                  </button>
+                );
+              })}
 
               {/* Mass Filter Button with Interactive Popover */}
               <div className="relative">
                 <button
-                  onClick={() => {
-                    setFilterCat('mass');
-                    setShowMassMenu((prev) => !prev);
-                  }}
+                  onClick={() => setShowMassMenu((prev) => !prev)}
                   className={`px-2 py-0.5 rounded text-[10px] transition cursor-pointer flex items-center gap-1 ${
-                    filterCat === 'mass'
+                    massBracket !== 'all'
                       ? 'bg-indigo-600 text-white font-bold shadow'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800'
                   }`}
-                  title="Filter systems by Stellar Mass"
+                  title="Filter systems by Stellar Mass (Combines with other filters)"
                 >
-                  <span className={filterCat === 'mass' ? 'text-white' : 'text-indigo-400 font-semibold'}>
+                  <span className={massBracket !== 'all' ? 'text-white' : 'text-indigo-400 font-semibold'}>
                     {getMassFilterButtonLabel()}
                   </span>
                   <ChevronDown className="w-2.5 h-2.5 opacity-70" />
@@ -2693,10 +2653,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                             key={p.id}
                             onClick={() => {
                               setMassBracket(p.id as MassFilterBracket);
-                              setFilterCat('mass');
                             }}
                             className={`p-1.5 rounded-lg border text-left transition cursor-pointer ${
-                              massBracket === p.id && filterCat === 'mass'
+                              massBracket === p.id
                                 ? 'bg-indigo-950/90 border-indigo-500 text-white shadow-sm'
                                 : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800'
                             }`}
@@ -2722,7 +2681,6 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                             onChange={(e) => {
                               setCustomMinMass(e.target.value);
                               setMassBracket('custom');
-                              setFilterCat('mass');
                             }}
                             className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs font-mono focus:outline-none focus:border-indigo-500"
                           />
@@ -2738,7 +2696,6 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                             onChange={(e) => {
                               setCustomMaxMass(e.target.value);
                               setMassBracket('custom');
-                              setFilterCat('mass');
                             }}
                             className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs font-mono focus:outline-none focus:border-indigo-500"
                           />
@@ -2750,7 +2707,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                       <button
                         onClick={() => {
                           setMassBracket('all');
-                          setFilterCat('all');
+                          setActiveFilterCats(new Set());
                           setShowMassMenu(false);
                         }}
                         className="text-slate-400 hover:text-white transition"
@@ -2768,11 +2725,24 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 )}
               </div>
 
-              {/* Active matching count badge */}
-              {filterCat !== 'all' && (
-                <span className="text-[9.5px] text-cyan-300 bg-cyan-950/70 border border-cyan-800/80 px-1.5 py-0.5 rounded ml-1 font-bold">
-                  {matchingStarsCount} / {gridData.systems.length}
-                </span>
+              {/* Active matching count badge & Clear Button */}
+              {hasActiveFilters && (
+                <div className="flex items-center gap-1.5 ml-1">
+                  <span className="text-[9.5px] text-cyan-300 bg-cyan-950/70 border border-cyan-800/80 px-1.5 py-0.5 rounded font-bold">
+                    {matchingStarsCount} / {gridData.systems.length}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setActiveFilterCats(new Set());
+                      setMassBracket('all');
+                    }}
+                    className="text-[9px] text-slate-400 hover:text-rose-300 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 px-1.5 py-0.5 rounded transition flex items-center gap-0.5 cursor-pointer"
+                    title="Clear all active filters"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                    <span>Clear</span>
+                  </button>
+                </div>
               )}
             </div>
 
