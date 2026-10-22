@@ -13,21 +13,106 @@ import { SpecimenSpecies } from '../xenobiology/botanicalArtGen';
 export type SpeciesImageStyle = 'botanical-plate' | 'photorealistic-field';
 export type SurfaceImageStyle = 'landscape-16-9' | 'first-person-4-3' | 'orbital-panoramic';
 
-export interface GeminiImageGenOptions {
-  apiKey?: string;
+export type AiImageModel = 'flux-schnell' | 'imagen-3';
+export type FluxProvider = 'together' | 'pollinations-free';
+
+export interface AiImageGenOptions {
+  model?: AiImageModel;
+  fluxProvider?: FluxProvider;
+  fluxApiKey?: string;
+  geminiApiKey?: string;
+  apiKey?: string; // backwards compatibility
   aspectRatio?: '1:1' | '16:9' | '4:3' | '3:4' | '9:16';
   sampleCount?: number;
   outputMimeType?: 'image/jpeg' | 'image/png';
 }
 
-export interface GeminiImageResult {
+export type GeminiImageGenOptions = AiImageGenOptions;
+
+export interface AiImageResult {
   imageUrl: string; // Base64 data URL
   mimeType: string;
   prompt: string;
   durationMs: number;
+  model: AiImageModel;
+  provider?: string;
 }
 
-const API_KEY_STORAGE_KEY = 'zook_gemini_api_key';
+export type GeminiImageResult = AiImageResult;
+
+const MODEL_STORAGE_KEY = 'zook_ai_image_model';
+const FLUX_API_KEY_STORAGE_KEY = 'zook_flux_api_key';
+const FLUX_PROVIDER_STORAGE_KEY = 'zook_flux_provider';
+const GEMINI_API_KEY_STORAGE_KEY = 'zook_gemini_api_key';
+
+/**
+ * Retrieves the preferred AI image model. Defaults to 'flux-schnell'.
+ */
+export function getStoredAiModel(): AiImageModel {
+  try {
+    const stored = localStorage.getItem(MODEL_STORAGE_KEY);
+    if (stored === 'imagen-3' || stored === 'flux-schnell') {
+      return stored;
+    }
+  } catch {
+    // LocalStorage might be disabled
+  }
+  return 'flux-schnell'; // Default is FLUX.1 [schnell]
+}
+
+export function setStoredAiModel(model: AiImageModel): void {
+  try {
+    localStorage.setItem(MODEL_STORAGE_KEY, model);
+  } catch (err) {
+    console.warn('Failed to save AI model choice to localStorage', err);
+  }
+}
+
+/**
+ * Retrieves the stored FLUX API key (Together AI key or Pollen key).
+ */
+export function getStoredFluxApiKey(): string {
+  try {
+    const stored = localStorage.getItem(FLUX_API_KEY_STORAGE_KEY);
+    if (stored && stored.trim().length > 0) return stored.trim();
+  } catch {
+    // LocalStorage might be disabled
+  }
+  return (import.meta.env.VITE_TOGETHER_API_KEY as string) || '';
+}
+
+export function setStoredFluxApiKey(key: string): void {
+  try {
+    if (!key || key.trim().length === 0) {
+      localStorage.removeItem(FLUX_API_KEY_STORAGE_KEY);
+    } else {
+      localStorage.setItem(FLUX_API_KEY_STORAGE_KEY, key.trim());
+    }
+  } catch (err) {
+    console.warn('Failed to save FLUX API key to localStorage', err);
+  }
+}
+
+/**
+ * Retrieves preferred FLUX provider.
+ */
+export function getStoredFluxProvider(): FluxProvider {
+  try {
+    const stored = localStorage.getItem(FLUX_PROVIDER_STORAGE_KEY);
+    if (stored === 'together' || stored === 'pollinations-free') return stored;
+  } catch {
+    // LocalStorage might be disabled
+  }
+  return getStoredFluxApiKey() ? 'together' : 'pollinations-free';
+}
+
+export function setStoredFluxProvider(provider: FluxProvider): void {
+  try {
+    localStorage.setItem(FLUX_PROVIDER_STORAGE_KEY, provider);
+  } catch (err) {
+    console.warn('Failed to save FLUX provider to localStorage', err);
+  }
+}
 
 /**
  * Retrieves the currently saved Gemini API Key.
@@ -35,7 +120,7 @@ const API_KEY_STORAGE_KEY = 'zook_gemini_api_key';
  */
 export function getStoredApiKey(): string {
   try {
-    const stored = localStorage.getItem(API_KEY_STORAGE_KEY);
+    const stored = localStorage.getItem(GEMINI_API_KEY_STORAGE_KEY);
     if (stored && stored.trim().length > 0) {
       return stored.trim();
     }
@@ -53,9 +138,9 @@ export function getStoredApiKey(): string {
 export function setStoredApiKey(key: string): void {
   try {
     if (!key || key.trim().length === 0) {
-      localStorage.removeItem(API_KEY_STORAGE_KEY);
+      localStorage.removeItem(GEMINI_API_KEY_STORAGE_KEY);
     } else {
-      localStorage.setItem(API_KEY_STORAGE_KEY, key.trim());
+      localStorage.setItem(GEMINI_API_KEY_STORAGE_KEY, key.trim());
     }
   } catch (err) {
     console.warn('Failed to save Gemini API key to localStorage', err);
@@ -67,16 +152,183 @@ export function setStoredApiKey(key: string): void {
  */
 export function clearStoredApiKey(): void {
   try {
-    localStorage.removeItem(API_KEY_STORAGE_KEY);
+    localStorage.removeItem(GEMINI_API_KEY_STORAGE_KEY);
   } catch (err) {
     console.warn('Failed to clear Gemini API key from localStorage', err);
   }
 }
 
 /**
+ * Computes pixel dimensions corresponding to an aspect ratio for FLUX.
+ */
+export function getDimensionsForRatio(aspectRatio: string = '1:1'): { width: number; height: number } {
+  switch (aspectRatio) {
+    case '16:9':
+      return { width: 1280, height: 720 };
+    case '4:3':
+      return { width: 1152, height: 864 };
+    case '3:4':
+      return { width: 864, height: 1152 };
+    case '9:16':
+      return { width: 720, height: 1280 };
+    case '1:1':
+    default:
+      return { width: 1024, height: 1024 };
+  }
+}
+
+/**
  * In-memory image cache to prevent redundant API charges for identical prompts.
  */
-const imageResultCache = new Map<string, GeminiImageResult>();
+const imageResultCache = new Map<string, AiImageResult>();
+
+/**
+ * Calls FLUX.1 [schnell] via Together AI ($0.003/image) or Pollinations.ai (Free Gateway).
+ */
+export async function generateFluxImage(
+  prompt: string,
+  options: AiImageGenOptions = {}
+): Promise<AiImageResult> {
+  const provider = options.fluxProvider || getStoredFluxProvider();
+  const apiKey = (options.fluxApiKey || getStoredFluxApiKey()).trim();
+  const aspectRatio = options.aspectRatio || '1:1';
+  const { width, height } = getDimensionsForRatio(aspectRatio);
+
+  const cacheKey = `flux_${provider}_${prompt.trim()}_${aspectRatio}`;
+  if (imageResultCache.has(cacheKey)) {
+    return imageResultCache.get(cacheKey)!;
+  }
+
+  const startTime = Date.now();
+
+  // If using Together AI or if an API key is present:
+  if (provider === 'together' || (apiKey && provider !== 'pollinations-free')) {
+    if (!apiKey) {
+      throw new Error(
+        'Together AI API key required for FLUX.1 [schnell] fast dedicated generation. Enter your key or switch to the Free Public Gateway.'
+      );
+    }
+
+    let response: Response;
+    try {
+      response = await fetch('https://api.together.xyz/v1/images/generations', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'black-forest-labs/FLUX.1-schnell',
+          prompt: prompt.trim(),
+          width,
+          height,
+          steps: 4,
+          n: 1,
+          response_format: 'b64_json',
+        }),
+      });
+    } catch (netErr: unknown) {
+      const msg = netErr instanceof Error ? netErr.message : String(netErr);
+      throw new Error(`Network failure connecting to Together AI FLUX endpoint: ${msg}`);
+    }
+
+    if (!response.ok) {
+      let errorDetail = `HTTP ${response.status} ${response.statusText}`;
+      try {
+        const errJson = await response.json();
+        if (errJson?.error?.message) {
+          errorDetail = errJson.error.message;
+        }
+      } catch {
+        // Body not JSON
+      }
+
+      if (response.status === 401) {
+        throw new Error('Invalid Together AI API Key. Please verify your key at together.ai.');
+      }
+      if (response.status === 429) {
+        throw new Error('Together AI rate limit or credits depleted. Check your balance or switch to Free Gateway.');
+      }
+
+      throw new Error(`FLUX generation failed on Together AI: ${errorDetail}`);
+    }
+
+    const data = await response.json();
+    const b64 = data?.data?.[0]?.b64_json;
+    if (!b64) {
+      throw new Error('Together AI did not return image data for FLUX.1 [schnell].');
+    }
+
+    const result: AiImageResult = {
+      imageUrl: `data:image/jpeg;base64,${b64}`,
+      mimeType: 'image/jpeg',
+      prompt,
+      durationMs: Date.now() - startTime,
+      model: 'flux-schnell',
+      provider: 'Together AI ($0.003/image)',
+    };
+
+    imageResultCache.set(cacheKey, result);
+    return result;
+  }
+
+  // Free Public Gateway (Pollinations.ai)
+  const seed = Math.floor(Math.random() * 999999);
+  let pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
+    prompt.trim()
+  )}?model=flux&width=${width}&height=${height}&seed=${seed}&nologo=true`;
+  if (apiKey) {
+    pollUrl += `&key=${encodeURIComponent(apiKey)}`;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(pollUrl);
+  } catch (netErr: unknown) {
+    const msg = netErr instanceof Error ? netErr.message : String(netErr);
+    throw new Error(`Network failure connecting to FLUX Free Gateway: ${msg}`);
+  }
+
+  if (!response.ok) {
+    let errorDetail = `HTTP ${response.status}`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.error?.message) {
+        errorDetail = errJson.error.message;
+      }
+    } catch {
+      // Body not JSON
+    }
+
+    if (response.status === 402) {
+      throw new Error(
+        `Free Gateway Rate Limit: ${errorDetail}. For instant, unlimited $0.003 generations, add a Together AI key above!`
+      );
+    }
+
+    throw new Error(`FLUX generation failed on Free Gateway: ${errorDetail}`);
+  }
+
+  const blob = await response.blob();
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+
+  const result: AiImageResult = {
+    imageUrl: dataUrl,
+    mimeType: blob.type || 'image/jpeg',
+    prompt,
+    durationMs: Date.now() - startTime,
+    model: 'flux-schnell',
+    provider: 'Free Public Gateway (Pollinations)',
+  };
+
+  imageResultCache.set(cacheKey, result);
+  return result;
+}
 
 /**
  * Calls Google's Imagen 3 model via Google AI Studio's Gemini REST API.
@@ -85,7 +337,7 @@ export async function generateGeminiImage(
   prompt: string,
   options: GeminiImageGenOptions = {}
 ): Promise<GeminiImageResult> {
-  const apiKey = (options.apiKey || getStoredApiKey()).trim();
+  const apiKey = (options.geminiApiKey || options.apiKey || getStoredApiKey()).trim();
 
   if (!apiKey) {
     throw new Error(
@@ -97,7 +349,7 @@ export async function generateGeminiImage(
   const sampleCount = options.sampleCount || 1;
   const outputMimeType = options.outputMimeType || 'image/jpeg';
 
-  const cacheKey = `${prompt.trim()}_${aspectRatio}_${outputMimeType}`;
+  const cacheKey = `imagen3_${prompt.trim()}_${aspectRatio}_${outputMimeType}`;
   if (imageResultCache.has(cacheKey)) {
     return imageResultCache.get(cacheKey)!;
   }
@@ -170,17 +422,33 @@ export async function generateGeminiImage(
   const imageUrl = `data:${mime};base64,${prediction.bytesBase64Encoded}`;
   const durationMs = Date.now() - startTime;
 
-  const result: GeminiImageResult = {
+  const result: AiImageResult = {
     imageUrl,
     mimeType: mime,
     prompt,
     durationMs,
+    model: 'imagen-3',
+    provider: 'Google Imagen 3 (Gemini API)',
   };
 
   // Cache in memory
   imageResultCache.set(cacheKey, result);
 
   return result;
+}
+
+/**
+ * Unified image generator: routes to FLUX.1 [schnell] (default) or Google Imagen 3.
+ */
+export async function generateAiImage(
+  prompt: string,
+  options: AiImageGenOptions = {}
+): Promise<AiImageResult> {
+  const model = options.model || getStoredAiModel() || 'flux-schnell';
+  if (model === 'imagen-3') {
+    return generateGeminiImage(prompt, options);
+  }
+  return generateFluxImage(prompt, options);
 }
 
 /**

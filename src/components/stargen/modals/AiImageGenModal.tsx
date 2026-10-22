@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
+  Zap,
   X,
   Key,
   Copy,
@@ -13,18 +14,27 @@ import {
   Eye,
   EyeOff,
   Image as ImageIcon,
+  Globe,
 } from 'lucide-react';
 import {
   buildSpeciesImagePrompt,
   buildPlanetSurfaceImagePrompt,
-  generateGeminiImage,
+  generateAiImage,
+  getStoredAiModel,
+  setStoredAiModel,
+  getStoredFluxApiKey,
+  setStoredFluxApiKey,
+  getStoredFluxProvider,
+  setStoredFluxProvider,
   getStoredApiKey,
   setStoredApiKey,
   copyToClipboard,
   downloadDataUrlAsFile,
   SpeciesImageStyle,
   SurfaceImageStyle,
-  GeminiImageResult,
+  AiImageModel,
+  FluxProvider,
+  AiImageResult,
 } from '../../../core/api/geminiImageGen';
 import { SpecimenSpecies } from '../../../core/xenobiology/botanicalArtGen';
 import { BotanicalSpecimenPlate } from '../surface/BotanicalSpecimenPlate';
@@ -70,7 +80,10 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
   isOpen,
   onClose,
 }) => {
-  const [apiKey, setApiKey] = useState<string>('');
+  const [selectedModel, setSelectedModel] = useState<AiImageModel>(getStoredAiModel());
+  const [fluxProvider, setFluxProvider] = useState<FluxProvider>(getStoredFluxProvider());
+  const [fluxApiKey, setFluxApiKey] = useState<string>('');
+  const [geminiApiKey, setGeminiApiKey] = useState<string>('');
   const [showKey, setShowKey] = useState<boolean>(false);
   const [prompt, setPrompt] = useState<string>('');
   const [speciesStyle, setSpeciesStyle] = useState<SpeciesImageStyle>('botanical-plate');
@@ -79,15 +92,41 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [result, setResult] = useState<GeminiImageResult | null>(null);
+  const [result, setResult] = useState<AiImageResult | null>(null);
   const [copiedPrompt, setCopiedPrompt] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
-  // Initialize API key from storage on mount
+  // Initialize keys and defaults from storage on mount
   useEffect(() => {
-    const saved = getStoredApiKey();
-    if (saved) setApiKey(saved);
+    setSelectedModel(getStoredAiModel());
+    setFluxProvider(getStoredFluxProvider());
+    const savedFlux = getStoredFluxApiKey();
+    if (savedFlux) setFluxApiKey(savedFlux);
+    const savedGemini = getStoredApiKey();
+    if (savedGemini) setGeminiApiKey(savedGemini);
   }, []);
+
+  const handleModelChange = (m: AiImageModel) => {
+    setSelectedModel(m);
+    setStoredAiModel(m);
+    setErrorMsg(null);
+  };
+
+  const handleFluxProviderChange = (p: FluxProvider) => {
+    setFluxProvider(p);
+    setStoredFluxProvider(p);
+    setErrorMsg(null);
+  };
+
+  const handleFluxApiKeyChange = (val: string) => {
+    setFluxApiKey(val);
+    setStoredFluxApiKey(val);
+  };
+
+  const handleGeminiApiKeyChange = (val: string) => {
+    setGeminiApiKey(val);
+    setStoredApiKey(val);
+  };
 
   // Sync prompt whenever target or style changes
   useEffect(() => {
@@ -140,11 +179,6 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
     ? `AI Specimen Portrait: ${target.species.commonName}`
     : `AI Surface Generation: ${target.planetName}`;
 
-  const handleApiKeyChange = (val: string) => {
-    setApiKey(val);
-    setStoredApiKey(val);
-  };
-
   const handleResetPrompt = () => {
     if (isSpecies) {
       setPrompt(
@@ -196,8 +230,11 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
     setIsLoading(true);
 
     try {
-      const imgRes = await generateGeminiImage(prompt, {
-        apiKey,
+      const imgRes = await generateAiImage(prompt, {
+        model: selectedModel,
+        fluxProvider,
+        fluxApiKey,
+        geminiApiKey,
         aspectRatio,
       });
       setResult(imgRes);
@@ -211,11 +248,18 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
 
   const handleDownload = () => {
     if (!result) return;
+    const modelTag = selectedModel === 'flux-schnell' ? 'flux' : 'imagen3';
     const cleanName = isSpecies
-      ? `${target.species.scientificName.replace(/\s+/g, '_')}_imagen3.jpg`
-      : `${target.planetName.replace(/\s+/g, '_')}_surface_imagen3.jpg`;
+      ? `${target.species.scientificName.replace(/\s+/g, '_')}_${modelTag}.jpg`
+      : `${target.planetName.replace(/\s+/g, '_')}_surface_${modelTag}.jpg`;
     downloadDataUrlAsFile(result.imageUrl, cleanName);
   };
+
+  const isFlux = selectedModel === 'flux-schnell';
+  const isFluxFree = isFlux && fluxProvider === 'pollinations-free';
+  const isKeyReady = isFlux
+    ? isFluxFree || !!fluxApiKey.trim()
+    : !!geminiApiKey.trim();
 
   return (
     <div
@@ -227,22 +271,59 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800 bg-[#0f1524]">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-[#0f1524]">
           <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 via-sky-500 to-emerald-400 p-[1px] flex items-center justify-center shadow-md shadow-sky-500/20">
+            <div className={`w-7 h-7 rounded-lg p-[1px] flex items-center justify-center shadow-md ${
+              isFlux
+                ? 'bg-gradient-to-br from-amber-400 via-orange-500 to-amber-600 shadow-amber-500/20'
+                : 'bg-gradient-to-br from-indigo-500 via-sky-500 to-emerald-400 shadow-sky-500/20'
+            }`}>
               <div className="w-full h-full bg-[#0b101b] rounded-[7px] flex items-center justify-center">
-                <Sparkles className="w-4 h-4 text-sky-400 animate-pulse" />
+                {isFlux ? (
+                  <Zap className="w-4 h-4 text-amber-400 animate-pulse" />
+                ) : (
+                  <Sparkles className="w-4 h-4 text-sky-400 animate-pulse" />
+                )}
               </div>
             </div>
             <div>
-              <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                <span>{modalTitle}</span>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-950/80 border border-indigo-500/60 text-indigo-300">
-                  Google Imagen 3
-                </span>
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-white">
+                  {modalTitle}
+                </h2>
+                {/* Model Selector Tabs */}
+                <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => handleModelChange('flux-schnell')}
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 transition cursor-pointer ${
+                      isFlux
+                        ? 'bg-amber-500 text-slate-950 shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Zap className="w-2.5 h-2.5" />
+                    <span>FLUX.1 [schnell]</span>
+                    <span className="text-[8px] px-1 rounded bg-black/20 font-mono">Default</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleModelChange('imagen-3')}
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 transition cursor-pointer ${
+                      !isFlux
+                        ? 'bg-sky-500 text-slate-950 shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Sparkles className="w-2.5 h-2.5" />
+                    <span>Imagen 3</span>
+                  </button>
+                </div>
+              </div>
               <span className="text-[10px] text-slate-400">
-                Procedural prompt construction &amp; direct Google AI Studio image synthesis
+                {isFlux
+                  ? 'Black Forest Labs FLUX.1 [schnell] · 4-step flow matching (~$0.003/img or free gateway)'
+                  : 'Google Imagen 3 · Direct Google AI Studio neural synthesis (~$0.03/img)'}
               </span>
             </div>
           </div>
@@ -322,43 +403,120 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
               )}
             </div>
 
-            {/* API Key Input */}
+            {/* Provider & API Key Input */}
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-slate-400 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1">
-                  <Key className="w-3 h-3 text-amber-400" />
-                  Google Gemini / AI Studio Key
-                </label>
-                <a
-                  href="https://aistudio.google.com/app/apikey"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[10px] text-sky-400 hover:text-sky-300 flex items-center gap-1 hover:underline"
-                >
-                  <span>Get Free Key</span>
-                  <ExternalLink className="w-2.5 h-2.5" />
-                </a>
-              </div>
-              <div className="relative">
-                <input
-                  type={showKey ? 'text' : 'password'}
-                  value={apiKey}
-                  onChange={(e) => handleApiKeyChange(e.target.value)}
-                  placeholder="AIzaSy..."
-                  className="w-full bg-slate-950 border border-slate-700/80 focus:border-sky-400 rounded-lg px-3 py-1.5 text-xs text-white font-mono pr-8 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowKey(!showKey)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
-                  title={showKey ? 'Hide Key' : 'Show Key'}
-                >
-                  {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-              <span className="text-[9px] text-slate-500 block mt-1">
-                Stored safely in browser localStorage · Free tier available with Google AI Studio
-              </span>
+              {isFlux ? (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-slate-400 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1">
+                      <Zap className="w-3 h-3 text-amber-400" />
+                      FLUX.1 Gateway / Provider
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleFluxProviderChange('together')}
+                        className={`px-2 py-0.5 rounded text-[9px] font-bold border transition cursor-pointer ${
+                          fluxProvider === 'together'
+                            ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                            : 'bg-slate-900 border-slate-800 text-slate-400'
+                        }`}
+                      >
+                        Together AI ($0.003)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleFluxProviderChange('pollinations-free')}
+                        className={`px-2 py-0.5 rounded text-[9px] font-bold border transition cursor-pointer ${
+                          fluxProvider === 'pollinations-free'
+                            ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+                            : 'bg-slate-900 border-slate-800 text-slate-400'
+                        }`}
+                      >
+                        Free Gateway
+                      </button>
+                    </div>
+                  </div>
+
+                  {fluxProvider === 'together' ? (
+                    <div>
+                      <div className="relative">
+                        <input
+                          type={showKey ? 'text' : 'password'}
+                          value={fluxApiKey}
+                          onChange={(e) => handleFluxApiKeyChange(e.target.value)}
+                          placeholder="Together AI API Key (e.g. 5f...)"
+                          className="w-full bg-slate-950 border border-slate-700/80 focus:border-amber-400 rounded-lg px-3 py-1.5 text-xs text-white font-mono pr-8 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowKey(!showKey)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                        >
+                          {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between text-[9px] text-slate-500 mt-1">
+                        <span>Stored in localStorage · ~$0.003 / image (~330 images per $1)</span>
+                        <a
+                          href="https://api.together.xyz/settings/api-keys"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-amber-400 hover:underline flex items-center gap-0.5"
+                        >
+                          <span>Get Key</span>
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-emerald-950/30 border border-emerald-500/30 p-2 rounded-lg flex items-center justify-between text-[10px] text-emerald-300">
+                      <div className="flex items-center gap-1.5">
+                        <Globe className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                        <span>100% Free · No API Key Required</span>
+                      </div>
+                      <span className="text-[9px] text-emerald-400/70 font-mono">Rate limit: 1 img / 45s</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-slate-400 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1">
+                      <Key className="w-3 h-3 text-sky-400" />
+                      Google AI Studio Key
+                    </label>
+                    <a
+                      href="https://aistudio.google.com/app/apikey"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[10px] text-sky-400 hover:text-sky-300 flex items-center gap-1 hover:underline"
+                    >
+                      <span>Get Free Key</span>
+                      <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showKey ? 'text' : 'password'}
+                      value={geminiApiKey}
+                      onChange={(e) => handleGeminiApiKeyChange(e.target.value)}
+                      placeholder="AIzaSy..."
+                      className="w-full bg-slate-950 border border-slate-700/80 focus:border-sky-400 rounded-lg px-3 py-1.5 text-xs text-white font-mono pr-8 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowKey(!showKey)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                  <span className="text-[9px] text-slate-500 block mt-1">
+                    Stored in localStorage · Google Imagen 3 API (~$0.03 / image)
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -374,7 +532,9 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
                 onClick={() => setAspectRatio(ratio)}
                 className={`px-2 py-1 rounded text-xs font-bold border transition cursor-pointer ${
                   aspectRatio === ratio
-                    ? 'bg-sky-600 border-sky-400 text-white'
+                    ? isFlux
+                      ? 'bg-amber-500 border-amber-400 text-slate-950'
+                      : 'bg-sky-600 border-sky-400 text-white'
                     : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -387,7 +547,7 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
           <div className="bg-[#111726] p-3 rounded-xl border border-slate-800 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider flex items-center gap-1.5">
-                <Sparkles className="w-3 h-3 text-sky-400" />
+                {isFlux ? <Zap className="w-3 h-3 text-amber-400" /> : <Sparkles className="w-3 h-3 text-sky-400" />}
                 Synthesized Prompt (Editable)
               </span>
               <div className="flex items-center gap-2">
@@ -403,8 +563,8 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
                 <button
                   type="button"
                   onClick={handleCopyPrompt}
-                  className="text-[10px] text-sky-400 hover:text-sky-300 flex items-center gap-1 font-bold hover:underline cursor-pointer"
-                  title="Copy prompt for use in Midjourney, Gemini Web, or ChatGPT"
+                  className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-bold hover:underline cursor-pointer"
+                  title="Copy prompt for use anywhere"
                 >
                   {copiedPrompt ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                   {copiedPrompt ? 'Copied!' : 'Copy Prompt'}
@@ -416,7 +576,7 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={3}
-              className="w-full bg-slate-950 border border-slate-700/80 focus:border-sky-400 rounded-lg p-2.5 text-[11px] leading-relaxed text-slate-200 font-mono resize-y focus:outline-none custom-scrollbar"
+              className="w-full bg-slate-950 border border-slate-700/80 focus:border-amber-400 rounded-lg p-2.5 text-[11px] leading-relaxed text-slate-200 font-mono resize-y focus:outline-none custom-scrollbar"
             />
           </div>
 
@@ -427,9 +587,9 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
               <div className="space-y-1">
                 <b className="font-bold block">Generation Error</b>
                 <p className="text-[11px] leading-relaxed text-rose-200/90">{errorMsg}</p>
-                {!apiKey && (
+                {isFlux && fluxProvider === 'together' && !fluxApiKey && (
                   <p className="text-[10px] text-amber-300">
-                    Tip: Enter your Google AI Studio API key above to generate images directly.
+                    Tip: Switch to the Free Gateway above, or provide your Together AI API key.
                   </p>
                 )}
               </div>
@@ -441,13 +601,21 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
             {isLoading ? (
               <div className="flex flex-col items-center gap-3 p-6 text-center">
                 <div className="relative w-12 h-12">
-                  <div className="absolute inset-0 rounded-full border-2 border-sky-500/20 animate-ping" />
-                  <div className="w-12 h-12 rounded-full border-2 border-sky-400 border-t-transparent animate-spin" />
+                  <div className={`absolute inset-0 rounded-full border-2 animate-ping ${
+                    isFlux ? 'border-amber-500/20' : 'border-sky-500/20'
+                  }`} />
+                  <div className={`w-12 h-12 rounded-full border-2 border-t-transparent animate-spin ${
+                    isFlux ? 'border-amber-400' : 'border-sky-400'
+                  }`} />
                 </div>
                 <div className="space-y-1">
-                  <b className="text-white text-sm block">Synthesizing with Imagen 3...</b>
+                  <b className="text-white text-sm block">
+                    {isFlux ? 'Synthesizing with FLUX.1 [schnell]...' : 'Synthesizing with Imagen 3...'}
+                  </b>
                   <p className="text-[11px] text-slate-400">
-                    Querying Google's neural network with planetary astrophysics parameters
+                    {isFlux
+                      ? 'Executing 4-step distilled flow matching neural inference'
+                      : "Querying Google's neural network with planetary astrophysics parameters"}
                   </p>
                 </div>
               </div>
@@ -467,7 +635,7 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
                     className="p-2 rounded-lg bg-black/70 hover:bg-black/90 border border-white/20 text-white backdrop-blur transition cursor-pointer shadow-lg flex items-center gap-1.5 text-xs font-bold"
                     title="Download Generated Image"
                   >
-                    <Download className="w-3.5 h-3.5 text-sky-400" />
+                    <Download className="w-3.5 h-3.5 text-amber-400" />
                     <span>Download</span>
                   </button>
                   <button
@@ -481,7 +649,7 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
                 </div>
 
                 <div className="absolute bottom-4 left-4 px-2.5 py-1 rounded bg-black/75 backdrop-blur border border-white/10 text-[10px] text-slate-300">
-                  ✨ Generated in {(result.durationMs / 1000).toFixed(1)}s via Imagen 3
+                  ✨ Generated in {(result.durationMs / 1000).toFixed(1)}s via {result.provider || result.model}
                 </div>
               </div>
             ) : (
@@ -495,7 +663,11 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
                     />
                   </div>
                 ) : (
-                  <div className="w-16 h-16 rounded-2xl bg-sky-950/40 border border-sky-500/30 flex items-center justify-center text-sky-400">
+                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${
+                    isFlux
+                      ? 'bg-amber-950/40 border border-amber-500/30 text-amber-400'
+                      : 'bg-sky-950/40 border border-sky-500/30 text-sky-400'
+                  }`}>
                     <ImageIcon className="w-8 h-8 opacity-60" />
                   </div>
                 )}
@@ -503,7 +675,11 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
                   <b className="text-white text-xs block">Ready to Synthesize</b>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
                     Click below to generate high-fidelity artwork of this{' '}
-                    {isSpecies ? 'alien specimen' : 'planetary landscape'} using Google's Imagen 3.
+                    {isSpecies ? 'alien specimen' : 'planetary landscape'} using{' '}
+                    <strong className="text-slate-200">
+                      {isFlux ? 'FLUX.1 [schnell]' : 'Google Imagen 3'}
+                    </strong>
+                    .
                   </p>
                 </div>
               </div>
@@ -514,15 +690,32 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
         {/* Footer Action Bar */}
         <div className="flex items-center justify-between px-5 py-3 border-t border-slate-800 bg-[#0f1524]">
           <div className="flex items-center gap-2 text-[11px] text-slate-400">
-            {apiKey ? (
+            {isFlux ? (
+              isFluxFree ? (
+                <span className="text-emerald-400 flex items-center gap-1 font-semibold">
+                  <Globe className="w-3.5 h-3.5" />
+                  Free Public Gateway Active (No Key Required)
+                </span>
+              ) : fluxApiKey ? (
+                <span className="text-emerald-400 flex items-center gap-1 font-semibold">
+                  <Check className="w-3.5 h-3.5" />
+                  Together AI Key Active ($0.003/image)
+                </span>
+              ) : (
+                <span className="text-amber-400 flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  Together Key required (or switch to Free Gateway)
+                </span>
+              )
+            ) : geminiApiKey ? (
               <span className="text-emerald-400 flex items-center gap-1 font-semibold">
                 <Check className="w-3.5 h-3.5" />
-                API Key Active
+                Google AI Studio Key Active
               </span>
             ) : (
               <span className="text-amber-400 flex items-center gap-1">
                 <AlertTriangle className="w-3.5 h-3.5" />
-                Key required for generation
+                Google AI Studio Key required
               </span>
             )}
           </div>
@@ -539,8 +732,12 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
             <button
               type="button"
               onClick={handleGenerate}
-              disabled={isLoading || !prompt.trim()}
-              className="px-4 py-1.5 rounded-lg font-bold text-white shadow-lg transition flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-indigo-600 via-sky-600 to-emerald-600 hover:brightness-110 active:scale-95 shadow-sky-600/20"
+              disabled={isLoading || !prompt.trim() || !isKeyReady}
+              className={`px-4 py-1.5 rounded-lg font-bold text-white shadow-lg transition flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                isFlux
+                  ? 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:brightness-110 active:scale-95 shadow-amber-500/20 text-slate-950 font-extrabold'
+                  : 'bg-gradient-to-r from-indigo-600 via-sky-600 to-emerald-600 hover:brightness-110 active:scale-95 shadow-sky-600/20'
+              }`}
             >
               {isLoading ? (
                 <>
@@ -549,8 +746,8 @@ export const AiImageGenModal: React.FC<AiImageGenModalProps> = ({
                 </>
               ) : (
                 <>
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                  <span>Generate with Imagen 3</span>
+                  {isFlux ? <Zap className="w-3.5 h-3.5 text-slate-950 fill-current" /> : <Sparkles className="w-3.5 h-3.5 text-amber-300" />}
+                  <span>{isFlux ? 'Generate with FLUX.1 [schnell]' : 'Generate with Imagen 3'}</span>
                 </>
               )}
             </button>
