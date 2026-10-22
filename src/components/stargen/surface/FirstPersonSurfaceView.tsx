@@ -11,7 +11,6 @@ import {
   Layers,
   Sprout,
   Maximize2,
-  Minimize2,
 } from 'lucide-react';
 import { RealisticPlanetBody } from '../../../core/generation/realisticStarGen';
 import { RealisticMoon } from '../../../types/astrophysics';
@@ -1173,8 +1172,8 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const W = 900;
-      const H = 525;
+      const W = isFullscreen ? Math.min(1920, window.innerWidth || 1200) : 900;
+      const H = isFullscreen ? Math.min(1080, window.innerHeight || 800) : 525;
       if (canvas.width !== W || canvas.height !== H) {
         canvas.width = W;
         canvas.height = H;
@@ -2049,88 +2048,88 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
   ]);
 
   return (
-    <div className={`w-full flex flex-col ${isFullscreen ? 'flex-1 h-full min-h-0 gap-1.5' : 'gap-2.5'}`}>
+    <div className={isFullscreen ? 'w-full h-full p-0 m-0' : 'w-full flex flex-col gap-2.5'}>
       {/* Top First-Person Controls Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/90 px-3 py-2 rounded-lg border border-slate-800">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="inline-flex items-center -space-x-1">
-            <span
-              className="w-3 h-3 rounded-full border border-white/30"
-              style={{ backgroundColor: activeTile.biomeColor }}
-            />
-            {activeTile.secondaryBiomeColor && (
+      {!isFullscreen && (
+        <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/90 px-3 py-2 rounded-lg border border-slate-800">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center -space-x-1">
               <span
-                className="w-3 h-3 rounded-full border border-white/40"
-                style={{ backgroundColor: activeTile.secondaryBiomeColor }}
+                className="w-3 h-3 rounded-full border border-white/30"
+                style={{ backgroundColor: activeTile.biomeColor }}
               />
-            )}
-          </span>
-          <span className="text-white font-bold text-xs">
-            First-Person Surface Explorer • {activeTile.biomeName}
-          </span>
-          <span className="px-2 py-0.5 rounded-md bg-sky-950/90 border border-sky-500/60 text-sky-200 font-mono font-bold text-xs tracking-wide shadow-sm">
-            {activeTile.centerLat >= 0 ? `${activeTile.centerLat}°N` : `${Math.abs(activeTile.centerLat)}°S`},{' '}
-            {activeTile.centerLon >= 0 ? `${activeTile.centerLon}°E` : `${Math.abs(activeTile.centerLon)}°W`}
-          </span>
-          <span className="text-sky-400 text-[11px] font-mono">
-            • HDG {String(hudHeadingDeg).padStart(3, '0')}° ({compassLabelFromAzimuth(hudHeadingDeg)})
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Altitude / Camera Mode Toggle */}
-          <div className="flex items-center bg-slate-900 rounded-md p-0.5 border border-slate-800">
-            <button
-              type="button"
-              onClick={() => setHeightMode('walk')}
-              className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
-                heightMode === 'walk' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Surface Walk (2m eye level)"
-            >
-              <Footprints className="w-3 h-3" />
-              Walk
-            </button>
-            <button
-              type="button"
-              onClick={() => setHeightMode('skim')}
-              className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
-                heightMode === 'skim' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Low Terrain Skimmer (25m altitude)"
-            >
-              <Navigation className="w-3 h-3" />
-              Skim
-            </button>
-            <button
-              type="button"
-              onClick={() => setHeightMode('flight')}
-              className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
-                heightMode === 'flight' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="High Flight Vista (80m altitude)"
-            >
-              <Plane className="w-3 h-3" />
-              Flight
-            </button>
+              {activeTile.secondaryBiomeColor && (
+                <span
+                  className="w-3 h-3 rounded-full border border-white/40"
+                  style={{ backgroundColor: activeTile.secondaryBiomeColor }}
+                />
+              )}
+            </span>
+            <span className="text-white font-bold text-xs">
+              First-Person Surface Explorer • {activeTile.biomeName}
+            </span>
+            <span className="px-2 py-0.5 rounded-md bg-sky-950/90 border border-sky-500/60 text-sky-200 font-mono font-bold text-xs tracking-wide shadow-sm">
+              {activeTile.centerLat >= 0 ? `${activeTile.centerLat}°N` : `${Math.abs(activeTile.centerLat)}°S`},{' '}
+              {activeTile.centerLon >= 0 ? `${activeTile.centerLon}°E` : `${Math.abs(activeTile.centerLon)}°W`}
+            </span>
+            <span className="text-sky-400 text-[11px] font-mono">
+              • HDG {String(hudHeadingDeg).padStart(3, '0')}° ({compassLabelFromAzimuth(hudHeadingDeg)})
+            </span>
           </div>
 
-          {hasAtmosphere && (
-            <button
-              type="button"
-              onClick={() => setShowClouds((v) => !v)}
-              className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
-                showClouds
-                  ? 'bg-sky-900/60 border-sky-500/70 text-sky-200'
-                  : 'bg-slate-900 border-slate-700 text-slate-400'
-              }`}
-            >
-              <Cloud className="w-3 h-3" />
-              Clouds
-            </button>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Altitude / Camera Mode Toggle */}
+            <div className="flex items-center bg-slate-900 rounded-md p-0.5 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setHeightMode('walk')}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
+                  heightMode === 'walk' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Surface Walk (2m eye level)"
+              >
+                <Footprints className="w-3 h-3" />
+                Walk
+              </button>
+              <button
+                type="button"
+                onClick={() => setHeightMode('skim')}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
+                  heightMode === 'skim' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Low Terrain Skimmer (25m altitude)"
+              >
+                <Navigation className="w-3 h-3" />
+                Skim
+              </button>
+              <button
+                type="button"
+                onClick={() => setHeightMode('flight')}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
+                  heightMode === 'flight' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="High Flight Vista (80m altitude)"
+              >
+                <Plane className="w-3 h-3" />
+                Flight
+              </button>
+            </div>
 
-          {!isFullscreen && (
+            {hasAtmosphere && (
+              <button
+                type="button"
+                onClick={() => setShowClouds((v) => !v)}
+                className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
+                  showClouds
+                    ? 'bg-sky-900/60 border-sky-500/70 text-sky-200'
+                    : 'bg-slate-900 border-slate-700 text-slate-400'
+                }`}
+              >
+                <Cloud className="w-3 h-3" />
+                Clouds
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => setShowGeologyPanel((v) => !v)}
@@ -2144,79 +2143,75 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
               <Layers className="w-3 h-3" />
               Local Geology
             </button>
-          )}
 
-          {!isFullscreen && onToggleFlora && (
+            {onToggleFlora && (
+              <button
+                type="button"
+                onClick={onToggleFlora}
+                className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
+                  isFloraOpen
+                    ? 'bg-emerald-900/80 border-emerald-400 text-emerald-200 shadow-sm'
+                    : 'bg-emerald-950/60 border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-900/50'
+                }`}
+                title="Toggle Tile Indigenous Xenoflora & Species Catalog"
+              >
+                <Sprout className="w-3 h-3 text-emerald-400" />
+                Tile Flora
+              </button>
+            )}
+
+            <div className="flex items-center gap-1">
+              <Sun className="w-3.5 h-3.5 text-amber-400" />
+              <input
+                type="range"
+                min="-60"
+                max="180"
+                step="5"
+                value={timeOfDayDeg}
+                onChange={(e) => onChangeTimeOfDay(+e.target.value)}
+                className="w-16 accent-amber-400 cursor-pointer"
+                title="Adjust Solar Elevation / Time of Day"
+              />
+            </div>
+
             <button
               type="button"
-              onClick={onToggleFlora}
-              className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
-                isFloraOpen
-                  ? 'bg-emerald-900/80 border-emerald-400 text-emerald-200 shadow-sm'
-                  : 'bg-emerald-950/60 border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-900/50'
-              }`}
-              title="Toggle Tile Indigenous Xenoflora & Species Catalog"
+              onClick={onSwitchToBlockView}
+              className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-emerald-300 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+              title="Switch to 3D Isometric Tile Terrain View"
             >
-              <Sprout className="w-3 h-3 text-emerald-400" />
-              Tile Flora
+              <Hexagon className="w-3 h-3" />
+              3D Tile View
             </button>
-          )}
 
-          <div className="flex items-center gap-1">
-            <Sun className="w-3.5 h-3.5 text-amber-400" />
-            <input
-              type="range"
-              min="-60"
-              max="180"
-              step="5"
-              value={timeOfDayDeg}
-              onChange={(e) => onChangeTimeOfDay(+e.target.value)}
-              className="w-16 accent-amber-400 cursor-pointer"
-              title="Adjust Solar Elevation / Time of Day"
-            />
+            <button
+              type="button"
+              onClick={() => {
+                camRef.current.x = 0;
+                camRef.current.z = -0.25;
+                camRef.current.yaw = 0.25;
+                camRef.current.pitch = -0.06;
+              }}
+              className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[10px] flex items-center gap-1 cursor-pointer"
+            >
+              <RotateCcw className="w-3 h-3" />
+              Reset
+            </button>
+
+            {onToggleFullscreen && (
+              <button
+                type="button"
+                onClick={onToggleFullscreen}
+                className="px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition bg-slate-900 border-slate-700 text-slate-300 hover:text-white"
+                title="Toggle Fullscreen"
+              >
+                <Maximize2 className="w-3 h-3" />
+                Fullscreen
+              </button>
+            )}
           </div>
-
-          <button
-            type="button"
-            onClick={onSwitchToBlockView}
-            className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-emerald-300 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-            title="Switch to 3D Isometric Tile Terrain View"
-          >
-            <Hexagon className="w-3 h-3" />
-            3D Tile View
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              camRef.current.x = 0;
-              camRef.current.z = -0.25;
-              camRef.current.yaw = 0.25;
-              camRef.current.pitch = -0.06;
-            }}
-            className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[10px] flex items-center gap-1 cursor-pointer"
-          >
-            <RotateCcw className="w-3 h-3" />
-            Reset
-          </button>
-
-          {onToggleFullscreen && (
-            <button
-              type="button"
-              onClick={onToggleFullscreen}
-              className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
-                isFullscreen
-                  ? 'bg-purple-900/70 border-purple-400 text-purple-200'
-                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
-              }`}
-              title={isFullscreen ? 'Exit Fullscreen' : 'Toggle Fullscreen'}
-            >
-              {isFullscreen ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
-              {isFullscreen ? 'Exit' : 'Fullscreen'}
-            </button>
-          )}
         </div>
-      </div>
+      )}
 
       {/* Toggleable Local Geology & Crust Composition Panel */}
       {showGeologyPanel && !isFullscreen && (
@@ -2274,7 +2269,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       <div
         className={`${
           isFullscreen
-            ? 'w-full h-full flex-1 min-h-0 relative rounded-lg overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center'
+            ? 'w-full h-full relative overflow-hidden bg-slate-950 flex items-center justify-center p-0 m-0 border-0 rounded-none'
             : 'relative rounded-lg overflow-hidden border border-slate-800 bg-slate-950'
         } select-none ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
         onMouseDown={(e) => {
@@ -2327,18 +2322,18 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
           }
         />
 
-
-
-        {/* Bottom-left Controls & Telemetry HUD */}
-        <div className={`absolute ${isFullscreen ? 'bottom-4 left-4' : 'bottom-2.5 left-2.5'} bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-lg border border-slate-800/90 text-[11px] text-slate-300 pointer-events-none flex flex-col gap-0.5 z-40`}>
-          <div className="text-amber-300 font-bold flex items-center gap-1.5">
-            <Eye className="w-3.5 h-3.5" />
-            Dynamic First-Person View • {activeTile.biomeName}
+        {/* Bottom-left Controls & Telemetry HUD (hidden in fullscreen) */}
+        {!isFullscreen && (
+          <div className="absolute bottom-2.5 left-2.5 bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-lg border border-slate-800/90 text-[11px] text-slate-300 pointer-events-none flex flex-col gap-0.5 z-40">
+            <div className="text-amber-300 font-bold flex items-center gap-1.5">
+              <Eye className="w-3.5 h-3.5" />
+              Dynamic First-Person View • {activeTile.biomeName}
+            </div>
+            <div className="text-slate-400 text-[10px]">
+              Drag mouse to look 360° • <span className="text-white font-semibold">WASD / Arrows</span> to walk/fly • Click horizon beacons to travel to adjacent tiles
+            </div>
           </div>
-          <div className="text-slate-400 text-[10px]">
-            Drag mouse to look 360° • <span className="text-white font-semibold">WASD / Arrows</span> to walk/fly • Click horizon beacons to travel to adjacent tiles
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -551,19 +551,33 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
   return (
     <div
       ref={surfaceContainerRef}
-      className={`flex flex-col font-mono text-xs select-none ${
+      className={`font-mono text-xs select-none ${
         isFullscreen
-          ? 'fixed inset-0 z-50 bg-[#070b12] p-2 w-screen h-screen overflow-hidden gap-2'
-          : 'gap-4'
+          ? 'fixed inset-0 z-50 bg-[#070b12] w-screen h-screen overflow-hidden p-0 m-0'
+          : 'flex flex-col gap-4'
       }`}
       style={{
         contentVisibility: isFullscreen ? 'visible' : 'auto',
         containIntrinsicSize: isFullscreen ? 'none' : 'auto 720px',
       }}
     >
+      {/* Floating Exit Fullscreen Button */}
+      {isFullscreen && (
+        <button
+          type="button"
+          onClick={toggleFullscreen}
+          className="fixed top-3 right-3 z-50 px-3 py-1.5 rounded-lg bg-slate-950/80 hover:bg-slate-900 border border-slate-700/80 text-white text-xs font-mono flex items-center gap-1.5 shadow-2xl backdrop-blur-md cursor-pointer transition opacity-70 hover:opacity-100"
+          title="Exit Fullscreen (Esc)"
+        >
+          <Minimize2 className="w-3.5 h-3.5 text-purple-300" />
+          <span>Exit Fullscreen</span>
+        </button>
+      )}
+
       {/* Surface Navigation Toolbar */}
-      <div className={`flex flex-wrap items-center justify-between gap-3 bg-[#151d2c] p-2.5 rounded-xl border border-slate-800 shrink-0 ${isFullscreen ? 'shadow-md' : ''}`}>
-        <div className="flex items-center gap-2 flex-wrap">
+      {!isFullscreen && (
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-[#151d2c] p-2.5 rounded-xl border border-slate-800 shrink-0">
+          <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
             onClick={() => setDisplayMode('map')}
@@ -742,10 +756,11 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
           </div>
         ) : null}
       </div>
+      )}
 
       {/* Main Visual Display Area */}
-      <div className={`relative bg-[#0c121d] rounded-xl border border-slate-800 overflow-hidden flex flex-col items-center ${
-        isFullscreen ? 'flex-1 w-full h-full min-h-0 p-1 border-0 rounded-lg' : 'p-2'
+      <div className={`w-full flex flex-col items-center justify-center ${
+        isFullscreen ? 'flex-1 h-full min-h-0 p-0 m-0 border-0 rounded-none bg-slate-950 overflow-hidden' : 'relative bg-[#0c121d] rounded-xl border border-slate-800 overflow-hidden p-2'
       }`}>
         {displayMode === 'map' ? (
           <div className={`w-full flex flex-col items-center relative ${isFullscreen ? 'flex-1 h-full min-h-0 justify-center' : ''}`}>
