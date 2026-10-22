@@ -195,9 +195,6 @@ export const StarDossierModal: React.FC<StarDossierModalProps> = ({
                   </div>
                 </div>
               </div>
-              <p className="text-[10px] text-slate-400 leading-relaxed">
-                Eddington limb-darkened photosphere with 3D convective granulation cells, bright magnetic faculae, and Spörer&apos;s Law bipolar sunspot groups (umbra &approx; {Math.round(star.Teff * 0.68)} K, penumbra &approx; {Math.round(star.Teff * 0.86)} K).
-              </p>
             </div>
           </div>
         )}
