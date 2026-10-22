@@ -10,8 +10,11 @@
  * - Surface Biomes -> Ecological distribution & endemic habitat niches
  */
 
+export type PlantFormCategory = 'Tree' | 'Frond' | 'Cushion' | 'Spire' | 'Mat' | 'Kelp';
+
 export interface XenofloraSpecies {
   id: string;
+  formCategory: PlantFormCategory;
   commonName: string;
   scientificName: string;
   growthForm: string; // e.g. "Mega-Canopy Tree", "Succulent Cushion", "Siphon-Frond", "Mat-Lichen", "Pelagic Marine Kelp"
@@ -557,6 +560,7 @@ export function generatePlantEcosystem(params: {
 
     speciesList.push({
       id: `flora_${seed}_${i}`,
+      formCategory: arch.formCategory,
       commonName,
       scientificName,
       growthForm: arch.growthForm,

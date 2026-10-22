@@ -12,6 +12,7 @@ import {
   getSpeciesForBiome,
 } from '../../../core/xenobiology/floraGen';
 import { GoldbergPlanetaryTile } from './goldbergTileGrid';
+import { BotanicalSpecimenPlate } from './BotanicalSpecimenPlate';
 
 interface SurfaceEcosystemPanelProps {
   ecosystem: PlanetaryEcosystemSummary;
@@ -234,23 +235,32 @@ export const SurfaceEcosystemPanel: React.FC<SurfaceEcosystemPanelProps> = ({
                           : 'hover:bg-slate-900/50'
                       }`}
                     >
-                      {/* Name & Form */}
-                      <td className="py-2.5 px-3">
-                        <div className="flex items-center gap-1.5 font-bold text-white">
-                          <span>{species.commonName}</span>
-                          {isNativeToActive && (
-                            <span
-                              className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400"
-                              title="Native to currently selected tile"
-                            />
-                          )}
+                      {/* Name & Form with Botanical Thumbnail */}
+                      <td className="py-2 px-3">
+                        <div className="flex items-center gap-2.5">
+                          <BotanicalSpecimenPlate
+                            species={species}
+                            size="thumb"
+                            interactive={true}
+                          />
+                          <div>
+                            <div className="flex items-center gap-1.5 font-bold text-white">
+                              <span>{species.commonName}</span>
+                              {isNativeToActive && (
+                                <span
+                                  className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400"
+                                  title="Native to currently selected tile"
+                                />
+                              )}
+                            </div>
+                            <div className="text-[10px] text-emerald-400/90 italic font-serif">
+                              {species.scientificName}
+                            </div>
+                            <span className="inline-block mt-0.5 px-1.5 py-0.2 rounded text-[9px] bg-slate-800 text-slate-300 border border-slate-700">
+                              {species.growthForm}
+                            </span>
+                          </div>
                         </div>
-                        <div className="text-[10px] text-emerald-400/90 italic font-serif">
-                          {species.scientificName}
-                        </div>
-                        <span className="inline-block mt-0.5 px-1.5 py-0.2 rounded text-[9px] bg-slate-800 text-slate-300 border border-slate-700">
-                          {species.growthForm}
-                        </span>
                       </td>
 
                       {/* Pigment */}
@@ -324,14 +334,27 @@ export const SurfaceEcosystemPanel: React.FC<SurfaceEcosystemPanelProps> = ({
                       </td>
                     </tr>
 
-                    {/* Expanded Detail Drawer */}
+                    {/* Expanded Detail Drawer with Full Botanical Specimen Plate */}
                     {isExpanded && (
                       <tr className="bg-[#050912] border-b border-slate-800/80">
-                        <td colSpan={6} className="p-3.5 pl-6">
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                            <div className="md:col-span-2 space-y-2">
+                        <td colSpan={6} className="p-4 pl-6">
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-start">
+                            {/* Botanical Specimen Plate Card */}
+                            <div className="w-full max-w-[230px]">
+                              <span className="text-slate-500 block text-[9px] uppercase tracking-wider mb-1 font-bold">
+                                BOTANICAL SPECIMEN PLATE
+                              </span>
+                              <BotanicalSpecimenPlate
+                                species={species}
+                                size="card"
+                                interactive={true}
+                              />
+                            </div>
+
+                            {/* Field Notes & Physiological Adaptations */}
+                            <div className="md:col-span-2 space-y-2.5">
                               <div>
-                                <span className="text-slate-500 block text-[9px] uppercase tracking-wider mb-0.5">
+                                <span className="text-slate-500 block text-[9px] uppercase tracking-wider mb-0.5 font-bold">
                                   FIELD NOTE & ECOLOGICAL NICHE
                                 </span>
                                 <p className="text-slate-300 text-xs leading-relaxed">
@@ -340,7 +363,7 @@ export const SurfaceEcosystemPanel: React.FC<SurfaceEcosystemPanelProps> = ({
                               </div>
 
                               <div>
-                                <span className="text-slate-500 block text-[9px] uppercase tracking-wider mb-1">
+                                <span className="text-slate-500 block text-[9px] uppercase tracking-wider mb-1 font-bold">
                                   KEY PHYSIOLOGICAL ADAPTATIONS
                                 </span>
                                 <ul className="space-y-1">
@@ -354,7 +377,8 @@ export const SurfaceEcosystemPanel: React.FC<SurfaceEcosystemPanelProps> = ({
                               </div>
                             </div>
 
-                            <div className="bg-[#0a0f1b] p-2.5 rounded-lg border border-slate-800 space-y-2 text-[10px]">
+                            {/* Taxon Properties Card */}
+                            <div className="bg-[#0a0f1b] p-3 rounded-lg border border-slate-800 space-y-2.5 text-[10px]">
                               <div>
                                 <span className="text-slate-500 block uppercase text-[9px]">Canopy Abundance</span>
                                 <div className="flex items-center gap-2 mt-0.5">
@@ -370,12 +394,17 @@ export const SurfaceEcosystemPanel: React.FC<SurfaceEcosystemPanelProps> = ({
 
                               <div>
                                 <span className="text-slate-500 block uppercase text-[9px]">Structural Material</span>
-                                <b className="text-slate-200">{species.structuralPolymer}</b>
+                                <b className="text-slate-200 block truncate">{species.structuralPolymer}</b>
                               </div>
 
                               <div>
                                 <span className="text-slate-500 block uppercase text-[9px]">Light Absorption</span>
-                                <b className="text-slate-200">{species.trophicType}</b>
+                                <b className="text-slate-200 block truncate">{species.trophicType}</b>
+                              </div>
+
+                              <div>
+                                <span className="text-slate-500 block uppercase text-[9px]">Reproduction</span>
+                                <span className="text-slate-300 text-[9px] block leading-tight">{species.reproductionMethod}</span>
                               </div>
                             </div>
                           </div>

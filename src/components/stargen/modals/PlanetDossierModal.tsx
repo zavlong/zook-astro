@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { PlanetarySurfaceExplorer } from '../surface/PlanetarySurfaceExplorer';
 import { PlanetaryChemistrySection } from '../surface/PlanetaryChemistrySection';
+import { BotanicalSpecimenPlate } from '../surface/BotanicalSpecimenPlate';
 import { generatePlantEcosystem } from '../../../core/xenobiology/floraGen';
 import {
   ExportFormatType,
@@ -890,6 +891,38 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                   </div>
                 </div>
 
+                {/* Visual Plant Species Gallery Chips */}
+                {planetEcosystem.speciesList.length > 0 && (
+                  <div className="pt-2 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-slate-400 block text-[9px] uppercase font-semibold">
+                        Dominant Plant Species Plates (Click to Inspect)
+                      </span>
+                      <span className="text-[9px] text-emerald-400/80">
+                        {planetEcosystem.speciesList.length} taxa identified
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                      {planetEcosystem.speciesList.slice(0, 5).map((sp) => (
+                        <div
+                          key={sp.id}
+                          className="flex items-center gap-2 p-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500/50 transition flex-shrink-0 group"
+                        >
+                          <BotanicalSpecimenPlate species={sp} size="thumb" interactive={true} />
+                          <div className="pr-1 text-left">
+                            <span className="text-white group-hover:text-emerald-300 font-bold block text-[10px] truncate max-w-[110px]">
+                              {sp.commonName}
+                            </span>
+                            <span className="text-slate-400 text-[9px] block">
+                              {sp.growthForm.split(' ')[0]} · {sp.averageHeightM < 0.1 ? `${(sp.averageHeightM * 100).toFixed(0)}cm` : `${sp.averageHeightM.toFixed(1)}m`}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[10px]">
                   <span className="text-slate-400">
                     {planetEcosystem.isMulticellular
@@ -901,7 +934,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                     onClick={() => setActiveTab('surface')}
                     className="flex items-center gap-1 text-emerald-300 hover:text-emerald-200 font-bold transition hover:underline cursor-pointer"
                   >
-                    <span>View Species Table in Surface View</span>
+                    <span>View Full Species Catalog in Surface View</span>
                     <ArrowRight className="w-3 h-3" />
                   </button>
                 </div>
