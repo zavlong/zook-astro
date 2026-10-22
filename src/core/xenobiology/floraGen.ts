@@ -64,39 +64,290 @@ function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
 
-// Binomial genus & species name lexicon
-const GENUS_PREFIXES = [
-  'Dendro', 'Thallo', 'Phyco', 'Caulo', 'Xeno', 'Rhizo', 'Licheno', 'Crypto', 
-  'Aero', 'Chloro', 'Melano', 'Spiro', 'Arbo', 'Cacto', 'Pterido', 'Vasco'
-];
-const GENUS_SUFFIXES = [
-  'phyton', 'siphon', 'cladus', 'thrix', 'pteryx', 'dermis', 'sphaera', 'gaster',
-  'stemma', 'morphus', 'carpus', 'stachys', 'nema', 'philus', 'lobus', 'stipe'
-];
-const SPECIES_EPITHETS = [
-  'titanis', 'gracilis', 'borealis', 'aurea', 'rubrum', 'nigra', 'viridis',
-  'cryophilus', 'silvestris', 'abyssalis', 'volcanica', 'pallida', 'elegans',
-  'grandis', 'radiata', 'subtilis', 'pectinata', 'umbrosa', 'pumila', 'velox'
-];
+// Grammatical gender for Latin binomial agreement
+export type GrammaticalGender = 'masc' | 'fem' | 'neut';
 
-// Common name descriptor palettes
-const COMMON_ADJECTIVES_BY_SPECTRUM: Record<string, string[]> = {
-  IR: ['Obsidian', 'Burgundy', 'Shadow', 'Plum', 'Velvet', 'Midnight', 'Dusk', 'Charcoal', 'Gloom-Bough'],
-  Carotenoid: ['Amber', 'Gilded', 'Russet', 'Copper', 'Saffron', 'Sunburst', 'Ochre', 'Rust', 'Cinnamon'],
-  Chlorophyll: ['Emerald', 'Jade', 'Verdant', 'Moss', 'Viridian', 'Forest', 'Brightleaf', 'Clover'],
-  UV: ['Azure', 'Prismatic', 'Silver-Leaf', 'Turquoise', 'Teal', 'Cerulean', 'Sapphire', 'Cobalt-Frond'],
-  Cryo: ['Cryo-Coral', 'Frost-Spire', 'Indigo', 'Glacial', 'Violet-Frost', 'Boreal-Amethyst'],
-  Hydrocarbon: ['Tar-Frond', 'Amber-Chitin', 'Resin-Bough', 'Bitumen', 'Smoky']
+export interface FormSuffixEntry {
+  suffix: string;
+  gender: GrammaticalGender;
+  englishNouns: string[];
+}
+
+export interface ColorPrefixEntry {
+  prefix: string;
+  englishAdj: string;
+}
+
+export interface EpithetEntry {
+  masc: string;
+  fem: string;
+  neut: string;
+  english: string;
+}
+
+// Color & pigment taxonomy: Greek/Latin prefixes directly mapped to English spectrum adjectives
+export const COLOR_TAXONOMY: Record<string, ColorPrefixEntry[]> = {
+  Chlorophyll: [
+    { prefix: 'Chloro', englishAdj: 'Emerald' },
+    { prefix: 'Viridi', englishAdj: 'Verdant' },
+    { prefix: 'Prasino', englishAdj: 'Viridian' },
+    { prefix: 'Smaragdo', englishAdj: 'Jade' },
+  ],
+  Carotenoid: [
+    { prefix: 'Chryso', englishAdj: 'Golden' },
+    { prefix: 'Xantho', englishAdj: 'Amber' },
+    { prefix: 'Auro', englishAdj: 'Gilded' },
+    { prefix: 'Fulvo', englishAdj: 'Russet' },
+    { prefix: 'Croco', englishAdj: 'Saffron' },
+  ],
+  IR: [
+    { prefix: 'Melano', englishAdj: 'Obsidian' },
+    { prefix: 'Porphyro', englishAdj: 'Purple-Black' },
+    { prefix: 'Atro', englishAdj: 'Midnight' },
+    { prefix: 'Ianthino', englishAdj: 'Velvet' },
+  ],
+  UV: [
+    { prefix: 'Cyano', englishAdj: 'Azure' },
+    { prefix: 'Caeruleo', englishAdj: 'Cerulean' },
+    { prefix: 'Glauco', englishAdj: 'Teal' },
+    { prefix: 'Phycocyano', englishAdj: 'Cobalt' },
+  ],
+  Cryo: [
+    { prefix: 'Cryo', englishAdj: 'Cryo-Frost' },
+    { prefix: 'Gelido', englishAdj: 'Glacial' },
+    { prefix: 'Glacio', englishAdj: 'Indigo-Ice' },
+    { prefix: 'Ammonio', englishAdj: 'Amethyst-Frost' },
+  ],
+  Hydrocarbon: [
+    { prefix: 'Carbo', englishAdj: 'Bitumen' },
+    { prefix: 'Piceo', englishAdj: 'Pitch-Brown' },
+    { prefix: 'Bitumino', englishAdj: 'Tar' },
+    { prefix: 'Chalco', englishAdj: 'Smoky-Copper' },
+  ],
 };
 
-const COMMON_NOUNS_BY_FORM: Record<string, string[]> = {
-  Tree: ['Canopy-Oak', 'Spire-Pine', 'Ribbon-Trunk', 'Parasol-Tree', 'Pillar-Arbor', 'Colonnade'],
-  Frond: ['Siphon-Fern', 'Fan-Frond', 'Blade-Shrub', 'Ribbon-Reed', 'Vascular Quill', 'Flabellum'],
-  Cushion: ['Cushion-Dome', 'Pebble-Succulent', 'Carpet-Bryophyte', 'Tumble-Spire', 'Plate-Lichen'],
-  Mat: ['Stromatolite-Mat', 'Velvet-Thallus', 'Crust-Lichen', 'Rhizome-Felt', 'Biofilm-Weave'],
-  Kelp: ['Ribbon-Kelp', 'Siphon-Weed', 'Pneumatic Wrack', 'Tidal Kelp-Stipe', 'Pelagic Tendril'],
-  Spire: ['Spore-Column', 'Needle-Spire', 'Glass-Lichen', 'Chimney-Frond', 'Chalcogenide Tower']
+// Form suffixes for unicellular / microbial crusts (no trees or arborescent trunks)
+export const UNICELLULAR_FORM_SUFFIXES: FormSuffixEntry[] = [
+  { suffix: 'stroma', gender: 'neut', englishNouns: ['Stromatolite-Crust', 'Biofilm-Weave'] },
+  { suffix: 'derma', gender: 'neut', englishNouns: ['Soil-Crust', 'Regolith-Skin'] },
+  { suffix: 'pelte', gender: 'fem', englishNouns: ['Algal-Mat', 'Crust-Sheet'] },
+  { suffix: 'thrix', gender: 'fem', englishNouns: ['Filament-Turf', 'Algal-Turf'] },
+  { suffix: 'taphris', gender: 'fem', englishNouns: ['Plains-Crust', 'Micro-Mat'] },
+  { suffix: 'biont', gender: 'masc', englishNouns: ['Colonial-Biofilm', 'Micro-Colony'] },
+];
+
+// Form suffixes for multicellular plant archetypes
+export const MULTICELLULAR_FORM_SUFFIXES: Record<PlantFormCategory, FormSuffixEntry[]> = {
+  Tree: [
+    { suffix: 'dendron', gender: 'neut', englishNouns: ['Canopy-Tree', 'Arbor'] },
+    { suffix: 'cladus', gender: 'masc', englishNouns: ['Bough-Tree', 'Canopy-Arbor'] },
+    { suffix: 'phyton', gender: 'neut', englishNouns: ['Pillar-Tree', 'Mega-Canopy'] },
+    { suffix: 'caulis', gender: 'masc', englishNouns: ['Trunk-Tree', 'Colonnade'] },
+  ],
+  Frond: [
+    { suffix: 'pteris', gender: 'fem', englishNouns: ['Fern-Frond', 'Plume-Frond'] },
+    { suffix: 'pteryx', gender: 'fem', englishNouns: ['Wing-Frond', 'Feather-Blade'] },
+    { suffix: 'frons', gender: 'fem', englishNouns: ['Siphon-Frond', 'Fan-Blade'] },
+    { suffix: 'stemma', gender: 'neut', englishNouns: ['Ribbon-Frond', 'Spray-Fern'] },
+  ],
+  Cushion: [
+    { suffix: 'pulvinus', gender: 'masc', englishNouns: ['Cushion-Dome', 'Pebble-Succulent'] },
+    { suffix: 'sphaera', gender: 'fem', englishNouns: ['Globe-Succulent', 'Dome-Cushion'] },
+    { suffix: 'plax', gender: 'fem', englishNouns: ['Plate-Lichen', 'Shield-Cushion'] },
+    { suffix: 'lobus', gender: 'masc', englishNouns: ['Lobed-Rosette', 'Button-Cushion'] },
+  ],
+  Mat: [
+    { suffix: 'stroma', gender: 'neut', englishNouns: ['Stromatolite-Mat', 'Biofilm-Weave'] },
+    { suffix: 'derma', gender: 'neut', englishNouns: ['Crust-Lichen', 'Ground-Carpet'] },
+    { suffix: 'pelte', gender: 'fem', englishNouns: ['Velvet-Thallus', 'Sheet-Lichen'] },
+    { suffix: 'rhiza', gender: 'fem', englishNouns: ['Rhizome-Felt', 'Carpet-Bryophyte'] },
+  ],
+  Kelp: [
+    { suffix: 'phyceae', gender: 'fem', englishNouns: ['Ribbon-Kelp', 'Siphon-Wrack'] },
+    { suffix: 'siphon', gender: 'neut', englishNouns: ['Tubular-Wrack', 'Pelagic-Tendril'] },
+    { suffix: 'nemus', gender: 'neut', englishNouns: ['Float-Weed', 'Pelagic-Tendril'] },
+    { suffix: 'zona', gender: 'fem', englishNouns: ['Tidal-Wrack', 'Coastal-Kelp'] },
+  ],
+  Spire: [
+    { suffix: 'spira', gender: 'fem', englishNouns: ['Needle-Spire', 'Pinnacle'] },
+    { suffix: 'turris', gender: 'fem', englishNouns: ['Tower-Spire', 'Chimney-Spire'] },
+    { suffix: 'columna', gender: 'fem', englishNouns: ['Columnar-Spire', 'Obelisk'] },
+    { suffix: 'stachys', gender: 'fem', englishNouns: ['Spike-Spire', 'Spore-Spire'] },
+  ],
 };
+
+// Size-aligned Epithets (Strictly enforced so small plants are never called 'grandis' or 'titanis')
+export const MICRO_EPITHETS: EpithetEntry[] = [
+  { masc: 'pumilus', fem: 'pumila', neut: 'pumilum', english: 'Pygmy' },
+  { masc: 'nanus', fem: 'nana', neut: 'nanum', english: 'Dwarf' },
+  { masc: 'crustosus', fem: 'crustosa', neut: 'crustosum', english: 'Crust' },
+  { masc: 'humilis', fem: 'humilis', neut: 'humile', english: 'Low-Creeping' },
+  { masc: 'subtilis', fem: 'subtilis', neut: 'subtile', english: 'Micro' },
+  { masc: 'tenuis', fem: 'tenuis', neut: 'tenue', english: 'Sheet' },
+  { masc: 'repens', fem: 'repens', neut: 'repens', english: 'Creeping' },
+];
+
+export const MEDIUM_EPITHETS: EpithetEntry[] = [
+  { masc: 'gracilis', fem: 'gracilis', neut: 'gracile', english: 'Slender' },
+  { masc: 'elegans', fem: 'elegans', neut: 'elegans', english: 'Elegant' },
+  { masc: 'communis', fem: 'communis', neut: 'commune', english: 'Common' },
+  { masc: 'ramosus', fem: 'ramosa', neut: 'ramosum', english: 'Branching' },
+  { masc: 'intermedius', fem: 'intermedia', neut: 'intermedium', english: 'Midland' },
+  { masc: 'decorus', fem: 'decora', neut: 'decorum', english: 'Ornate' },
+];
+
+export const LARGE_EPITHETS: EpithetEntry[] = [
+  { masc: 'grandis', fem: 'grandis', neut: 'grande', english: 'Great' },
+  { masc: 'titanis', fem: 'titanis', neut: 'titane', english: 'Titanic' },
+  { masc: 'giganteus', fem: 'gigantea', neut: 'giganteum', english: 'Giant' },
+  { masc: 'excelsus', fem: 'excelsa', neut: 'excelsum', english: 'Towering' },
+  { masc: 'procerus', fem: 'procera', neut: 'procerum', english: 'High-Canopy' },
+  { masc: 'magnificus', fem: 'magnifica', neut: 'magnificum', english: 'Majestic' },
+  { masc: 'colossalis', fem: 'colossalis', neut: 'colossale', english: 'Colossal' },
+];
+
+// Endemic Biome/Habitat-aligned Epithets
+export const VOLCANIC_EPITHETS: EpithetEntry[] = [
+  { masc: 'volcanicus', fem: 'volcanica', neut: 'volcanicum', english: 'Volcanic' },
+  { masc: 'pyrogenus', fem: 'pyrogena', neut: 'pyrogenum', english: 'Pyric' },
+  { masc: 'ignescens', fem: 'ignescens', neut: 'ignescens', english: 'Caldera' },
+  { masc: 'chalcophilus', fem: 'chalcophila', neut: 'chalcophilum', english: 'Thermal' },
+];
+
+export const CRYO_EPITHETS: EpithetEntry[] = [
+  { masc: 'cryophilus', fem: 'cryophila', neut: 'cryophilum', english: 'Frost-Tolerant' },
+  { masc: 'borealis', fem: 'borealis', neut: 'boreale', english: 'Boreal' },
+  { masc: 'gelidus', fem: 'gelida', neut: 'gelidum', english: 'Glacial' },
+  { masc: 'pergelidus', fem: 'pergelida', neut: 'pergelidum', english: 'Permafrost' },
+];
+
+export const AQUATIC_EPITHETS: EpithetEntry[] = [
+  { masc: 'pelagicus', fem: 'pelagica', neut: 'pelagicum', english: 'Pelagic' },
+  { masc: 'marinus', fem: 'marina', neut: 'marinum', english: 'Coastal' },
+  { masc: 'abyssalis', fem: 'abyssalis', neut: 'abyssale', english: 'Abyssal' },
+  { masc: 'thalassicus', fem: 'thalassica', neut: 'thalassicum', english: 'Oceanic' },
+];
+
+export const ARID_EPITHETS: EpithetEntry[] = [
+  { masc: 'eremicus', fem: 'eremica', neut: 'eremicum', english: 'Desert' },
+  { masc: 'xerophilus', fem: 'xerophila', neut: 'xerophilum', english: 'Drought-Resistant' },
+  { masc: 'saxatilis', fem: 'saxatilis', neut: 'saxatile', english: 'Lithic' },
+  { masc: 'arenarius', fem: 'arenaria', neut: 'arenarium', english: 'Dune' },
+];
+
+export const STROMATOLITE_EPITHETS: EpithetEntry[] = [
+  { masc: 'stromatolyticus', fem: 'stromatolytica', neut: 'stromatolyticum', english: 'Stromatolitic' },
+  { masc: 'edaphicus', fem: 'edaphica', neut: 'edaphicum', english: 'Soil-Bound' },
+  { masc: 'endolithicus', fem: 'endolithica', neut: 'endolithicum', english: 'Endolithic' },
+];
+
+/**
+ * Generates semantically aligned binomial scientific and English common names.
+ * Ensures:
+ * - Color prefix strictly matches pigment photobiology ("Chloro" is only green, "Chryso" gold, etc.)
+ * - Form suffix strictly matches morphology ("pteryx" only fronds, "dendron" trees, "stroma" mats)
+ * - Size epithet strictly matches scale ("grandis" only for large canopy trees >8m, "pumilus" for crusts <0.15m)
+ * - Latin and English names mirror each other's linguistic meaning.
+ */
+export function generateCoherentSpeciesName(params: {
+  regimeKey: 'IR' | 'Carotenoid' | 'Chlorophyll' | 'UV' | 'Cryo' | 'Hydrocarbon';
+  formCategory: PlantFormCategory;
+  isMulticellular: boolean;
+  scaledHeight: number;
+  nativeBiomeIds: number[];
+  speciesIndex: number;
+  rng: () => number;
+  usedScientificNames?: Set<string>;
+  usedCommonNames?: Set<string>;
+}): { scientificName: string; commonName: string } {
+  const {
+    regimeKey,
+    formCategory,
+    isMulticellular,
+    scaledHeight,
+    nativeBiomeIds,
+    speciesIndex,
+    rng,
+    usedScientificNames,
+    usedCommonNames,
+  } = params;
+
+  // 1. Color prefix matching the pigment regime
+  const colorList = COLOR_TAXONOMY[regimeKey] || COLOR_TAXONOMY.Chlorophyll;
+  const colorEntry = colorList[(speciesIndex + Math.floor(rng() * colorList.length)) % colorList.length];
+
+  // 2. Form suffix matching morphology
+  const suffixList = !isMulticellular
+    ? UNICELLULAR_FORM_SUFFIXES
+    : MULTICELLULAR_FORM_SUFFIXES[formCategory] || MULTICELLULAR_FORM_SUFFIXES.Tree;
+  const formEntry = suffixList[(speciesIndex + Math.floor(rng() * suffixList.length)) % suffixList.length];
+
+  // Genus: ColorPrefix + FormSuffix (e.g. Chlorodendron, Cryostroma, Xanthopteris)
+  const genus = `${colorEntry.prefix}${formEntry.suffix}`;
+
+  // 3. Candidate epithets pool adhering to scale and habitat
+  const epithetPool: EpithetEntry[] = [];
+
+  const hasVolcanic = nativeBiomeIds.some(id => id === 14 || id === 15 || id === 22);
+  const hasCryo = nativeBiomeIds.some(id => id === 6 || id === 7) || regimeKey === 'Cryo';
+  const hasAquatic = nativeBiomeIds.some(id => id === 2 || id === 3 || id === 23) || formCategory === 'Kelp';
+  const hasArid = nativeBiomeIds.some(id => id === 9 || id === 10 || id === 11);
+
+  if (hasVolcanic) epithetPool.push(...VOLCANIC_EPITHETS);
+  if (hasCryo) epithetPool.push(...CRYO_EPITHETS);
+  if (hasAquatic) epithetPool.push(...AQUATIC_EPITHETS);
+  if (hasArid) epithetPool.push(...ARID_EPITHETS);
+  if (!isMulticellular) epithetPool.push(...STROMATOLITE_EPITHETS);
+
+  // Strictly enforce size-aligned epithets
+  if (scaledHeight < 0.15) {
+    epithetPool.push(...MICRO_EPITHETS);
+  } else if (scaledHeight > 8.0) {
+    epithetPool.push(...LARGE_EPITHETS);
+  } else {
+    epithetPool.push(...MEDIUM_EPITHETS);
+  }
+
+  // Pick unique epithet where possible
+  let chosenEpithet = pickRandom(epithetPool, rng);
+  for (let attempt = 0; attempt < epithetPool.length; attempt++) {
+    const candidate = epithetPool[(attempt + Math.floor(rng() * epithetPool.length)) % epithetPool.length];
+    const candidateLatin =
+      formEntry.gender === 'masc'
+        ? candidate.masc
+        : formEntry.gender === 'fem'
+        ? candidate.fem
+        : candidate.neut;
+    const testSci = `${genus} ${candidateLatin}`;
+    if (!usedScientificNames || !usedScientificNames.has(testSci)) {
+      chosenEpithet = candidate;
+      break;
+    }
+  }
+
+  const epithetLatin =
+    formEntry.gender === 'masc'
+      ? chosenEpithet.masc
+      : formEntry.gender === 'fem'
+      ? chosenEpithet.fem
+      : chosenEpithet.neut;
+
+  const scientificName = `${genus} ${epithetLatin}`;
+
+  // 4. English common name strictly reflecting the exact Latin components
+  const englishNoun = pickRandom(formEntry.englishNouns, rng);
+  let commonName: string;
+  if (englishNoun.toLowerCase().includes(chosenEpithet.english.toLowerCase())) {
+    commonName = `${colorEntry.englishAdj} ${englishNoun}`;
+  } else {
+    commonName = `${chosenEpithet.english} ${colorEntry.englishAdj} ${englishNoun}`;
+  }
+
+  if (usedScientificNames) usedScientificNames.add(scientificName);
+  if (usedCommonNames) usedCommonNames.add(commonName);
+
+  return { scientificName, commonName };
+}
 
 /**
  * Derives pigment regime key based on star temperature and solvent.
@@ -521,6 +772,9 @@ export function generatePlantEcosystem(params: {
   let minCanopyH = 999;
   let maxCanopyH = 0;
 
+  const usedScientificNames = new Set<string>();
+  const usedCommonNames = new Set<string>();
+
   for (let i = 0; i < selectedArchetypes.length; i++) {
     const arch = selectedArchetypes[i];
     const specRng = createSeedRng((seed * 73 + i * 1993) >>> 0);
@@ -538,18 +792,18 @@ export function generatePlantEcosystem(params: {
     const colorIdx = i % pigmentInfo.baseHexColors.length;
     const baseColor = pigmentInfo.baseHexColors[colorIdx];
 
-    // Scientific name
-    const genus = pickRandom(GENUS_PREFIXES, specRng) + pickRandom(GENUS_SUFFIXES, specRng);
-    const epithet = pickRandom(SPECIES_EPITHETS, specRng);
-    const scientificName = `${genus} ${epithet}`;
-
-    // Common name
-    const adjPalette = COMMON_ADJECTIVES_BY_SPECTRUM[pigmentInfo.regimeKey] || COMMON_ADJECTIVES_BY_SPECTRUM.Chlorophyll;
-    const unicellularNouns = ['Algal-Mat', 'Soil-Crust', 'Biofilm-Weave', 'Turf-Colony', 'Stromatolite-Crust', 'Plains-Biofilm'];
-    const nounPalette = !isMulticellular
-      ? unicellularNouns
-      : COMMON_NOUNS_BY_FORM[arch.formCategory] || COMMON_NOUNS_BY_FORM.Tree;
-    const commonName = `${pickRandom(adjPalette, specRng)} ${pickRandom(nounPalette, specRng)}`;
+    // Semantically aligned Latin binomial and English common names
+    const { scientificName, commonName } = generateCoherentSpeciesName({
+      regimeKey: pigmentInfo.regimeKey,
+      formCategory: arch.formCategory,
+      isMulticellular,
+      scaledHeight,
+      nativeBiomeIds: arch.nativeBiomes.map(b => b.id),
+      speciesIndex: i,
+      rng: specRng,
+      usedScientificNames,
+      usedCommonNames,
+    });
 
     // Canopy coverage %
     const coverage = Math.round(10 + specRng() * 25);
