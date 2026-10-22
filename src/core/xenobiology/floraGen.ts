@@ -117,6 +117,8 @@ export const COLOR_TAXONOMY: Record<string, ColorPrefixEntry[]> = {
     { prefix: 'Gelido', englishAdj: 'Glacial' },
     { prefix: 'Glacio', englishAdj: 'Indigo-Ice' },
     { prefix: 'Ammonio', englishAdj: 'Amethyst-Frost' },
+    { prefix: 'Iantho', englishAdj: 'Violet' },
+    { prefix: 'Porphyro', englishAdj: 'Amethyst' },
   ],
   Hydrocarbon: [
     { prefix: 'Carbo', englishAdj: 'Bitumen' },
@@ -259,7 +261,7 @@ export function generateCoherentSpeciesName(params: {
   rng: () => number;
   usedScientificNames?: Set<string>;
   usedCommonNames?: Set<string>;
-}): { scientificName: string; commonName: string } {
+}): { scientificName: string; commonName: string; colorAdjective: string } {
   const {
     regimeKey,
     formCategory,
@@ -368,7 +370,7 @@ export function generateCoherentSpeciesName(params: {
   if (usedScientificNames) usedScientificNames.add(finalScientificName);
   if (usedCommonNames) usedCommonNames.add(finalCommonName);
 
-  return { scientificName: finalScientificName, commonName: finalCommonName };
+  return { scientificName: finalScientificName, commonName: finalCommonName, colorAdjective: colorEntry.englishAdj };
 }
 
 /**
@@ -395,8 +397,8 @@ export function getPigmentRegime(
     return {
       regimeKey: 'Cryo',
       trophicType: 'Cryogenic Psychrophilic Photoautotroph',
-      pigmentName: 'Cryogenic Polyphenols & Pyrroles (Violet-Teal)',
-      baseHexColors: ['#6d328f', '#512373', '#38687a', '#2f5466', '#7e3fa6']
+      pigmentName: 'Cryogenic Polyphenols & Rhodopsins (Deep Violet)',
+      baseHexColors: ['#6d328f', '#512373', '#5a2278', '#45185e', '#7e3fa6']
     };
   }
 
@@ -863,7 +865,7 @@ export function generatePlantEcosystem(params: {
       fieldNote: (biomes) => `Cryogenic microbial mat encrusting frozen nitrogen plains and tectonic linea fractures across ${biomes}.`,
       adaptations: [
         'Metabolism active down to 75 Kelvin utilizing cryogenic solvent eutectic mixtures',
-        'Dense purplish-teal pyrrole complexes harvesting faint reflected solar photons',
+        'Dense light-harvesting antenna complexes tuned to faint reflected solar photons',
         'Flexible liposome membranes remaining fluid in supercooled liquid nitrogen',
       ],
     },
@@ -908,10 +910,10 @@ export function generatePlantEcosystem(params: {
         'Bioluminescent flash responses deterring nocturnal micro-grazers',
       ],
     },
-    // 8. Coastal Cyanobacterial Mat (Aquatic / Coast)
+    // 8. Coastal Phototrophic Mat (Aquatic / Coast)
     {
       formCategory: 'Mat',
-      growthForm: 'Estuarine Coastal Cyanobacterial Mat',
+      growthForm: 'Estuarine Coastal Phototrophic Mat',
       habitatType: 'aquatic',
       baseHeightM: 0.015,
       baseSpreadM: 5.0,
@@ -944,7 +946,7 @@ export function generatePlantEcosystem(params: {
       fieldNote: (biomes) => `Forms iridescent lipid biofilm slicks across open ocean currents in ${biomes}.`,
       adaptations: [
         'Hydrophobic lipid matrix keeping cell colonies floating on surface water tension',
-        'UV-quenching carotenoid shields protecting against unshielded pelagic sun',
+        'UV-quenching photoprotective pigment shields protecting against unshielded pelagic sun',
         'Direct uptake of atmospheric aerosols and dissolved ocean nutrients',
       ],
     },
@@ -985,7 +987,7 @@ export function generatePlantEcosystem(params: {
       adaptations: [
         'Luciferin flash deterrence startling nocturnal planktivorous micro-grazers',
         'Positive phototaxis flagellar motors positioning cells at optimal light depths',
-        'Carotenoid-dense lipid stores protecting nuclear DNA from solar ultraviolet rays',
+        'Photoprotective lipid stores shielding cellular structures from solar ultraviolet rays',
       ],
     },
     // 12. Benthic Siliceous Diatomaceous Film (Aquatic: 1, 2, 23)
@@ -1001,7 +1003,7 @@ export function generatePlantEcosystem(params: {
       ],
       compatibleBiomeIds: [1, 2, 23],
       reproductionMethod: 'Auxospore enlargement and benthic siliceous frustule division',
-      fieldNote: (biomes) => `Golden-amber micro-algal film coating shallow seabed mineral sands in ${biomes}.`,
+      fieldNote: (biomes) => `Dense benthic micro-algal film coating shallow seabed mineral sands in ${biomes}.`,
       adaptations: [
         'Nanostructured porous silica shells providing structural resilience under bottom currents',
         'Gliding motility along secreted polysaccharide tracks to avoid burial by sediment',
@@ -1048,10 +1050,10 @@ export function generatePlantEcosystem(params: {
         'Chemoautotrophic ATP generation powered by dissolved volcanic hydrogen-sulfide',
       ],
     },
-    // 15. Intertidal Halophilic Carotenoid Crust (Amphibious/Coast: 2, 3, 22)
+    // 15. Intertidal Halophilic Extremophile Crust (Amphibious/Coast: 2, 3, 22)
     {
       formCategory: 'Mat',
-      growthForm: 'Intertidal Halophilic Carotenoid Crust',
+      growthForm: 'Intertidal Halophilic Extremophile Crust',
       habitatType: 'amphibious',
       baseHeightM: 0.006,
       baseSpreadM: 4.5,
@@ -1061,9 +1063,9 @@ export function generatePlantEcosystem(params: {
       ],
       compatibleBiomeIds: [2, 3, 22],
       reproductionMethod: 'Tidal wash spore dispersal and mucilage sheath expansion',
-      fieldNote: (biomes) => `Vibrant crimson-orange microbial crust binding hypersaline tidal flats and lagoons in ${biomes}.`,
+      fieldNote: (biomes) => `Resilient microbial crust binding hypersaline tidal flats and lagoons in ${biomes}.`,
       adaptations: [
-        'High bacteriorhodopsin and carotenoid pigments shielding against solar ultraviolet glare',
+        'High-density photoprotective pigments shielding against solar ultraviolet glare',
         'Osmolyte trehalose accumulation buffering cells against fluctuating marine salinity',
         'Desiccation-resistant spore sheets surviving complete low-tide sun-baking',
       ],
@@ -1283,7 +1285,7 @@ export function generatePlantEcosystem(params: {
       adaptations: [
         'Ultra-flexible collagenous stipes trailing in ocean currents without snapping',
         'Bioluminescent warning flashes deterring deep pelagic herbivores',
-        'High-efficiency diffuse blue-green light harvesting in deep photic layers',
+        'High-efficiency diffuse light-harvesting complexes tuned to deep photic layers',
       ],
     },
     // 10. Sub-Ice Cryophilic Hanging Frond (Aquatic / Ice shelf: 8, 1, 2, 21)
@@ -1407,7 +1409,7 @@ export function generatePlantEcosystem(params: {
       adaptations: [
         'Concentrated glycerol-trehalose antifreeze sap remaining fluid at 80 Kelvin',
         'High-tensile fibrous holdfasts locking into cryogenic ice fissures',
-        'Low-albedo purplish-teal foliage absorbing diffuse infrared thermal radiation from sub-surface vents',
+        'Low-albedo foliage absorbing diffuse infrared thermal radiation from sub-surface vents',
       ],
     },
     // 16. Nitrogen-Plains Cryo-Cushion (Cryo: 18, 21, 8, 7, 13)
@@ -1699,7 +1701,7 @@ export function generatePlantEcosystem(params: {
     const nativeBiomeNames = resolvedBiomes.map(b => b.name);
 
     // Semantically aligned Latin binomial and English common names
-    const { scientificName, commonName } = generateCoherentSpeciesName({
+    const { scientificName, commonName, colorAdjective } = generateCoherentSpeciesName({
       regimeKey: pigmentInfo.regimeKey,
       formCategory: arch.formCategory,
       isMulticellular,
@@ -1714,7 +1716,20 @@ export function generatePlantEcosystem(params: {
     // Canopy coverage %
     const coverage = Math.round(10 + specRng() * 25);
 
-    const descNote = arch.fieldNote(nativeBiomeNames.join(', '));
+    // Sanitize any potential color mentions in description and adaptations to strictly align with this species' assigned color
+    const descNote = arch.fieldNote(nativeBiomeNames.join(', '))
+      .replace(/purplish-teal/gi, colorAdjective.toLowerCase())
+      .replace(/golden-amber/gi, colorAdjective.toLowerCase())
+      .replace(/crimson-orange/gi, colorAdjective.toLowerCase())
+      .replace(/blue-green/gi, colorAdjective.toLowerCase());
+
+    const sanitizedAdaptations = arch.adaptations.map(adapt => {
+      return adapt
+        .replace(/purplish-teal/gi, colorAdjective.toLowerCase())
+        .replace(/golden-amber/gi, colorAdjective.toLowerCase())
+        .replace(/crimson-orange/gi, colorAdjective.toLowerCase())
+        .replace(/blue-green/gi, colorAdjective.toLowerCase());
+    });
 
     speciesList.push({
       id: `flora_${seed}_${i}`,
@@ -1732,7 +1747,7 @@ export function generatePlantEcosystem(params: {
       nativeBiomeIds,
       nativeBiomeNames,
       canopyCoveragePct: coverage,
-      adaptations: arch.adaptations,
+      adaptations: sanitizedAdaptations,
       description: descNote,
     });
   }
