@@ -10,6 +10,8 @@ import {
   Hexagon,
   Layers,
   Sprout,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { RealisticPlanetBody } from '../../../core/generation/realisticStarGen';
 import { RealisticMoon } from '../../../types/astrophysics';
@@ -49,6 +51,8 @@ interface FirstPersonSurfaceViewProps {
   onSwitchToBlockView: () => void;
   onToggleFlora?: () => void;
   isFloraOpen?: boolean;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }
 
 type CameraHeightMode = 'walk' | 'skim' | 'flight';
@@ -85,6 +89,8 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
   onSwitchToBlockView,
   onToggleFlora,
   isFloraOpen,
+  isFullscreen,
+  onToggleFullscreen,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -2191,6 +2197,22 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
             <RotateCcw className="w-3 h-3" />
             Reset
           </button>
+
+          {onToggleFullscreen && (
+            <button
+              type="button"
+              onClick={onToggleFullscreen}
+              className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
+                isFullscreen
+                  ? 'bg-purple-900/70 border-purple-400 text-purple-200'
+                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+              }`}
+              title={isFullscreen ? 'Exit Fullscreen' : 'Toggle Fullscreen'}
+            >
+              {isFullscreen ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+              {isFullscreen ? 'Exit' : 'Fullscreen'}
+            </button>
+          )}
         </div>
       </div>
 

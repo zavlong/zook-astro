@@ -11,6 +11,8 @@ import {
   Hexagon,
   Sprout,
   Sparkles,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import {
   RealisticPlanetBody,
@@ -86,6 +88,33 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
   const mapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const globeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const surfaceContainerRef = useRef<HTMLDivElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      if (surfaceContainerRef.current?.requestFullscreen) {
+        surfaceContainerRef.current.requestFullscreen().catch(() => {
+          setIsFullscreen((prev) => !prev);
+        });
+      } else {
+        setIsFullscreen((prev) => !prev);
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+      setIsFullscreen(false);
+    }
+  };
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
 
   // Generate physics surface model
   const surfaceModel = useMemo<PlanetarySurfaceModel>(() => {
@@ -507,10 +536,15 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
   return (
     <div
-      className="flex flex-col gap-4 font-mono text-xs select-none"
+      ref={surfaceContainerRef}
+      className={`flex flex-col gap-4 font-mono text-xs select-none ${
+        isFullscreen
+          ? 'fixed inset-0 z-50 bg-[#070b12] p-4 overflow-y-auto h-screen w-screen'
+          : ''
+      }`}
       style={{
-        contentVisibility: 'auto',
-        containIntrinsicSize: 'auto 720px',
+        contentVisibility: isFullscreen ? 'visible' : 'auto',
+        containIntrinsicSize: isFullscreen ? 'none' : 'auto 720px',
       }}
     >
       {/* Surface Navigation Toolbar */}
@@ -578,6 +612,24 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
             AI Surface Art
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className={`px-3 py-1.5 rounded-lg border font-bold flex items-center gap-1.5 transition cursor-pointer ${
+              isFullscreen
+                ? 'bg-purple-950/90 border-purple-400 text-purple-200 shadow-md shadow-purple-950/50'
+                : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white hover:border-slate-500'
+            }`}
+            title={isFullscreen ? 'Exit Fullscreen Surface View (Esc)' : 'Enter Fullscreen Surface View'}
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-3.5 h-3.5 text-purple-300" />
+            ) : (
+              <Maximize2 className="w-3.5 h-3.5 text-slate-300" />
+            )}
+            {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
           </button>
         </div>
 
@@ -879,6 +931,8 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             onBackToGlobe={() => setDisplayMode('globe')}
             onToggleFlora={() => setShowEcosystemPanel(prev => !prev)}
             isFloraOpen={showEcosystemPanel}
+            isFullscreen={isFullscreen}
+            onToggleFullscreen={toggleFullscreen}
           />
         ) : (
           <FirstPersonSurfaceView
@@ -900,6 +954,8 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             onSwitchToBlockView={() => setDisplayMode('terrain')}
             onToggleFlora={() => setShowEcosystemPanel(prev => !prev)}
             isFloraOpen={showEcosystemPanel}
+            isFullscreen={isFullscreen}
+            onToggleFullscreen={toggleFullscreen}
           />
         )}
       </div>
