@@ -963,6 +963,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             activeTile={selectedTile}
             planet={planet}
             moon={moon}
+            ecosystem={ecosystem}
             timeOfDayDeg={timeOfDayDeg}
             onChangeTimeOfDay={setTimeOfDayDeg}
             onSelectTile={(nextTile) =>

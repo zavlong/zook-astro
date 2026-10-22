@@ -40,6 +40,12 @@ import {
 } from './tileTerrainRasterizer';
 import { evaluateDetailedBiomeTexel } from './detailedBiomeTextures';
 import { onBiomeTexturesLoaded } from '../../../core/textures/biomeTextureAtlas';
+import {
+  generateTileTrees,
+  renderTileTrees,
+  ProceduralTree,
+} from './proceduralTrees';
+import { PlanetaryEcosystemSummary } from '../../../core/xenobiology/floraGen';
 
 interface LocalTileTerrainViewProps {
   surfaceModel: PlanetarySurfaceModel;
@@ -47,6 +53,7 @@ interface LocalTileTerrainViewProps {
   activeTile: GoldbergPlanetaryTile;
   planet: RealisticPlanetBody;
   moon?: RealisticMoon | null;
+  ecosystem?: PlanetaryEcosystemSummary;
   timeOfDayDeg: number;
   onChangeTimeOfDay: (deg: number) => void;
   onSelectTile: (tile: GoldbergPlanetaryTile) => void;
@@ -97,6 +104,7 @@ interface TileMeshData {
   mipBumpX: Int8Array;
   mipBumpZ: Int8Array;
   tileSeed: number;
+  trees: ProceduralTree[];
 }
 
 
@@ -115,6 +123,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
   activeTile,
   planet,
   moon,
+  ecosystem,
   timeOfDayDeg,
   onChangeTimeOfDay,
   onSelectTile,
@@ -1353,6 +1362,17 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       }
     }
 
+    // Procedural 3D Trees for forested biomes if large land plants exist
+    const trees = generateTileTrees({
+      tile: activeTile,
+      surfaceModel,
+      ecosystem,
+      tileSeed,
+      sampleHeight: (px, pz) => sampleHeightOnly(px, pz),
+      sides,
+      corners,
+    });
+
     const result = {
       sides,
       corners,
@@ -1376,6 +1396,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       mipBumpX,
       mipBumpZ,
       tileSeed,
+      trees,
     };
 
     if (tileMeshCache.size >= 16) {
@@ -1385,7 +1406,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     tileMeshCache.set(cacheKey, result);
 
     return result;
-  }, [surfaceModel, activeTile, neighborTiles, pBarAtmo, hasAtmosphere, textureVersion]);
+  }, [surfaceModel, activeTile, neighborTiles, pBarAtmo, hasAtmosphere, textureVersion, ecosystem]);
 
   // Render the Per-Pixel Textured & Bump-Mapped 3D Hexagonal Biome Block + Infinite Perspective Plane to Canvas
   useEffect(() => {
@@ -1791,6 +1812,25 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
       ctx.closePath();
       ctx.stroke();
       ctx.restore();
+
+      // 4b. Render 3D Procedural Trees in Forested Biomes
+      if (meshData.trees && meshData.trees.length > 0) {
+        renderTileTrees(
+          ctx,
+          meshData.trees,
+          project3D,
+          {
+            lx,
+            ly,
+            lz,
+            isNight,
+            isSunset,
+            verticalExag,
+          },
+          rotPitch,
+          scale
+        );
+      }
 
       // 5. Render 3D Elevated Cloud Layer & Atmospheric Veil over the Terrain Block
       if (showClouds3D && cloudPuffs.length > 0) {
