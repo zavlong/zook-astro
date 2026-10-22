@@ -606,3 +606,18 @@ export function generatePlantEcosystem(params: {
 export function getSpeciesForBiome(speciesList: XenofloraSpecies[], biomeId: number): XenofloraSpecies[] {
   return speciesList.filter(s => s.nativeBiomeIds.includes(biomeId));
 }
+
+/**
+ * Filter species that are native to a tile's biomes (both primary and secondary ecotone biomes).
+ */
+export function getSpeciesForTileBiomes(
+  speciesList: XenofloraSpecies[],
+  primaryBiomeId: number,
+  secondaryBiomeId?: number | null
+): XenofloraSpecies[] {
+  return speciesList.filter(s =>
+    s.nativeBiomeIds.includes(primaryBiomeId) ||
+    (secondaryBiomeId !== undefined && secondaryBiomeId !== null && s.nativeBiomeIds.includes(secondaryBiomeId))
+  );
+}
+

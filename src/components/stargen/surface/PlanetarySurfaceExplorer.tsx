@@ -777,6 +777,8 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               })
             }
             onBackToGlobe={() => setDisplayMode('globe')}
+            onToggleFlora={() => setShowEcosystemPanel(prev => !prev)}
+            isFloraOpen={showEcosystemPanel}
           />
         ) : (
           <FirstPersonSurfaceView
@@ -796,6 +798,8 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               })
             }
             onSwitchToBlockView={() => setDisplayMode('terrain')}
+            onToggleFlora={() => setShowEcosystemPanel(prev => !prev)}
+            isFloraOpen={showEcosystemPanel}
           />
         )}
       </div>
@@ -880,6 +884,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       <SurfaceEcosystemPanel
         ecosystem={ecosystem}
         activeTile={selectedTile}
+        isTileView={displayMode === 'terrain' || displayMode === 'horizon'}
         isOpen={showEcosystemPanel}
         onClose={() => setShowEcosystemPanel(false)}
       />

@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   Cloud,
   ZoomIn,
+  Sprout,
 } from 'lucide-react';
 import { RealisticPlanetBody } from '../../../core/generation/realisticStarGen';
 import { RealisticMoon } from '../../../types/astrophysics';
@@ -48,6 +49,8 @@ interface LocalTileTerrainViewProps {
   onChangeTimeOfDay: (deg: number) => void;
   onSelectTile: (tile: GoldbergPlanetaryTile) => void;
   onBackToGlobe: () => void;
+  onToggleFlora?: () => void;
+  isFloraOpen?: boolean;
 }
 
 interface CloudPuff3D {
@@ -112,6 +115,8 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
   onChangeTimeOfDay,
   onSelectTile,
   onBackToGlobe,
+  onToggleFlora,
+  isFloraOpen,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -2097,6 +2102,22 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
             <Layers className="w-3 h-3" />
             Local Geology
           </button>
+
+          {onToggleFlora && (
+            <button
+              type="button"
+              onClick={onToggleFlora}
+              className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
+                isFloraOpen
+                  ? 'bg-emerald-900/80 border-emerald-400 text-emerald-200 shadow-sm'
+                  : 'bg-emerald-950/60 border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-900/50'
+              }`}
+              title="Toggle Tile Indigenous Xenoflora & Species Catalog"
+            >
+              <Sprout className="w-3 h-3 text-emerald-400" />
+              Tile Flora
+            </button>
+          )}
 
           <button
             type="button"
