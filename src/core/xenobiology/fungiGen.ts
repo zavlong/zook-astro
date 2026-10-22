@@ -186,36 +186,15 @@ export const FUNGI_NICHE_EPITHETS: FungiEpithetEntry[] = [
   { masc: 'volcanicus', fem: 'volcanica', neut: 'volcanicum', english: 'Volcanic' },
 ];
 
-// Biome categorization
-const WATER_BIOME_IDS = new Set<number>([0, 1, 2, 17, 23]);
-const SOLID_LAND_BIOME_IDS = new Set<number>([
-  3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 18, 21, 22
-]);
-
-const BIOME_NAMES: Record<number, string> = {
-  0: 'Abyssal Trench',
-  1: 'Deep Ocean',
-  2: 'Continental Shelf / Shallows',
-  3: 'Coastal Alluvial Basin',
-  4: 'Lowland Silicate Plains',
-  5: 'Temperate Continental Basin',
-  6: 'High-Latitude Rocky Steppe',
-  7: 'Tundra / Permafrost',
-  8: 'Polar Glacial Ice',
-  9: 'Arid Steppe / Scrub',
-  10: 'Hyper-Arid Dunes / Desert',
-  11: 'High Plateau / Badlands',
-  12: 'Mountain Cordillera',
-  13: 'Alpine Glacial Peaks',
-  14: 'Basalt Volcanic Crust',
-  15: 'Active Lava Caldera & Fissure',
-  16: 'Regolith Impact Craterlands',
-  17: 'Hydrocarbon Methane Sea',
-  18: 'Cryovolcanic Nitrogen Plains',
-  21: 'Cryotectonic Ice Fissure (Linea)',
-  22: 'Active Volcanic Shield & Lava Caldera',
-  23: 'Algal Sea',
-};
+import {
+  CRYO_BIOME_IDS,
+  VOLCANIC_BIOME_IDS,
+  ARID_BIOME_IDS,
+  AQUATIC_BIOME_IDS,
+  SOLID_LAND_BIOME_IDS,
+  WATER_BIOME_IDS,
+  BIOME_NAMES,
+} from './floraGen';
 
 function createSeedRng(seed: number) {
   let s = seed >>> 0;
@@ -268,15 +247,19 @@ export function generateCoherentFungiName(params: {
   // 2. Epithet pool adhering to scale and habitat
   const epithetPool: FungiEpithetEntry[] = [];
 
-  const hasVolcanic = nativeBiomeIds.some(id => id === 14 || id === 15 || id === 22);
-  const hasCryo = nativeBiomeIds.some(id => id === 6 || id === 7 || id === 8);
-  const hasAquatic = nativeBiomeIds.some(id => id === 0 || id === 1 || id === 2 || id === 23);
+  const hasVolcanic = nativeBiomeIds.some(id => VOLCANIC_BIOME_IDS.has(id));
+  const hasCryo = nativeBiomeIds.some(id => CRYO_BIOME_IDS.has(id));
+  const hasAquatic = nativeBiomeIds.some(id => AQUATIC_BIOME_IDS.has(id));
+  const hasArid = nativeBiomeIds.some(id => ARID_BIOME_IDS.has(id));
 
   if (hasVolcanic) epithetPool.push({ masc: 'volcanicus', fem: 'volcanica', neut: 'volcanicum', english: 'Volcanic' });
   if (hasCryo) epithetPool.push({ masc: 'cryophilus', fem: 'cryophila', neut: 'cryophilum', english: 'Frost-Tolerant' });
   if (hasAquatic) {
     epithetPool.push({ masc: 'pelagicus', fem: 'pelagica', neut: 'pelagicum', english: 'Marine' });
     epithetPool.push({ masc: 'abyssalis', fem: 'abyssalis', neut: 'abyssale', english: 'Abyssal' });
+  }
+  if (hasArid) {
+    epithetPool.push({ masc: 'eremicus', fem: 'eremica', neut: 'eremicum', english: 'Desert' });
   }
 
   // Niche-based options
@@ -362,6 +345,7 @@ interface FungiArchetypeConfig {
   baseSpreadM: number;
   trophicType: string;
   nativeBiomes: { id: number; name: string }[];
+  compatibleBiomeIds: number[];
   reproductionMethod: string;
   fieldNote: (biomes: string) => string;
   adaptations: string[];
@@ -383,6 +367,7 @@ export function generateFungiEcosystem(params: {
   hasLand?: boolean;
   coveragePct?: number;
   biomeGrid?: Uint8Array;
+  surfaceTempK?: number;
 }): PlanetaryFungiSummary {
   const {
     seed,
@@ -392,6 +377,7 @@ export function generateFungiEcosystem(params: {
     pressureBar: _pressureBar = 1.0,
     solventKey = 'H2O',
     biomeGrid,
+    surfaceTempK,
   } = params;
 
   if (!hasBiosphere) {
@@ -414,6 +400,11 @@ export function generateFungiEcosystem(params: {
       presentBiomeIds.add(biomeGrid[i]);
     }
   }
+
+  // Detect whether this is an extreme cryogenic or volcanic world
+  const isAllCryoBiomes = presentBiomeIds.size > 0 && Array.from(presentBiomeIds).every(id => CRYO_BIOME_IDS.has(id));
+  const isAllVolcanicBiomes = presentBiomeIds.size > 0 && Array.from(presentBiomeIds).every(id => VOLCANIC_BIOME_IDS.has(id));
+  const isCryoWorld = isAllCryoBiomes || (surfaceTempK !== undefined && surfaceTempK < 215) || solventKey === 'NH3-H2O';
 
   // 2. Land & ocean presence
   let hasLand = params.hasLand;
@@ -447,10 +438,18 @@ export function generateFungiEcosystem(params: {
   const heightMultiplier = Math.pow(1.0 / g, 0.55);
 
   let structuralPolymer = isMulticellular ? 'Melanized Chitin & Beta-Glucan' : 'Cellular Glucosamine Biofilm';
-  if (solventKey === 'NH3-H2O') {
-    structuralPolymer = 'Cryo-Glycerol Chitosan Hydrogel';
+  if (isCryoWorld || solventKey === 'NH3-H2O') {
+    structuralPolymer = isMulticellular
+      ? 'Cryo-Glycerol Chitosan Hydrogel & Trehalose Matrix'
+      : 'Cryo-Active Glucosamine Biofilm';
   } else if (solventKey.toLowerCase().includes('methane')) {
-    structuralPolymer = 'Silica-Sclerotized Polycyclic Chitin';
+    structuralPolymer = isMulticellular
+      ? 'Silica-Sclerotized Polycyclic Chitin'
+      : 'Silica-Frustule Hydrocarbon Biofilm';
+  } else if (isAllVolcanicBiomes) {
+    structuralPolymer = isMulticellular
+      ? 'Silica-Sclerotized Pyritic Chitin'
+      : 'Thermophilic Mineral Biofilm';
   }
 
   // Number of fungal species to generate: randomly between 5 and 20 species
@@ -468,7 +467,7 @@ export function generateFungiEcosystem(params: {
 
   // Archetypes pool
   const archetypes: FungiArchetypeConfig[] = [
-    // 1. Bioluminescent Forest Gilled Parasol (Land)
+    // 1. Bioluminescent Forest Gilled Parasol (Temperate Land: 3, 4, 5, 12)
     {
       formCategory: 'Cap',
       growthForm: 'Bioluminescent Parasol Gilled-Cap',
@@ -480,6 +479,7 @@ export function generateFungiEcosystem(params: {
         { id: 4, name: 'Lowland Silicate Plains' },
         { id: 5, name: 'Temperate Continental Basin' },
       ],
+      compatibleBiomeIds: [3, 4, 5, 12],
       reproductionMethod: 'Night-glowing basidiospores attracted by atmospheric air currents',
       fieldNote: (biomes) => `Bioluminescent gilled cap carpeting forest humus and decomposing plant debris across ${biomes}.`,
       adaptations: [
@@ -488,7 +488,7 @@ export function generateFungiEcosystem(params: {
         'Hydrophobic cap cuticle shedding seasonal rainstorms',
       ],
     },
-    // 2. Woody Trunk Bracket Polypore (Land)
+    // 2. Woody Trunk Bracket Polypore (Temperate/Steppe: 3, 4, 5, 6, 12)
     {
       formCategory: 'Bracket',
       growthForm: 'Perennial Tiered Shelf-Polypore',
@@ -501,6 +501,7 @@ export function generateFungiEcosystem(params: {
         { id: 5, name: 'Temperate Continental Basin' },
         { id: 6, name: 'High-Latitude Rocky Steppe' },
       ],
+      compatibleBiomeIds: [3, 4, 5, 6, 12],
       reproductionMethod: 'Passive microscopic spore drift from downward-facing hymenial pores',
       fieldNote: (biomes) => `Hard, woody bracket shelves growing in horizontal tiers along living and fallen trunks in ${biomes}.`,
       adaptations: [
@@ -509,7 +510,7 @@ export function generateFungiEcosystem(params: {
         'Antifungal chemical secretions defending substrate territory from competitor molds',
       ],
     },
-    // 3. Giant Ballistic Spore Puffball (Land)
+    // 3. Giant Ballistic Spore Puffball (Basin/Arid: 4, 5, 9, 11)
     {
       formCategory: 'Puffball',
       growthForm: 'Giant Ostiolate Ballistic Puffball',
@@ -522,6 +523,7 @@ export function generateFungiEcosystem(params: {
         { id: 4, name: 'Lowland Silicate Plains' },
         { id: 9, name: 'Arid Steppe / Scrub' },
       ],
+      compatibleBiomeIds: [4, 5, 9, 11],
       reproductionMethod: 'Pneumatic shockwave puffs discharging clouds of millions of spores',
       fieldNote: (biomes) => `Large bulbous puffball expanding on open ground in ${biomes}, puffing spores when triggered by wind or touch.`,
       adaptations: [
@@ -530,7 +532,7 @@ export function generateFungiEcosystem(params: {
         'Rapid fruiting body inflation absorbing ground moisture after planetary rain events',
       ],
     },
-    // 4. Branching Antler Coral Fungus (Land)
+    // 4. Branching Antler Coral Fungus (Boreal/Alpine: 5, 6, 7, 12, 13)
     {
       formCategory: 'Coral',
       growthForm: 'Branching Antler Clavarioid Coral',
@@ -543,6 +545,7 @@ export function generateFungiEcosystem(params: {
         { id: 7, name: 'Tundra / Permafrost' },
         { id: 5, name: 'Temperate Continental Basin' },
       ],
+      compatibleBiomeIds: [5, 6, 7, 12, 13],
       reproductionMethod: 'External spore release along ascending antler branch surfaces',
       fieldNote: (biomes) => `Intricately branched coral-like fungus rising from moss beds and rocky soils in ${biomes}.`,
       adaptations: [
@@ -551,7 +554,7 @@ export function generateFungiEcosystem(params: {
         'Deep mycelial tap-strands locking into rocky crevices',
       ],
     },
-    // 5. Deep Soil Mycorrhizal Rhizomorph Web (Land)
+    // 5. Deep Soil Mycorrhizal Rhizomorph Web (Forest/Plains: 3, 4, 5, 12)
     {
       formCategory: 'MycelialNet',
       growthForm: 'Subterranean Rhizomorph Communication Grid',
@@ -563,6 +566,7 @@ export function generateFungiEcosystem(params: {
         { id: 4, name: 'Lowland Silicate Plains' },
         { id: 5, name: 'Temperate Continental Basin' },
       ],
+      compatibleBiomeIds: [3, 4, 5, 12],
       reproductionMethod: 'Continuous underground hyphal runner expansion and nodular sclerotia',
       fieldNote: (biomes) => `Extensive underground network of cord-like mycelial cables linking root systems across ${biomes}.`,
       adaptations: [
@@ -571,7 +575,7 @@ export function generateFungiEcosystem(params: {
         'Melanized protective outer sheath insulating mycelial conduits from parasitic microbes',
       ],
     },
-    // 6. Fluorescent Chalice Spore Cup (Land / Marsh)
+    // 6. Fluorescent Chalice Spore Cup (Riparian/Alluvial: 2, 3, 4, 5)
     {
       formCategory: 'Cup',
       growthForm: 'Fluorescent Cup & Chalice Ascocarp',
@@ -583,6 +587,7 @@ export function generateFungiEcosystem(params: {
         { id: 3, name: 'Coastal Alluvial Basin' },
         { id: 4, name: 'Lowland Silicate Plains' },
       ],
+      compatibleBiomeIds: [2, 3, 4, 5],
       reproductionMethod: 'Hydro-ballistic spore shooting triggered by falling raindrops',
       fieldNote: (biomes) => `Vivid cup-shaped ascocarp nestled in moist silt and leaf litter in ${biomes}.`,
       adaptations: [
@@ -591,7 +596,7 @@ export function generateFungiEcosystem(params: {
         'UV-fluorescent pigment layer deterring micro-slug grazers',
       ],
     },
-    // 7. Radiotrophic Melanin-Absorber (Land - High Radiation / Badlands)
+    // 7. Radiotrophic Melanin-Absorber (High Radiation / Badlands: 9, 11, 14, 16)
     {
       formCategory: 'Puffball',
       growthForm: 'Radiotrophic Melano-Crust Fungus',
@@ -604,6 +609,7 @@ export function generateFungiEcosystem(params: {
         { id: 16, name: 'Regolith Impact Craterlands' },
         { id: 14, name: 'Basalt Volcanic Crust' },
       ],
+      compatibleBiomeIds: [9, 11, 14, 16],
       reproductionMethod: 'Hardened melanized chlamydospores released during thermal updrafts',
       fieldNote: (biomes) => `Jet-black radiotrophic fungus growing in unshielded high-radiation plateaus in ${biomes}, converting cosmic rays into chemical energy.`,
       adaptations: [
@@ -612,7 +618,7 @@ export function generateFungiEcosystem(params: {
         'Radical-scavenging carotenoid complexes preventing cellular oxidative stress',
       ],
     },
-    // 8. Lithotrophic Basalt Bio-Eroder (Land - Rock/Volcanic)
+    // 8. Lithotrophic Basalt Bio-Eroder (Volcanic/Regolith: 9, 11, 14, 15, 16, 22)
     {
       formCategory: 'MycelialNet',
       growthForm: 'Endolithic Rock-Etching Mycelium',
@@ -625,6 +631,7 @@ export function generateFungiEcosystem(params: {
         { id: 15, name: 'Active Lava Caldera & Fissure' },
         { id: 22, name: 'Active Volcanic Shield & Lava Caldera' },
       ],
+      compatibleBiomeIds: [9, 11, 14, 15, 16, 22],
       reproductionMethod: 'Microscopic hyphal fragmentation within expanding rock cracks',
       fieldNote: (biomes) => `Rock-boring mycelium dissolving volcanic minerals and etching basaltic bedrock in ${biomes}.`,
       adaptations: [
@@ -634,8 +641,182 @@ export function generateFungiEcosystem(params: {
       ],
     },
 
+    // --- CRYO WORLDS & SUB-ZERO GLACIAL FUNGI (Biomes: 18, 21, 8, 7, 13) ---
+    // 9. Cryotectonic Sub-Zero Ice-Cup (Cryo: 18, 21, 8, 7, 13)
+    {
+      formCategory: 'Cup',
+      growthForm: 'Cryotectonic Sub-Zero Ice-Cup',
+      habitatType: 'land',
+      baseHeightM: 0.3,
+      baseSpreadM: 0.4,
+      trophicType: 'Cryophilic Nitrogen-Seep Saprobe',
+      nativeBiomes: [
+        { id: 21, name: 'Cryotectonic Ice Fissure (Linea)' },
+        { id: 18, name: 'Cryovolcanic Nitrogen Plains' },
+      ],
+      compatibleBiomeIds: [18, 21, 8, 7, 13],
+      reproductionMethod: 'Cryo-spores extruded into sub-glacial linea vents',
+      fieldNote: (biomes) => `Clusters along sub-surface ice fractures and cryotectonic rifts in ${biomes}, digesting aerosol organic fallout.`,
+      adaptations: [
+        'Cryo-protective trehalose sap preventing cell lysis down to 80 Kelvin',
+        'Hyphal anchoring pads gripping nitrogen and methane ice crystals',
+        'Enzymatic recycling of cryovolcanic organic deposits',
+      ],
+    },
+    // 10. Cryogenic Nitrogen-Plains Mycelial Felt (Cryo: 18, 21, 8, 7, 13)
+    {
+      formCategory: 'MycelialNet',
+      growthForm: 'Cryogenic Nitrogen-Plains Mycelial Felt',
+      habitatType: 'land',
+      baseHeightM: 0.03,
+      baseSpreadM: 18.0,
+      trophicType: 'Sub-Zero Cryo-Polymer Decomposer',
+      nativeBiomes: [
+        { id: 18, name: 'Cryovolcanic Nitrogen Plains' },
+        { id: 21, name: 'Cryotectonic Ice Fissure (Linea)' },
+      ],
+      compatibleBiomeIds: [18, 21, 8, 7, 13],
+      reproductionMethod: 'Sub-ice hyphal runner expansion and cryo-dormant sclerotia',
+      fieldNote: (biomes) => `Extensive frost-resistant mycelial web weaving through frozen nitrogen crusts in ${biomes}.`,
+      adaptations: [
+        'Flexible polyunsaturated fatty acid membranes remaining functional in liquid nitrogen',
+        'Symbiotic exchange of trace ammonia and methane with cryo-lichens',
+        'Melanized hyphal cables conducting geothermal heat pulses along tectonic rifts',
+      ],
+    },
+    // 11. Glacial Cryo-Puffball (Cryo: 18, 21, 8, 7, 13)
+    {
+      formCategory: 'Puffball',
+      growthForm: 'Glacial Cryo-Puffball',
+      habitatType: 'land',
+      baseHeightM: 0.9,
+      baseSpreadM: 1.1,
+      trophicType: 'Cryo-Dormant Spore Reservoired Saprobe',
+      nativeBiomes: [
+        { id: 18, name: 'Cryovolcanic Nitrogen Plains' },
+        { id: 8, name: 'Polar Glacial Ice' },
+      ],
+      compatibleBiomeIds: [18, 21, 8, 7, 13],
+      reproductionMethod: 'Sublimation-triggered ostiole rupture releasing cold-active spores',
+      fieldNote: (biomes) => `Elastic, frozen puffball releasing clouds of cryo-protected spores during rare sublimative warming periods in ${biomes}.`,
+      adaptations: [
+        'Elastic freeze-tolerant peridium expanding under nitrogen vapor expansion',
+        'Vitreous spore coatings resisting cosmic rays during cryogenic dormancy',
+        'Glycerol hydrogel interior preventing brittle fracture in glacial blizzards',
+      ],
+    },
+    // 12. Sub-Glacial Shelf-Bracket (Cryo: 18, 21, 8, 7, 13)
+    {
+      formCategory: 'Bracket',
+      growthForm: 'Sub-Glacial Shelf-Bracket',
+      habitatType: 'land',
+      baseHeightM: 0.6,
+      baseSpreadM: 0.9,
+      trophicType: 'Glacial Ice-Matrix Endolith',
+      nativeBiomes: [
+        { id: 21, name: 'Cryotectonic Ice Fissure (Linea)' },
+        { id: 8, name: 'Polar Glacial Ice' },
+      ],
+      compatibleBiomeIds: [18, 21, 8, 7, 13],
+      reproductionMethod: 'Downward pore ejection into cryogenic ice chasms',
+      fieldNote: (biomes) => `Hardened bracket conk protruding from vertical ice walls and linea fissures in ${biomes}.`,
+      adaptations: [
+        'Biomineralized silica-chitin shell anchored directly into bedrock ice',
+        'Downward-directed spore tubes sheltered from raging surface ice winds',
+        'Extracellular ice-structuring proteins sculpting micro-pockets in the ice shelf',
+      ],
+    },
+
+    // --- VOLCANIC CALDERA FUNGI (Biomes: 14, 15, 22) ---
+    // 13. Volcanic Fumarole Pyritic Coral (Volcanic: 14, 15, 22)
+    {
+      formCategory: 'Coral',
+      growthForm: 'Volcanic Fumarole Pyritic Coral Fungus',
+      habitatType: 'land',
+      baseHeightM: 1.2,
+      baseSpreadM: 0.8,
+      trophicType: 'Chemosynthetic Sulfur-Oxidizing Geothermal Mycota',
+      nativeBiomes: [
+        { id: 15, name: 'Active Lava Caldera & Fissure' },
+        { id: 22, name: 'Active Volcanic Shield & Lava Caldera' },
+      ],
+      compatibleBiomeIds: [14, 15, 22],
+      reproductionMethod: 'Scalding hydrothermal steam jet spore ejection',
+      fieldNote: (biomes) => `Sulfur-encrusted antler coral thriving at the edges of active volcanic vents and calderas in ${biomes}.`,
+      adaptations: [
+        'Thermostable enzymes withstanding temperatures up to 390 Kelvin',
+        'Pyritic mineral sleeves shielding hyphae from acid gas erosion',
+        'Chemolithotrophic energy derivation from gaseous volcanic hydrogen sulfide',
+      ],
+    },
+    // 14. Caldera Tephra Basalt-Cup (Volcanic: 14, 15, 22)
+    {
+      formCategory: 'Cup',
+      growthForm: 'Caldera Tephra Basalt-Cup',
+      habitatType: 'land',
+      baseHeightM: 0.25,
+      baseSpreadM: 0.35,
+      trophicType: 'Pyrophytic Mineral Saprobe',
+      nativeBiomes: [
+        { id: 14, name: 'Basalt Volcanic Crust' },
+        { id: 22, name: 'Active Volcanic Shield & Lava Caldera' },
+      ],
+      compatibleBiomeIds: [14, 15, 22],
+      reproductionMethod: 'Heat-activated asci catapulting spores across lava flows',
+      fieldNote: (biomes) => `Heat-resistant cup fungus colonizing warm basaltic fissures and volcanic cinder fields in ${biomes}.`,
+      adaptations: [
+        'Heat-triggered spore dehiscence activating after fresh lava flows cool below 360 K',
+        'Vitreous silicate lining preserving moisture on scorching basalt crusts',
+        'Direct chemical leaching of iron and sulfur from volcanic tephra',
+      ],
+    },
+
+    // --- ARID & DESERT REGOLITH FUNGI (Biomes: 9, 10, 11, 16) ---
+    // 15. Hyper-Arid Stalked Dune-Puffball (Arid: 9, 10, 11, 16)
+    {
+      formCategory: 'Puffball',
+      growthForm: 'Hyper-Arid Stalked Dune-Puffball',
+      habitatType: 'land',
+      baseHeightM: 1.5,
+      baseSpreadM: 0.6,
+      trophicType: 'Desiccation-Tolerant Sand Saprobe',
+      nativeBiomes: [
+        { id: 10, name: 'Hyper-Arid Dunes / Desert' },
+        { id: 9, name: 'Arid Steppe / Scrub' },
+      ],
+      compatibleBiomeIds: [9, 10, 11, 16],
+      reproductionMethod: 'Sand-scouring wind erosion tearing apical ostiole pore',
+      fieldNote: (biomes) => `Stalked desert puffball elevating its spore chamber above shifting sands in ${biomes}.`,
+      adaptations: [
+        'Rigid fibrous stalk lifting spore head above blowing dune grit',
+        'Anhydrobiotic spore cells surviving decades without liquid moisture',
+        'Subterranean hyphal anchor stabilizing dune sand grains into cohesive soil',
+      ],
+    },
+    // 16. Impact-Breccia Lithotrophic Mycelium (Arid/Craterlands: 9, 10, 11, 16)
+    {
+      formCategory: 'MycelialNet',
+      growthForm: 'Impact-Breccia Lithotrophic Mycelium',
+      habitatType: 'land',
+      baseHeightM: 0.02,
+      baseSpreadM: 14.0,
+      trophicType: 'Lithotrophic Regolith Bio-Eroder',
+      nativeBiomes: [
+        { id: 16, name: 'Regolith Impact Craterlands' },
+        { id: 11, name: 'High Plateau / Badlands' },
+      ],
+      compatibleBiomeIds: [9, 10, 11, 16],
+      reproductionMethod: 'Endolithic hyphal mining and drought-resistant chlamydospores',
+      fieldNote: (biomes) => `Network of rock-penetrating hyphae mining trace minerals within porous regolith in ${biomes}.`,
+      adaptations: [
+        'Endolithic acid-boring hyphae fracturing shock-metamorphosed mineral grains',
+        'Radiation-absorbing carotenoid and melanin sheaths guarding against cosmic rays',
+        'Hygroscopic cell wall polymers adsorbing micro-droplets of atmospheric dew',
+      ],
+    },
+
     // --- AQUATIC & PELAGIC FUNGI (For Ocean Worlds & Marine Biomes) ---
-    // 9. Pelagic Marine Snow Saprobe (Aquatic)
+    // 17. Pelagic Marine Snow Saprobe (Aquatic: 0, 1, 2, 17, 23)
     {
       formCategory: 'MycelialNet',
       growthForm: 'Pelagic Marine Snow Mycelial Veil',
@@ -648,6 +829,7 @@ export function generateFungiEcosystem(params: {
         { id: 23, name: 'Algal Sea' },
         { id: 2, name: 'Continental Shelf / Shallows' },
       ],
+      compatibleBiomeIds: [0, 1, 2, 17, 23],
       reproductionMethod: 'Hydrochorous flagellated zoospores swimming on marine thermocline currents',
       fieldNote: (biomes) => `Sprawling, translucent mycelial veils intercepting falling organic debris in ocean photic zones across ${biomes}.`,
       adaptations: [
@@ -656,7 +838,7 @@ export function generateFungiEcosystem(params: {
         'Lipid buoyancy micro-vesicles keeping hyphal veils suspended at optimal depths',
       ],
     },
-    // 10. Abyssal Hydrothermal Vent Sulfur Fungus (Aquatic)
+    // 18. Abyssal Hydrothermal Vent Sulfur Fungus (Aquatic: 0, 1, 17)
     {
       formCategory: 'Coral',
       growthForm: 'Abyssal Vent Mineralized Hyphal Chimney',
@@ -668,6 +850,7 @@ export function generateFungiEcosystem(params: {
         { id: 0, name: 'Abyssal Trench' },
         { id: 1, name: 'Deep Ocean' },
       ],
+      compatibleBiomeIds: [0, 1, 17],
       reproductionMethod: 'High-pressure hydrothermal vent plume spore discharge',
       fieldNote: (biomes) => `Chemotrophic mineralized chimney fungus growing around seafloor spreading rifts and thermal vents in ${biomes}.`,
       adaptations: [
@@ -676,7 +859,7 @@ export function generateFungiEcosystem(params: {
         'Metallic sulfide-reinforced chitin sleeve insulating from thermal vent scalding',
       ],
     },
-    // 11. Pelagic Floating Sargassum-Associated Bracket (Aquatic)
+    // 19. Pelagic Floating Sargassum-Associated Bracket (Aquatic: 1, 2, 23)
     {
       formCategory: 'Bracket',
       growthForm: 'Pelagic Floating Kelp-Bracket Fungus',
@@ -689,6 +872,7 @@ export function generateFungiEcosystem(params: {
         { id: 23, name: 'Algal Sea' },
         { id: 2, name: 'Continental Shelf / Shallows' },
       ],
+      compatibleBiomeIds: [1, 2, 23],
       reproductionMethod: 'Mucilaginous water-borne spores attaching to floating macro-algae fronds',
       fieldNote: (biomes) => `Waterproof bracket fungus growing on floating kelp rafts and surface vegetation across ${biomes}.`,
       adaptations: [
@@ -697,7 +881,7 @@ export function generateFungiEcosystem(params: {
         'Active digestion of dying kelp blades without harming healthy photosynthetic tissue',
       ],
     },
-    // 12. Sub-Ice Cryophilic Sea-Yeast & Brine-Mold (Aquatic / Polar Ice)
+    // 20. Sub-Ice Cryophilic Sea-Yeast & Brine-Mold (Aquatic / Polar Ice: 8, 1, 2, 21)
     {
       formCategory: 'Cup',
       growthForm: 'Sub-Ice Cryophilic Inverted Spore Cup',
@@ -710,6 +894,7 @@ export function generateFungiEcosystem(params: {
         { id: 2, name: 'Continental Shelf / Shallows' },
         { id: 1, name: 'Deep Ocean' },
       ],
+      compatibleBiomeIds: [8, 1, 2, 21],
       reproductionMethod: 'Brine-channel spore drift along underside of polar pack ice',
       fieldNote: (biomes) => `Inverted spore cups clinging to the submerged underside of polar sea ice and ice shelves in ${biomes}.`,
       adaptations: [
@@ -718,7 +903,7 @@ export function generateFungiEcosystem(params: {
         'Digestive enzymes active at sub-zero temperatures recycling dead cryo-algae',
       ],
     },
-    // 13. Pelagic Bioluminescent Bubble-Puff (Aquatic)
+    // 21. Pelagic Bioluminescent Bubble-Puff (Aquatic: 1, 2, 23)
     {
       formCategory: 'Puffball',
       growthForm: 'Pelagic Floating Bioluminescent Bubble-Puff',
@@ -730,6 +915,7 @@ export function generateFungiEcosystem(params: {
         { id: 23, name: 'Algal Sea' },
         { id: 1, name: 'Deep Ocean' },
       ],
+      compatibleBiomeIds: [1, 2, 23],
       reproductionMethod: 'Bioluminescent spore clouds released upon contact with marine fauna',
       fieldNote: (biomes) => `Floating globular puffball drifting in warm ocean currents in ${biomes}, glowing brightly when agitated.`,
       adaptations: [
@@ -740,28 +926,30 @@ export function generateFungiEcosystem(params: {
     },
   ];
 
-  // Habitat filtering:
+  // Strict planetary habitat and ecological biome filtering:
   // - If planet has NO solid land, exclude land-only fungi!
   // - If planet has NO liquid oceans, exclude aquatic-only fungi!
-  const candidatePool = archetypes.filter(arch => {
+  // - If biomeGrid is available, the archetype MUST be ecologically compatible with at least one biome present on the planet!
+  let candidatePool = archetypes.filter(arch => {
     if (arch.habitatType === 'aquatic' && !hasLiquid) return false;
     if (arch.habitatType === 'land' && !hasLand) return false;
     if (arch.habitatType === 'amphibious' && !hasLand && !hasLiquid) return false;
 
+    // Strict ecological biome correspondence:
     if (presentBiomeIds.size > 0) {
-      const hasDirectBiome = arch.nativeBiomes.some(b => presentBiomeIds.has(b.id));
-      if (!hasDirectBiome) {
-        const isWaterArch = arch.habitatType === 'aquatic';
-        const isAmphiArch = arch.habitatType === 'amphibious';
-        const hasWaterBiome = Array.from(presentBiomeIds).some(id => WATER_BIOME_IDS.has(id) || id === 8);
-        const hasSolidBiome = Array.from(presentBiomeIds).some(id => SOLID_LAND_BIOME_IDS.has(id));
-
-        if (isWaterArch && !hasWaterBiome) return false;
-        if (!isWaterArch && !isAmphiArch && !hasSolidBiome) return false;
-      }
+      const hasCompatibleBiome = arch.compatibleBiomeIds.some(id => presentBiomeIds.has(id));
+      if (!hasCompatibleBiome) return false;
     }
     return true;
   });
+
+  if (candidatePool.length === 0) {
+    candidatePool = archetypes.filter(arch => {
+      if (arch.habitatType === 'aquatic' && !hasLiquid) return false;
+      if (arch.habitatType === 'land' && !hasLand) return false;
+      return true;
+    });
+  }
 
   // Pick diverse archetypes deterministically for this seed (supports up to 20 species)
   const selectedArchetypes: FungiArchetypeConfig[] = [];
@@ -789,30 +977,23 @@ export function generateFungiEcosystem(params: {
     const colorEntry = FUNGI_COLOR_TAXONOMY[(i + Math.floor(specRng() * FUNGI_COLOR_TAXONOMY.length)) % FUNGI_COLOR_TAXONOMY.length];
     const colorHex = pickRandom(colorEntry.hexColors, specRng);
 
-    // Resolve native biomes: prioritize biomes that actually exist on this planet
+    // Resolve native biomes: ONLY biomes that ACTUALLY exist on this planet AND are ecologically compatible!
+    // 1. Direct match with archetype's preferred nativeBiomes
     let resolvedBiomes = arch.nativeBiomes.filter(b => presentBiomeIds.size === 0 || presentBiomeIds.has(b.id));
-    if (resolvedBiomes.length === 0) {
-      if (arch.habitatType === 'aquatic' || !hasLand) {
-        const waterPresent = Array.from(presentBiomeIds).filter(id => WATER_BIOME_IDS.has(id) || id === 8);
-        if (waterPresent.length > 0) {
-          resolvedBiomes = waterPresent.slice(0, 2).map(id => ({
-            id,
-            name: BIOME_NAMES[id] || 'Ocean',
-          }));
-        } else {
-          resolvedBiomes = arch.nativeBiomes;
-        }
+
+    // 2. If none of the preferred biomes are on this planet, pick compatible biomes that ARE present
+    if (resolvedBiomes.length === 0 && presentBiomeIds.size > 0) {
+      const compatiblePresent = arch.compatibleBiomeIds.filter(id => presentBiomeIds.has(id));
+      if (compatiblePresent.length > 0) {
+        resolvedBiomes = compatiblePresent.slice(0, 2).map(id => ({
+          id,
+          name: BIOME_NAMES[id] || 'Plains',
+        }));
       } else {
-        const landPresent = Array.from(presentBiomeIds).filter(id => SOLID_LAND_BIOME_IDS.has(id));
-        if (landPresent.length > 0) {
-          resolvedBiomes = landPresent.slice(0, 2).map(id => ({
-            id,
-            name: BIOME_NAMES[id] || 'Plains',
-          }));
-        } else {
-          resolvedBiomes = arch.nativeBiomes;
-        }
+        resolvedBiomes = arch.nativeBiomes;
       }
+    } else if (resolvedBiomes.length === 0) {
+      resolvedBiomes = arch.nativeBiomes;
     }
 
     const nativeBiomeIds = resolvedBiomes.map(b => b.id);

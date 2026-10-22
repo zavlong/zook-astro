@@ -17,10 +17,13 @@ Operational guidelines, scientific models, taxonomic tables, and linguistic prot
 ## 1. Core Principles of Exobiological Design
 
 1. **Environmental Determinism**: Organisms are direct evolutionary products of their planetary habitat—surface gravity, atmospheric column density, solvent chemistry, stellar radiation spectrum, and available solid land.
-2. **Strict Habitat Grounding**:
+2. **Strict Habitat Grounding & Ecological Biome Correspondence**:
+   - **Ecological Regimes**: Biomes are partitioned into distinct ecological envelopes (Cryo/Glacial `[7, 8, 13, 18, 21]`, Volcanic `[14, 15, 22]`, Arid `[9, 10, 11, 16]`, Temperate Land `[3, 4, 5, 6, 12]`, Aquatic `[0, 1, 2, 17, 23]`).
+   - **No Cross-Regime Incongruity**: *Never* generate temperate trees or lush forest shrubs on cryogenic nitrogen plains (`18`), ice fissures (`21`), or volcanic lava calderas (`15, 22`).
+   - **Cryo Worlds**: On cryogenic or frozen worlds, life must be psychrophilic/cryophilic (e.g. Cryotectonic Ice-Fronds, Nitrogen-Pore Cryo-Lichens, Glacial Sublimation Spires, Sub-Zero Hyphal Nets) utilizing cryo-pyrrole pigments and cryo-proteoglycan/trehalose structural polymers.
    - **Ocean Worlds (0% Solid Land)**: *Never* generate terrestrial trees, shrubs, soil crusts, or forest mushrooms. Only pelagic floating hydrophytes, benthic kelp ribbons, marine snow saprobes, and abyssal hydrothermal vent fungi are permissible.
    - **Desert / Airless Worlds (0% Liquid)**: *Never* generate pelagic or aquatic taxa.
-   - **Unicellular Planets (< 3.0 Gyr)**: Replace complex arborescent canopies with biological soil crusts, endolithic biofilms, and microbial algal plains.
+   - **Unicellular Planets (< 2.8 Gyr)**: Replace complex arborescent canopies with biological soil crusts, endolithic biofilms, and microbial algal plains.
 3. **Semantic Linguistic Concordance**:
    - Latin/Greek binomial scientific names must **strictly and accurately mirror** English common names in meaning.
    - A species named *Chlorodendron grandis* must be a large green tree, never a small winged purple shrub.

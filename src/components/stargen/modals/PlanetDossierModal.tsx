@@ -169,8 +169,9 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
       hasLiquid,
       hasLand,
       coveragePct: covPct,
+      surfaceTempK: Tsurf,
     });
-  }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, systemResult, pBar]);
+  }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, systemResult, pBar, Tsurf]);
 
   const planetFungi = useMemo(() => {
     const seed = isMoon && activeMoon
@@ -192,8 +193,9 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
       hasLiquid,
       hasLand,
       coveragePct: covPct,
+      surfaceTempK: Tsurf,
     });
-  }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, systemResult, pBar]);
+  }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, systemResult, pBar, Tsurf]);
 
   const tauIR =
     ghK > 0 && Tatm > 10 ? Math.max(0.01, (4 / 3) * (Math.pow(Tsurf / Tatm, 4) - 1)) : 0;

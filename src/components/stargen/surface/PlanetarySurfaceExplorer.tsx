@@ -93,6 +93,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const hasLand = surfaceModel.hasLiquid
       ? coveragePct < 100 && !surfaceModel.isNoSurface
       : true;
+    const surfaceTempK = (moon ? moon.surfaceTempK : planet.surfaceTempK) ?? (surfaceModel.temperatureGrid ? surfaceModel.temperatureGrid[180 * 180 + 90] : undefined);
 
     return generatePlantEcosystem({
       seed: surfaceModel.seed,
@@ -106,6 +107,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       hasLand,
       coveragePct,
       biomeGrid: surfaceModel.biomeGrid,
+      surfaceTempK,
     });
   }, [surfaceModel, planet, moon, stars]);
 
@@ -115,6 +117,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const hasLand = surfaceModel.hasLiquid
       ? coveragePct < 100 && !surfaceModel.isNoSurface
       : true;
+    const surfaceTempK = (moon ? moon.surfaceTempK : planet.surfaceTempK) ?? (surfaceModel.temperatureGrid ? surfaceModel.temperatureGrid[180 * 180 + 90] : undefined);
 
     return generateFungiEcosystem({
       seed: surfaceModel.seed,
@@ -128,6 +131,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       hasLand,
       coveragePct,
       biomeGrid: surfaceModel.biomeGrid,
+      surfaceTempK,
     });
   }, [surfaceModel, planet, moon, stars]);
 

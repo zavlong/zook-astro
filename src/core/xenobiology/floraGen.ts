@@ -288,10 +288,10 @@ export function generateCoherentSpeciesName(params: {
   // 3. Candidate epithets pool adhering to scale and habitat
   const epithetPool: EpithetEntry[] = [];
 
-  const hasVolcanic = nativeBiomeIds.some(id => id === 14 || id === 15 || id === 22);
-  const hasCryo = nativeBiomeIds.some(id => id === 6 || id === 7) || regimeKey === 'Cryo';
-  const hasAquatic = nativeBiomeIds.some(id => id === 2 || id === 3 || id === 23) || formCategory === 'Kelp';
-  const hasArid = nativeBiomeIds.some(id => id === 9 || id === 10 || id === 11);
+  const hasVolcanic = nativeBiomeIds.some(id => VOLCANIC_BIOME_IDS.has(id));
+  const hasCryo = nativeBiomeIds.some(id => CRYO_BIOME_IDS.has(id)) || regimeKey === 'Cryo';
+  const hasAquatic = nativeBiomeIds.some(id => AQUATIC_BIOME_IDS.has(id)) || formCategory === 'Kelp';
+  const hasArid = nativeBiomeIds.some(id => ARID_BIOME_IDS.has(id));
 
   if (hasVolcanic) epithetPool.push(...VOLCANIC_EPITHETS);
   if (hasCryo) epithetPool.push(...CRYO_EPITHETS);
@@ -372,9 +372,16 @@ export function generateCoherentSpeciesName(params: {
 }
 
 /**
- * Derives pigment regime key based on star temperature and solvent.
+ * Derives pigment regime key based on star temperature, solvent, and surface temperature regime.
  */
-function getPigmentRegime(starTeff: number, solventKey: string): {
+export function getPigmentRegime(
+  starTeff: number,
+  solventKey: string = 'H2O',
+  options?: {
+    isCryoWorld?: boolean;
+    surfaceTempK?: number;
+  }
+): {
   regimeKey: 'IR' | 'Carotenoid' | 'Chlorophyll' | 'UV' | 'Cryo' | 'Hydrocarbon';
   trophicType: string;
   pigmentName: string;
@@ -383,10 +390,11 @@ function getPigmentRegime(starTeff: number, solventKey: string): {
   const isAmmonia = solventKey === 'NH3-H2O';
   const isHydrocarbon = solventKey.toLowerCase().includes('methane') || solventKey.toLowerCase().includes('ethane');
 
-  if (isAmmonia) {
+  // Cryogenic environment (ammonia-water, cryogenic planet < 215 K, or pure cryo biomes)
+  if (isAmmonia || options?.isCryoWorld || (options?.surfaceTempK !== undefined && options.surfaceTempK < 215)) {
     return {
       regimeKey: 'Cryo',
-      trophicType: 'Cryo-Ammonia Osmotrophic Phototroph',
+      trophicType: 'Cryogenic Psychrophilic Photoautotroph',
       pigmentName: 'Cryogenic Polyphenols & Pyrroles (Violet-Teal)',
       baseHexColors: ['#6d328f', '#512373', '#38687a', '#2f5466', '#7e3fa6']
     };
@@ -433,11 +441,17 @@ function getPigmentRegime(starTeff: number, solventKey: string): {
   }
 }
 
-// Planetary Biome Categories for Xenoflora Habitat Distribution
-export const WATER_BIOME_IDS = new Set<number>([0, 1, 2, 17, 23]);
-export const POLAR_ICE_BIOME_IDS = new Set<number>([8, 18, 21]);
+// Explicit Ecological Biome Regimes
+export const CRYO_BIOME_IDS = new Set<number>([7, 8, 13, 18, 21]);
+export const VOLCANIC_BIOME_IDS = new Set<number>([14, 15, 22]);
+export const ARID_BIOME_IDS = new Set<number>([9, 10, 11, 16]);
+export const TEMPERATE_LAND_BIOME_IDS = new Set<number>([3, 4, 5, 6, 12]);
+export const AQUATIC_BIOME_IDS = new Set<number>([0, 1, 2, 17, 23]);
+
+export const WATER_BIOME_IDS = AQUATIC_BIOME_IDS;
+export const POLAR_ICE_BIOME_IDS = CRYO_BIOME_IDS;
 export const SOLID_LAND_BIOME_IDS = new Set<number>([
-  3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 18, 21, 22
+  3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 21, 22
 ]);
 
 export const BIOME_NAMES: Record<number, string> = {
@@ -481,6 +495,7 @@ export function generatePlantEcosystem(params: {
   hasLand?: boolean;
   coveragePct?: number;
   biomeGrid?: Uint8Array;
+  surfaceTempK?: number;
 }): PlanetaryEcosystemSummary {
   const {
     seed,
@@ -492,6 +507,7 @@ export function generatePlantEcosystem(params: {
     pressureBar = 1.0,
     solventKey = 'H2O',
     biomeGrid,
+    surfaceTempK,
   } = params;
 
   if (!hasBiosphere) {
@@ -518,6 +534,11 @@ export function generatePlantEcosystem(params: {
       presentBiomeIds.add(biomeGrid[i]);
     }
   }
+
+  // Detect whether this is an extreme cryogenic or volcanic world
+  const isAllCryoBiomes = presentBiomeIds.size > 0 && Array.from(presentBiomeIds).every(id => CRYO_BIOME_IDS.has(id));
+  const isAllVolcanicBiomes = presentBiomeIds.size > 0 && Array.from(presentBiomeIds).every(id => VOLCANIC_BIOME_IDS.has(id));
+  const isCryoWorld = isAllCryoBiomes || (surfaceTempK !== undefined && surfaceTempK < 215) || solventKey === 'NH3-H2O';
 
   // 2. Strict evaluation of whether this planet has solid dry land vs. is a global ocean world
   let hasLand = params.hasLand;
@@ -559,18 +580,25 @@ export function generatePlantEcosystem(params: {
   // Height scaling: structural physics h ~ (1/g)^0.65
   const heightMultiplier = Math.pow(1.0 / g, 0.65);
 
-  const pigmentInfo = getPigmentRegime(starTeff, solventKey);
+  const pigmentInfo = getPigmentRegime(starTeff, solventKey, {
+    isCryoWorld,
+    surfaceTempK,
+  });
 
   // Structural base polymer depending on solvent, multicellularity, and gravity
   let structuralBase = isMulticellular ? 'Lignified Cellulose' : 'Extracellular Biofilm Matrix & Polysaccharides';
-  if (solventKey === 'NH3-H2O') {
+  if (isCryoWorld || solventKey === 'NH3-H2O') {
     structuralBase = isMulticellular
       ? 'Cryo-Proteoglycan & Glycerol-Cellulose Gel'
       : 'Cryo-Proteoglycan Mucilaginous Biofilm';
-  } else if (solventKey.toLowerCase().includes('methane')) {
+  } else if (solventKey.toLowerCase().includes('methane') || solventKey.toLowerCase().includes('ethane')) {
     structuralBase = isMulticellular
       ? 'Silica-Sclerotized Polyaromatic Frustules'
       : 'Silica-Frustule Hydrocarbon Biofilms';
+  } else if (isAllVolcanicBiomes) {
+    structuralBase = isMulticellular
+      ? 'Silica-Reinforced Biomineral Matrix'
+      : 'Vitreous Mineral Biofilm Crust';
   } else if (isMulticellular && g > 1.6) {
     structuralBase = 'Silica-Reinforced Biomineralized Cellulose';
   }
@@ -598,6 +626,7 @@ export function generatePlantEcosystem(params: {
     baseHeightM: number;
     baseSpreadM: number;
     nativeBiomes: { id: number; name: string }[];
+    compatibleBiomeIds: number[];
     reproductionMethod: string;
     fieldNote: (biomes: string) => string;
     adaptations: string[];
@@ -613,9 +642,10 @@ export function generatePlantEcosystem(params: {
       baseHeightM: 0.005,
       baseSpreadM: 6.0,
       nativeBiomes: [
-        { id: 5, name: 'Algal Plains' },
+        { id: 5, name: 'Temperate Continental Basin' },
         { id: 4, name: 'Lowland Silicate Plains' },
       ],
+      compatibleBiomeIds: [3, 4, 5, 6],
       reproductionMethod: 'Asexual binary fission and windborne desiccation-tolerant micro-cysts',
       fieldNote: (biomes) => `Spreads across exposed plains and regolith in ${biomes} as resilient, drought-tolerant biological soil crusts.`,
       adaptations: [
@@ -632,9 +662,10 @@ export function generatePlantEcosystem(params: {
       baseHeightM: 0.035,
       baseSpreadM: 4.5,
       nativeBiomes: [
-        { id: 5, name: 'Algal Plains' },
+        { id: 5, name: 'Temperate Continental Basin' },
         { id: 3, name: 'Coastal Alluvial Basin' },
       ],
+      compatibleBiomeIds: [3, 4, 5],
       reproductionMethod: 'Colonial budding and benthic extracellular slime accretion',
       fieldNote: (biomes) => `Forms layered, terraced microbial mats along shallow shores and basins across ${biomes}.`,
       adaptations: [
@@ -643,7 +674,7 @@ export function generatePlantEcosystem(params: {
         'Carbonate mineral precipitation consolidating loose silt into stone',
       ],
     },
-    // 3. Endolithic Biofilm (Land only)
+    // 3. Endolithic Biofilm (Land only - Arid/Badlands)
     {
       formCategory: 'Cushion',
       growthForm: 'Endolithic Radiotolerant Soil Biofilm',
@@ -655,6 +686,7 @@ export function generatePlantEcosystem(params: {
         { id: 9, name: 'Arid Steppe / Scrub' },
         { id: 11, name: 'High Plateau / Badlands' },
       ],
+      compatibleBiomeIds: [4, 9, 10, 11, 16],
       reproductionMethod: 'Microbial fragmentation and dormant spore dusting',
       fieldNote: (biomes) => `Shelters inside microscopic rock pores and fissures throughout ${biomes}, surviving extreme surface exposure.`,
       adaptations: [
@@ -663,7 +695,7 @@ export function generatePlantEcosystem(params: {
         'Osmotic sugar synthesis buffering rapid daily temperature swings',
       ],
     },
-    // 4. Sub-Polar Cryophilic Biofilm (Amphibious - can colonize floating sea ice or tundra)
+    // 4. Sub-Polar Cryophilic Biofilm (Polar/Tundra)
     {
       formCategory: 'Spire',
       growthForm: 'Sub-Polar Cryophilic Algal Biofilm',
@@ -675,6 +707,7 @@ export function generatePlantEcosystem(params: {
         { id: 7, name: 'Tundra / Permafrost' },
         { id: 6, name: 'High-Latitude Rocky Steppe' },
       ],
+      compatibleBiomeIds: [6, 7, 8, 13, 18, 21],
       reproductionMethod: 'Cryo-dormant spore encapsulation in permafrost pores',
       fieldNote: (biomes) => `Cold-active microbial film colonizing snowpack, ice sheets, and permafrost in ${biomes}.`,
       adaptations: [
@@ -683,7 +716,47 @@ export function generatePlantEcosystem(params: {
         'Dark surface pigments absorbing solar thermal radiation to melt surrounding ice',
       ],
     },
-    // 5. Pelagic Marine Micro-Algae (Aquatic only)
+    // 5. Cryotectonic Nitrogen-Ice Extremophile Biofilm (Cryo worlds: 18, 21)
+    {
+      formCategory: 'Mat',
+      growthForm: 'Cryotectonic Nitrogen-Ice Extremophile Biofilm',
+      habitatType: 'land',
+      baseHeightM: 0.003,
+      baseSpreadM: 5.5,
+      nativeBiomes: [
+        { id: 18, name: 'Cryovolcanic Nitrogen Plains' },
+        { id: 21, name: 'Cryotectonic Ice Fissure (Linea)' },
+      ],
+      compatibleBiomeIds: [18, 21, 8, 7, 13],
+      reproductionMethod: 'Sub-surface cryo-dormant cysts expanding along tectonic fracture fissures',
+      fieldNote: (biomes) => `Cryogenic microbial mat encrusting frozen nitrogen plains and tectonic linea fractures across ${biomes}.`,
+      adaptations: [
+        'Metabolism active down to 75 Kelvin utilizing cryogenic solvent eutectic mixtures',
+        'Dense purplish-teal pyrrole complexes harvesting faint reflected solar photons',
+        'Flexible liposome membranes remaining fluid in supercooled liquid nitrogen',
+      ],
+    },
+    // 6. Volcanic Fumarole Pyritic Biofilm (Volcanic worlds: 14, 15, 22)
+    {
+      formCategory: 'Cushion',
+      growthForm: 'Volcanic Fumarole Chemotrophic Biofilm',
+      habitatType: 'land',
+      baseHeightM: 0.006,
+      baseSpreadM: 2.2,
+      nativeBiomes: [
+        { id: 15, name: 'Active Lava Caldera & Fissure' },
+        { id: 22, name: 'Active Volcanic Shield & Lava Caldera' },
+      ],
+      compatibleBiomeIds: [14, 15, 22],
+      reproductionMethod: 'Thermal convective spore dusting propelled by volcanic vent plumes',
+      fieldNote: (biomes) => `Chemosynthetic crust coating scalding basalt and sulfur fumaroles in ${biomes}.`,
+      adaptations: [
+        'Hyperthermophilic enzymes functional up to 410 Kelvin in sulfurous vents',
+        'Chemosynthetic sulfur oxidation generating metabolic energy independent of sunlight',
+        'Acid-neutralizing mineral shell shielding colonies from caustic volcanic fumes',
+      ],
+    },
+    // 7. Pelagic Marine Micro-Algae (Aquatic only)
     {
       formCategory: 'Kelp',
       growthForm: 'Pelagic Marine Micro-Algal Bloom',
@@ -695,6 +768,7 @@ export function generatePlantEcosystem(params: {
         { id: 1, name: 'Deep Ocean' },
         { id: 2, name: 'Continental Shelf / Shallows' },
       ],
+      compatibleBiomeIds: [0, 1, 2, 17, 23],
       reproductionMethod: 'Exponential asexual division in photic surface waters',
       fieldNote: (biomes) => `Free-floating micro-algae blooming in vast surface slicks across photic waters in ${biomes}.`,
       adaptations: [
@@ -703,7 +777,7 @@ export function generatePlantEcosystem(params: {
         'Bioluminescent flash responses deterring nocturnal micro-grazers',
       ],
     },
-    // 6. Coastal Cyanobacterial Mat (Aquatic / Coast)
+    // 8. Coastal Cyanobacterial Mat (Aquatic / Coast)
     {
       formCategory: 'Mat',
       growthForm: 'Estuarine Coastal Cyanobacterial Mat',
@@ -714,6 +788,7 @@ export function generatePlantEcosystem(params: {
         { id: 2, name: 'Continental Shelf / Shallows' },
         { id: 1, name: 'Deep Ocean' },
       ],
+      compatibleBiomeIds: [1, 2, 3, 23],
       reproductionMethod: 'Horizontal gliding trichome filaments across intertidal silt',
       fieldNote: (biomes) => `Fibrous microbial mat binding tidal silt and shallow shoals across ${biomes}.`,
       adaptations: [
@@ -722,7 +797,7 @@ export function generatePlantEcosystem(params: {
         'Facultative anoxygenic metabolism when buried under storm silt',
       ],
     },
-    // 7. Floating Neuston Biofilm Sheet (Aquatic only - open ocean)
+    // 9. Floating Neuston Biofilm Sheet (Aquatic only - open ocean)
     {
       formCategory: 'Mat',
       growthForm: 'Pelagic Floating Neuston Biofilm Sheet',
@@ -733,6 +808,7 @@ export function generatePlantEcosystem(params: {
         { id: 1, name: 'Deep Ocean' },
         { id: 23, name: 'Algal Sea' },
       ],
+      compatibleBiomeIds: [1, 2, 23],
       reproductionMethod: 'Surface surfactant budding propelled across pelagic wave crests',
       fieldNote: (biomes) => `Forms iridescent lipid biofilm slicks across open ocean currents in ${biomes}.`,
       adaptations: [
@@ -741,7 +817,7 @@ export function generatePlantEcosystem(params: {
         'Direct uptake of atmospheric aerosols and dissolved ocean nutrients',
       ],
     },
-    // 8. Abyssal Chemotrophic Biofilm (Aquatic only - ocean depths)
+    // 10. Abyssal Chemotrophic Biofilm (Aquatic only - ocean depths)
     {
       formCategory: 'Cushion',
       growthForm: 'Abyssal Chemotrophic Biofilm Crust',
@@ -752,6 +828,7 @@ export function generatePlantEcosystem(params: {
         { id: 0, name: 'Abyssal Trench' },
         { id: 1, name: 'Deep Ocean' },
       ],
+      compatibleBiomeIds: [0, 1, 17],
       reproductionMethod: 'Sub-sea mineral spore dispersal along seafloor hydrothermal currents',
       fieldNote: (biomes) => `Chemosynthetic crust coating abyssal seabed basalt and hydrothermal rifts across ${biomes}.`,
       adaptations: [
@@ -764,7 +841,7 @@ export function generatePlantEcosystem(params: {
 
   // Multicellular complex plant archetypes
   const multicellularArchetypes: ArchetypeConfig[] = [
-    // 1. Dominant Arboreal / High Canopy Tree (Land only)
+    // 1. Dominant Arboreal / High Canopy Tree (Temperate Land only: 4, 5, 12)
     {
       formCategory: 'Tree',
       growthForm: g < 0.6 ? 'Towering Low-Gravity Mega-Canopy' : g > 1.4 ? 'Buttressed Ground-Hug Canopy' : 'Arborescent Vascular Canopy Tree',
@@ -775,6 +852,7 @@ export function generatePlantEcosystem(params: {
         { id: 4, name: 'Lowland Silicate Plains' },
         { id: 5, name: 'Temperate Continental Basin' },
       ],
+      compatibleBiomeIds: [3, 4, 5, 12],
       reproductionMethod: pBar > 2.5 
         ? 'Buoyant aeroplanktonic seed-balloons riding dense air currents' 
         : pBar < 0.4 
@@ -793,7 +871,7 @@ export function generatePlantEcosystem(params: {
           : 'Waxy outer cuticle minimizing transpiration moisture loss',
       ],
     },
-    // 2. Understory Frond / Shrub (Land only)
+    // 2. Understory Frond / Shrub (Temperate Land only: 3, 4, 5, 6)
     {
       formCategory: 'Frond',
       growthForm: 'Broadleaf Siphon-Frond Understory Shrub',
@@ -805,6 +883,7 @@ export function generatePlantEcosystem(params: {
         { id: 5, name: 'Temperate Continental Basin' },
         { id: 3, name: 'Coastal Alluvial Basin' },
       ],
+      compatibleBiomeIds: [3, 4, 5, 6],
       reproductionMethod: 'Hydraulic siphon-gametes released in riparian humidity',
       fieldNote: (biomes) => `A shade-tolerant understory shrub widespread in ${biomes}, colonizing forest floors through creeping root systems.`,
       adaptations: [
@@ -813,7 +892,7 @@ export function generatePlantEcosystem(params: {
         'Bio-synthetic alkaloids protecting tender foliage from micro-herbivores',
       ],
     },
-    // 3. Resilient Ground Cover / Succulent Cushion (Land only)
+    // 3. Resilient Ground Cover / Succulent Cushion (Arid: 9, 10, 11, 16)
     {
       formCategory: 'Cushion',
       growthForm: 'Succulent Cushion-Dome Lithophyte',
@@ -825,6 +904,7 @@ export function generatePlantEcosystem(params: {
         { id: 11, name: 'High Plateau / Badlands' },
         { id: 10, name: 'Hyper-Arid Dunes / Desert' },
       ],
+      compatibleBiomeIds: [9, 10, 11, 16],
       reproductionMethod: 'Creeping clonal runners with subterranean nutrient corms',
       fieldNote: (biomes) => `Compact, dome-shaped succulent thriving on rocky outcrops and arid plains in ${biomes}.`,
       adaptations: [
@@ -833,7 +913,7 @@ export function generatePlantEcosystem(params: {
         'Internal water-storage tissue maintaining turgor through extended droughts',
       ],
     },
-    // 4. Boreal / Cold Plateau Conifer-Equivalent (Land only)
+    // 4. Boreal / Cold Plateau Needle-Fern (Sub-Polar/Alpine: 6, 7, 12, 13)
     {
       formCategory: 'Spire',
       growthForm: 'Spire Needle-Fern / Columnar Autotroph',
@@ -844,6 +924,7 @@ export function generatePlantEcosystem(params: {
         { id: 6, name: 'High-Latitude Rocky Steppe' },
         { id: 7, name: 'Tundra / Permafrost' },
       ],
+      compatibleBiomeIds: [6, 7, 12, 13],
       reproductionMethod: 'Hardened cryo-dormant spore nodules buried in permafrost',
       fieldNote: (biomes) => `Tall columnar autotroph inhabiting cold taiga and permafrost in ${biomes}, built to shed heavy precipitation.`,
       adaptations: [
@@ -852,7 +933,7 @@ export function generatePlantEcosystem(params: {
         'Resin-coated needle cuticle resisting frostbite and drying winds',
       ],
     },
-    // 5. Pioneer Mat Lichen (Land only)
+    // 5. Pioneer Mat Lichen (Badlands / Regolith: 6, 9, 11, 16)
     {
       formCategory: 'Mat',
       growthForm: 'Symbiotic Crust-Lichen & Biofilm Carpet',
@@ -864,6 +945,7 @@ export function generatePlantEcosystem(params: {
         { id: 6, name: 'High-Latitude Rocky Steppe' },
         { id: 11, name: 'High Plateau / Badlands' },
       ],
+      compatibleBiomeIds: [6, 9, 11, 16],
       reproductionMethod: 'Direct fragmentation and desiccated windborne soredia dust',
       fieldNote: (biomes) => `Resilient ground-hugging lichen carpeting exposed rock and regolith in ${biomes}, establishing early organic soil.`,
       adaptations: [
@@ -872,7 +954,7 @@ export function generatePlantEcosystem(params: {
         'Direct atmospheric moisture adsorption without requiring liquid surface water',
       ],
     },
-    // 6. Coastal / Marine Pelagic Kelp (Aquatic only)
+    // 6. Coastal / Marine Pelagic Kelp (Aquatic: 1, 2, 23)
     {
       formCategory: 'Kelp',
       growthForm: 'Pelagic Marine Siphon-Kelp Reef',
@@ -884,6 +966,7 @@ export function generatePlantEcosystem(params: {
         { id: 23, name: 'Algal Sea' },
         { id: 1, name: 'Deep Ocean' },
       ],
+      compatibleBiomeIds: [1, 2, 23],
       reproductionMethod: 'Bioluminescent flagellated gametes released during planetary spring tides',
       fieldNote: (biomes) => `Large submerged kelp forming dense floating meadows and coastal reefs throughout ${biomes}.`,
       adaptations: [
@@ -892,7 +975,7 @@ export function generatePlantEcosystem(params: {
         'Active cellular filtration concentrating trace dissolved minerals from seawater',
       ],
     },
-    // 7. Floating Sargassum-like Pelagic Raft (Aquatic only - open ocean)
+    // 7. Floating Sargassum-like Pelagic Raft (Aquatic: 1, 2, 23)
     {
       formCategory: 'Mat',
       growthForm: 'Pelagic Floating Kelp-Raft & Surface Canopy',
@@ -904,6 +987,7 @@ export function generatePlantEcosystem(params: {
         { id: 23, name: 'Algal Sea' },
         { id: 2, name: 'Continental Shelf / Shallows' },
       ],
+      compatibleBiomeIds: [1, 2, 23],
       reproductionMethod: 'Vegetative thallus fragmentation drifting along global ocean gyres',
       fieldNote: (biomes) => `Expansive free-floating macro-algal rafts drifting across open ocean gyres in ${biomes}, forming floating canopy ecosystems.`,
       adaptations: [
@@ -912,7 +996,7 @@ export function generatePlantEcosystem(params: {
         'Foliar salt-excretion pores preventing mineral crust crystallization',
       ],
     },
-    // 8. Abyssal Hydrothermal Vent Chemotroph (Aquatic only - seabed vents)
+    // 8. Abyssal Hydrothermal Vent Chemotroph (Aquatic Abyssal: 0, 1)
     {
       formCategory: 'Spire',
       growthForm: 'Abyssal Chalcogenide Chimney-Lichen',
@@ -923,6 +1007,7 @@ export function generatePlantEcosystem(params: {
         { id: 0, name: 'Abyssal Trench' },
         { id: 1, name: 'Deep Ocean' },
       ],
+      compatibleBiomeIds: [0, 1],
       reproductionMethod: 'Thermal plume convective spore dispersers triggering along rift fissures',
       fieldNote: (biomes) => `Mineralized chimney autotroph colonizing seafloor hydrothermal vents and tectonic rifts in ${biomes}.`,
       adaptations: [
@@ -931,7 +1016,7 @@ export function generatePlantEcosystem(params: {
         'Heavy pyritic mineral sleeve withstanding crushing abyssal hydrostatic pressure',
       ],
     },
-    // 9. Floating Tendril-Ribbon Hydrophyte (Aquatic only)
+    // 9. Floating Tendril-Ribbon Hydrophyte (Aquatic: 1, 2, 23)
     {
       formCategory: 'Kelp',
       growthForm: 'Pelagic Tendril-Ribbon Hydrophyte',
@@ -942,6 +1027,7 @@ export function generatePlantEcosystem(params: {
         { id: 1, name: 'Deep Ocean' },
         { id: 2, name: 'Continental Shelf / Shallows' },
       ],
+      compatibleBiomeIds: [1, 2, 23],
       reproductionMethod: 'Pelagic zoospore swarms drifting on deep photic currents',
       fieldNote: (biomes) => `Immense trailing ribbons floating through oceanic photic currents in ${biomes}, trailing dozens of meters below the surface.`,
       adaptations: [
@@ -950,7 +1036,7 @@ export function generatePlantEcosystem(params: {
         'High-efficiency diffuse blue-green light harvesting in deep photic layers',
       ],
     },
-    // 10. Sub-Ice Cryophilic Hanging Frond (Aquatic / Ice shelf)
+    // 10. Sub-Ice Cryophilic Hanging Frond (Aquatic / Ice shelf: 8, 1, 2, 21)
     {
       formCategory: 'Frond',
       growthForm: 'Sub-Ice Cryophilic Hanging Frond',
@@ -962,6 +1048,7 @@ export function generatePlantEcosystem(params: {
         { id: 2, name: 'Continental Shelf / Shallows' },
         { id: 1, name: 'Deep Ocean' },
       ],
+      compatibleBiomeIds: [8, 1, 2, 21],
       reproductionMethod: 'Sub-ice micro-spores carried on frigid sub-glacial currents',
       fieldNote: (biomes) => `Inverted photosynthetic frond anchoring to the underside of polar sea ice and ice shelves in ${biomes}.`,
       adaptations: [
@@ -970,7 +1057,7 @@ export function generatePlantEcosystem(params: {
         'Extremely sensitive low-light pigments capturing weak solar rays filtered through sea ice',
       ],
     },
-    // 11. Pelagic Floating Bulb-Cushion (Aquatic only)
+    // 11. Pelagic Floating Bulb-Cushion (Aquatic: 1, 2, 23)
     {
       formCategory: 'Cushion',
       growthForm: 'Pelagic Floating Bulb-Cushion',
@@ -982,6 +1069,7 @@ export function generatePlantEcosystem(params: {
         { id: 2, name: 'Continental Shelf / Shallows' },
         { id: 1, name: 'Deep Ocean' },
       ],
+      compatibleBiomeIds: [1, 2, 23],
       reproductionMethod: 'Budding buoyant daughter spherules detached by surface wave action',
       fieldNote: (biomes) => `Buoyant globular colonies clustering into floating mats across tropical surface currents in ${biomes}.`,
       adaptations: [
@@ -990,7 +1078,7 @@ export function generatePlantEcosystem(params: {
         'Symbiotic nitrogen-fixing bacteria embedded in internal fibrous chambers',
       ],
     },
-    // 12. Benthic Marine Siphon-Fan (Aquatic / Coasts)
+    // 12. Benthic Marine Siphon-Fan (Aquatic: 1, 2, 23)
     {
       formCategory: 'Frond',
       growthForm: 'Benthic Marine Siphon-Fan',
@@ -1002,6 +1090,7 @@ export function generatePlantEcosystem(params: {
         { id: 23, name: 'Algal Sea' },
         { id: 1, name: 'Deep Ocean' },
       ],
+      compatibleBiomeIds: [1, 2, 23],
       reproductionMethod: 'Planktonic flagellated gametes released during planetary spring tides',
       fieldNote: (biomes) => `Fan-shaped benthic autotroph anchored to submerged rocks and continental shallows across ${biomes}.`,
       adaptations: [
@@ -1010,7 +1099,7 @@ export function generatePlantEcosystem(params: {
         'Elastic siphon tubules channeling nutrient-rich bottom currents',
       ],
     },
-    // 13. Wetland Alluvial Mangrove / Siphon-Reef (Amphibious - needs coasts/shallows)
+    // 13. Wetland Alluvial Mangrove / Siphon-Reef (Amphibious: 2, 3)
     {
       formCategory: 'Frond',
       growthForm: 'Alluvial Stilt-Frond & Pneumatophore Shrub',
@@ -1021,6 +1110,7 @@ export function generatePlantEcosystem(params: {
         { id: 3, name: 'Coastal Alluvial Basin' },
         { id: 2, name: 'Continental Shelf / Shallows' },
       ],
+      compatibleBiomeIds: [2, 3],
       reproductionMethod: 'Viviparous hydrochorous propagules drifting on estuary tides',
       fieldNote: (biomes) => `Stilt-rooted shoreline shrub stabilizing tidal mudflats and coastal estuaries in ${biomes}.`,
       adaptations: [
@@ -1029,7 +1119,7 @@ export function generatePlantEcosystem(params: {
         'Interlocking stilt-root matrix preventing shoreline sediment erosion',
       ],
     },
-    // 14. Volcanic Caldera / Geothermal Extremophile (Land only)
+    // 14. Volcanic Caldera Chemosynthetic Spire (Volcanic: 14, 15, 22)
     {
       formCategory: 'Spire',
       growthForm: 'Chemosynthetic Chalcogenide Chimney-Lichen',
@@ -1041,6 +1131,7 @@ export function generatePlantEcosystem(params: {
         { id: 15, name: 'Active Lava Caldera & Fissure' },
         { id: 22, name: 'Active Volcanic Shield & Lava Caldera' },
       ],
+      compatibleBiomeIds: [14, 15, 22],
       reproductionMethod: 'Thermal plume convective spore dispersers triggering upon basalt fracturing',
       fieldNote: (biomes) => `Chemosynthetic spire growing directly around geothermal vents and volcanic fissures in ${biomes}.`,
       adaptations: [
@@ -1049,34 +1140,254 @@ export function generatePlantEcosystem(params: {
         'Vitreous silica outer sleeve shielding tissues from acidic volcanic fumes',
       ],
     },
+    // 15. Cryotectonic Ice-Frond Lithophyte (Cryo: 18, 21, 8, 7, 13)
+    {
+      formCategory: 'Frond',
+      growthForm: 'Cryotectonic Ice-Fissure Siphon-Frond',
+      habitatType: 'land',
+      baseHeightM: 1.8,
+      baseSpreadM: 2.4,
+      nativeBiomes: [
+        { id: 21, name: 'Cryotectonic Ice Fissure (Linea)' },
+        { id: 18, name: 'Cryovolcanic Nitrogen Plains' },
+      ],
+      compatibleBiomeIds: [18, 21, 8, 7, 13],
+      reproductionMethod: 'Sub-ice cryo-spore extrusion along tectonic stress lines',
+      fieldNote: (biomes) => `Anchors deep within frozen cryotectonic chasms across ${biomes}, tapping trace sub-surface geothermal vapor.`,
+      adaptations: [
+        'Concentrated glycerol-trehalose antifreeze sap remaining fluid at 80 Kelvin',
+        'High-tensile fibrous holdfasts locking into cryogenic ice fissures',
+        'Low-albedo purplish-teal foliage absorbing diffuse infrared thermal radiation from sub-surface vents',
+      ],
+    },
+    // 16. Nitrogen-Plains Cryo-Cushion (Cryo: 18, 21, 8, 7, 13)
+    {
+      formCategory: 'Cushion',
+      growthForm: 'Nitrogen-Pore Cryo-Succulent Cushion',
+      habitatType: 'land',
+      baseHeightM: 0.35,
+      baseSpreadM: 1.6,
+      nativeBiomes: [
+        { id: 18, name: 'Cryovolcanic Nitrogen Plains' },
+        { id: 8, name: 'Polar Glacial Ice' },
+      ],
+      compatibleBiomeIds: [18, 21, 8, 7, 13],
+      reproductionMethod: 'Desiccated nitrogen-frost resistant cysts dispersed on cryo-wind updrafts',
+      fieldNote: (biomes) => `Forms dense, frost-tolerant succulent domes across cryogenic plains in ${biomes}, insulated by micro-cellular gas pockets.`,
+      adaptations: [
+        'Cellular nitrogen-gas insulating chambers preventing core freeze-fracture',
+        'Osmotic cryo-protectants maintaining membrane flexibility in liquid nitrogen',
+        'Silica-reinforced exterior crust shedding drifting nitrogen snow',
+      ],
+    },
+    // 17. Sub-Zero Glacial Siphon-Spire (Cryo: 18, 21, 8, 13)
+    {
+      formCategory: 'Spire',
+      growthForm: 'Glacial Sublimation Siphon-Spire',
+      habitatType: 'land',
+      baseHeightM: 5.2,
+      baseSpreadM: 1.2,
+      nativeBiomes: [
+        { id: 18, name: 'Cryovolcanic Nitrogen Plains' },
+        { id: 13, name: 'Alpine Glacial Peaks' },
+      ],
+      compatibleBiomeIds: [18, 21, 8, 13],
+      reproductionMethod: 'Sublimation-triggered spore ejection propelled by expanding sub-ice gases',
+      fieldNote: (biomes) => `Erect crystalline spire capturing ambient atmospheric sublimation vapors across frigid plains in ${biomes}.`,
+      adaptations: [
+        'Vitreous mineral flutes channeling ambient geothermal sublimation vapors',
+        'Internal counter-current heat exchangers retaining central stalk warmth',
+        'Hexagonal ice-crystal shedding architecture preventing structural collapse',
+      ],
+    },
+    // 18. Cryogenic Thallus-Mat (Cryo: 18, 21, 8, 7, 13)
+    {
+      formCategory: 'Mat',
+      growthForm: 'Cryogenic Nitrogen-Frost Crust-Lichen',
+      habitatType: 'land',
+      baseHeightM: 0.04,
+      baseSpreadM: 4.8,
+      nativeBiomes: [
+        { id: 18, name: 'Cryovolcanic Nitrogen Plains' },
+        { id: 21, name: 'Cryotectonic Ice Fissure (Linea)' },
+      ],
+      compatibleBiomeIds: [18, 21, 8, 7, 13],
+      reproductionMethod: 'Cryo-fragmentation and drifting thallus scale dispersal',
+      fieldNote: (biomes) => `Sprawling cryophilic lichen thallus encrusting nitrogen ice and fracture margins across ${biomes}.`,
+      adaptations: [
+        'Symbiotic cold-active algae and fungal hyphae sharing metabolic antifreeze',
+        'Direct uptake of sublimating nitrogen and methane vapors',
+        'Micro-adhesion thalli etching directly into solid water-ice bedrock',
+      ],
+    },
+    // 19. Creeping Tundra Permafrost-Frond (Cryo/Sub-polar: 6, 7, 8, 13, 18, 21)
+    {
+      formCategory: 'Frond',
+      growthForm: 'Creeping Tundra Permafrost-Frond',
+      habitatType: 'land',
+      baseHeightM: 0.75,
+      baseSpreadM: 1.9,
+      nativeBiomes: [
+        { id: 7, name: 'Tundra / Permafrost' },
+        { id: 6, name: 'High-Latitude Rocky Steppe' },
+      ],
+      compatibleBiomeIds: [6, 7, 8, 13, 18, 21],
+      reproductionMethod: 'Subterranean permafrost runner rhizomes and cryogenic seeds',
+      fieldNote: (biomes) => `Low-creeping woody shrub anchoring into frozen permafrost across ${biomes}, resisting severe glacial winds.`,
+      adaptations: [
+        'Prostrate mat growth habit hugging the ground beneath howling sub-zero blizzards',
+        'Deep anchor taproots locking into permanently frozen ground',
+        'Hairy cuticular pubescence trapping an insulating layer of still air',
+      ],
+    },
+    // 20. Vitreous Basalt Cushion-Lithophyte (Volcanic: 14, 15, 22)
+    {
+      formCategory: 'Cushion',
+      growthForm: 'Vitreous Basalt Cushion-Lithophyte',
+      habitatType: 'land',
+      baseHeightM: 0.4,
+      baseSpreadM: 1.2,
+      nativeBiomes: [
+        { id: 14, name: 'Basalt Volcanic Crust' },
+        { id: 22, name: 'Active Volcanic Shield & Lava Caldera' },
+      ],
+      compatibleBiomeIds: [14, 15, 22],
+      reproductionMethod: 'Pyrophytic thermal spore pods bursting when exposed to lava radiant heat',
+      fieldNote: (biomes) => `Heat-tolerant mineralized cushion adhering to warm basaltic volcanic rock in ${biomes}.`,
+      adaptations: [
+        'Heat-shock chaperone proteins preventing protein denaturation up to 385 Kelvin',
+        'Fused silicate dermal scales deflecting falling volcanic cinders',
+        'Direct chemosynthetic assimilation of volcanic mineral leachate',
+      ],
+    },
+    // 21. Pyritic Caldera Vapor-Spire (Volcanic: 14, 15, 22)
+    {
+      formCategory: 'Spire',
+      growthForm: 'Pyritic Caldera Vapor-Spire',
+      habitatType: 'land',
+      baseHeightM: 4.0,
+      baseSpreadM: 1.0,
+      nativeBiomes: [
+        { id: 15, name: 'Active Lava Caldera & Fissure' },
+        { id: 22, name: 'Active Volcanic Shield & Lava Caldera' },
+      ],
+      compatibleBiomeIds: [14, 15, 22],
+      reproductionMethod: 'Convective gas plume spore dispersal along active caldera vents',
+      fieldNote: (biomes) => `Towering mineralized chimney harvesting sulfurous volcanic exhalations around active calderas in ${biomes}.`,
+      adaptations: [
+        'Heavy pyrite and sulfur mineral sheath resisting boiling volcanic steam',
+        'Endolithic vascular tubules filtering hydrogen sulfide from caldera vents',
+        'Thermal gradient harvesting converting heat differentials into metabolic energy',
+      ],
+    },
+    // 22. Pyrophytic Basalt Ash-Fern (Volcanic: 14, 15, 22)
+    {
+      formCategory: 'Frond',
+      growthForm: 'Pyrophytic Basalt Ash-Fern',
+      habitatType: 'land',
+      baseHeightM: 1.6,
+      baseSpreadM: 1.5,
+      nativeBiomes: [
+        { id: 14, name: 'Basalt Volcanic Crust' },
+        { id: 22, name: 'Active Volcanic Shield & Lava Caldera' },
+      ],
+      compatibleBiomeIds: [14, 15, 22],
+      reproductionMethod: 'Heat-resistant dust spores rooting rapidly in fresh volcanic tephra',
+      fieldNote: (biomes) => `Rapidly colonizes fresh mineral tephra and basaltic lava crusts in ${biomes}.`,
+      adaptations: [
+        'Silica-reinforced stipes standing erect in scorching volcanic ashfalls',
+        'Rapid-germination root runners binding loose volcanic tephra into soil',
+        'Acid-neutralizing sap buffering high sulfur dioxide levels',
+      ],
+    },
+    // 23. Columnar Taproot Desert Spire (Arid: 9, 10, 11, 16)
+    {
+      formCategory: 'Spire',
+      growthForm: 'Columnar Taproot Desert Spire',
+      habitatType: 'land',
+      baseHeightM: 7.5,
+      baseSpreadM: 1.5,
+      nativeBiomes: [
+        { id: 10, name: 'Hyper-Arid Dunes / Desert' },
+        { id: 9, name: 'Arid Steppe / Scrub' },
+      ],
+      compatibleBiomeIds: [9, 10, 11, 16],
+      reproductionMethod: 'Windblown winged desert seeds carried on high thermal updrafts',
+      fieldNote: (biomes) => `Towering succulent spire drilling deep taproots into arid bedrock throughout ${biomes}.`,
+      adaptations: [
+        'Vertical fluted column minimizing direct midday solar exposure',
+        'Subterranean taproot drilling tens of meters to reach deep groundwater aquifers',
+        'Dense mucilaginous water storage core buffering multi-year hyper-arid droughts',
+      ],
+    },
+    // 24. Silicate Impact-Glass Litho-Mat (Arid/Craterlands: 9, 10, 11, 16)
+    {
+      formCategory: 'Mat',
+      growthForm: 'Silicate Impact-Glass Litho-Mat',
+      habitatType: 'land',
+      baseHeightM: 0.05,
+      baseSpreadM: 3.2,
+      nativeBiomes: [
+        { id: 16, name: 'Regolith Impact Craterlands' },
+        { id: 11, name: 'High Plateau / Badlands' },
+      ],
+      compatibleBiomeIds: [9, 10, 11, 16],
+      reproductionMethod: 'Windborne desiccated soredia flakes coating meteorite impact ejecta',
+      fieldNote: (biomes) => `Vitreous lichen mat binding fractured impact regolith and breccia across ${biomes}.`,
+      adaptations: [
+        'Extracellular enzyme secretion extracting potassium and iron from impact melt rock',
+        'Reflective silvery silica cuticle deflecting extreme unshielded desert sunlight',
+        'Suspended animation dormancy reviving instantly upon trace humidity condensation',
+      ],
+    },
+    // 25. Pelagic Hydrocarbon Methane-Wrack (Methane Seas: 17, 1, 23)
+    {
+      formCategory: 'Kelp',
+      growthForm: 'Pelagic Hydrocarbon Methane-Wrack',
+      habitatType: 'aquatic',
+      baseHeightM: 15.0,
+      baseSpreadM: 3.5,
+      nativeBiomes: [
+        { id: 17, name: 'Hydrocarbon Methane Sea' },
+      ],
+      compatibleBiomeIds: [17, 1, 23],
+      reproductionMethod: 'Cryogenic non-aqueous zoospores propelled along methane ocean thermoclines',
+      fieldNote: (biomes) => `Non-aqueous photosynthetic wrack drifting through cryogenic hydrocarbon seas in ${biomes}.`,
+      adaptations: [
+        'Lipid bilayer membranes stable in liquid methane down to 90 Kelvin',
+        'Polycyclic aromatic hydrocarbon pigments absorbing dim far-red photons',
+        'Silica frustule structural stipes resisting cryogenic fluid shear',
+      ],
+    },
   ];
 
   const archetypes = isMulticellular ? multicellularArchetypes : unicellularArchetypes;
 
-  // Strict planetary habitat filtering:
+  // Strict planetary habitat and ecological biome filtering:
   // - If planet has NO solid land, EXCLUDE all land-only archetypes!
   // - If planet has NO liquid oceans, EXCLUDE all aquatic-only archetypes!
-  const candidatePool = archetypes.filter(arch => {
+  // - If biomeGrid is available, the archetype MUST be ecologically compatible with at least one biome present on the planet!
+  let candidatePool = archetypes.filter(arch => {
     if (arch.habitatType === 'aquatic' && !hasLiquid) return false;
     if (arch.habitatType === 'land' && !hasLand) return false;
     if (arch.habitatType === 'amphibious' && !hasLand && !hasLiquid) return false;
 
-    // If biomeGrid is available, verify that at least one of its biomes or a compatible biome is present
+    // Strict ecological biome correspondence:
     if (presentBiomeIds.size > 0) {
-      const hasDirectBiome = arch.nativeBiomes.some(b => presentBiomeIds.has(b.id));
-      if (!hasDirectBiome) {
-        // Must have at least a compatible habitat type on the planet
-        const isWaterArch = arch.habitatType === 'aquatic';
-        const isAmphiArch = arch.habitatType === 'amphibious';
-        const hasWaterBiome = Array.from(presentBiomeIds).some(id => WATER_BIOME_IDS.has(id) || id === 8);
-        const hasSolidBiome = Array.from(presentBiomeIds).some(id => SOLID_LAND_BIOME_IDS.has(id));
-
-        if (isWaterArch && !hasWaterBiome) return false;
-        if (!isWaterArch && !isAmphiArch && !hasSolidBiome) return false;
-      }
+      const hasCompatibleBiome = arch.compatibleBiomeIds.some(id => presentBiomeIds.has(id));
+      if (!hasCompatibleBiome) return false;
     }
     return true;
   });
+
+  // Safe fallback if an exotic combination filtered all candidates:
+  if (candidatePool.length === 0) {
+    candidatePool = archetypes.filter(arch => {
+      if (arch.habitatType === 'aquatic' && !hasLiquid) return false;
+      if (arch.habitatType === 'land' && !hasLand) return false;
+      return true;
+    });
+  }
 
   // Pick diverse archetypes deterministically for this seed (supports up to 20 species)
   const selectedArchetypes: ArchetypeConfig[] = [];
@@ -1110,30 +1421,23 @@ export function generatePlantEcosystem(params: {
     const colorIdx = i % pigmentInfo.baseHexColors.length;
     const baseColor = pigmentInfo.baseHexColors[colorIdx];
 
-    // Resolve native biomes: prioritize biomes that ACTUALLY exist on this planet
+    // Resolve native biomes: ONLY biomes that ACTUALLY exist on this planet AND are ecologically compatible!
+    // 1. Direct match with archetype's preferred nativeBiomes
     let resolvedBiomes = arch.nativeBiomes.filter(b => presentBiomeIds.size === 0 || presentBiomeIds.has(b.id));
-    if (resolvedBiomes.length === 0) {
-      if (arch.habitatType === 'aquatic' || !hasLand) {
-        const waterPresent = Array.from(presentBiomeIds).filter(id => WATER_BIOME_IDS.has(id) || id === 8);
-        if (waterPresent.length > 0) {
-          resolvedBiomes = waterPresent.slice(0, 2).map(id => ({
-            id,
-            name: BIOME_NAMES[id] || 'Ocean',
-          }));
-        } else {
-          resolvedBiomes = arch.nativeBiomes;
-        }
+
+    // 2. If none of the preferred biomes are on this planet, pick compatible biomes that ARE present
+    if (resolvedBiomes.length === 0 && presentBiomeIds.size > 0) {
+      const compatiblePresent = arch.compatibleBiomeIds.filter(id => presentBiomeIds.has(id));
+      if (compatiblePresent.length > 0) {
+        resolvedBiomes = compatiblePresent.slice(0, 2).map(id => ({
+          id,
+          name: BIOME_NAMES[id] || 'Plains',
+        }));
       } else {
-        const landPresent = Array.from(presentBiomeIds).filter(id => SOLID_LAND_BIOME_IDS.has(id));
-        if (landPresent.length > 0) {
-          resolvedBiomes = landPresent.slice(0, 2).map(id => ({
-            id,
-            name: BIOME_NAMES[id] || 'Plains',
-          }));
-        } else {
-          resolvedBiomes = arch.nativeBiomes;
-        }
+        resolvedBiomes = arch.nativeBiomes;
       }
+    } else if (resolvedBiomes.length === 0) {
+      resolvedBiomes = arch.nativeBiomes;
     }
 
     const nativeBiomeIds = resolvedBiomes.map(b => b.id);
