@@ -2773,12 +2773,17 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                             handleZoomToEntity({ kind: 'star', starIdx: sIdx });
                           }
                         }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSelectedEntity({ kind: 'star', starIdx: sIdx });
+                        }}
                         onDoubleClick={(e) => {
                           e.stopPropagation();
                           setSelectedEntity({ kind: 'star', starIdx: sIdx });
                         }}
                         className="w-full text-left px-2 py-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-slate-700 flex items-center justify-between group cursor-pointer transition select-none"
-                        title={`Star ${st.label} (${st.spectralType})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Double-Click: Open Detailed Stats`}
+                        title={`Star ${st.label} (${st.spectralType})\n• Right-Click: Open Star Data Screen\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Double-Click: Open Detailed Stats`}
                       >
                         <div className="flex items-center gap-2 truncate">
                           <img
@@ -2823,6 +2828,15 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                       });
                                     }
                                   }}
+                                  onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setSelectedEntity({
+                                      kind: 'belt',
+                                      zoneIdx: sZoneIdx,
+                                      bodyIdx: bIdx,
+                                    });
+                                  }}
                                   onDoubleClick={(e) => {
                                     e.stopPropagation();
                                     setSelectedEntity({
@@ -2832,7 +2846,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                     });
                                   }}
                                   className="w-full text-left px-2 py-1 rounded text-[11px] text-slate-400 hover:text-slate-200 hover:bg-slate-900/60 flex items-center justify-between cursor-pointer transition select-none"
-                                  title={`${b.role || 'Asteroid Belt'} (${b.a.toFixed(2)} AU)\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Double-Click: Open Detailed Stats`}
+                                  title={`${b.role || 'Asteroid Belt'} (${b.a.toFixed(2)} AU)\n• Right-Click: Open Belt Data Screen\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Double-Click: Open Detailed Stats`}
                                 >
                                   <div className="flex items-center gap-1.5 truncate">
                                     <span className="text-slate-600 text-[10px]">├─</span>
@@ -2856,77 +2870,49 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                               selectedEntity.zoneIdx === sZoneIdx &&
                               selectedEntity.bodyIdx === bIdx;
 
-                            return (
-                              <div key={`tree-planet-${sZoneIdx}-${bIdx}`} className="space-y-0.5">
+                              return (
                                 <div
-                                  className={`flex items-center justify-between px-2 py-1 rounded-lg border transition ${
-                                    isTracked
-                                      ? 'bg-sky-950/80 border-sky-500 text-sky-200'
-                                      : isDossier
-                                      ? 'bg-slate-800/90 border-slate-600 text-white'
-                                      : 'bg-slate-950/50 hover:bg-slate-900 border-transparent hover:border-slate-800 text-slate-300'
-                                  }`}
+                                  key={`tree-planet-${sZoneIdx}-${bIdx}`}
+                                  className="space-y-0.5"
+                                  onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setSelectedEntity({
+                                      kind: 'planet',
+                                      zoneIdx: sZoneIdx,
+                                      bodyIdx: bIdx,
+                                    });
+                                  }}
                                 >
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (e.shiftKey) {
-                                        handleTrackBody({
-                                          kind: 'planet',
-                                          zoneIdx: sZoneIdx,
-                                          bodyIdx: bIdx,
-                                        });
-                                      } else {
-                                        handleZoomToEntity({
-                                          kind: 'planet',
-                                          zoneIdx: sZoneIdx,
-                                          bodyIdx: bIdx,
-                                        });
-                                      }
-                                    }}
-                                    onDoubleClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedEntity({
-                                        kind: 'planet',
-                                        zoneIdx: sZoneIdx,
-                                        bodyIdx: bIdx,
-                                      });
-                                    }}
-                                    className="flex items-center gap-1.5 truncate flex-1 text-left cursor-pointer mr-1 select-none"
-                                    title={`Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}
+                                  <div
+                                    className={`flex items-center justify-between px-2 py-1 rounded-lg border transition ${
+                                      isTracked
+                                        ? 'bg-sky-950/80 border-sky-500 text-sky-200'
+                                        : isDossier
+                                        ? 'bg-slate-800/90 border-slate-600 text-white'
+                                        : 'bg-slate-950/50 hover:bg-slate-900 border-transparent hover:border-slate-800 text-slate-300'
+                                    }`}
                                   >
-                                    <span className="text-slate-600 text-[10px]">├─</span>
-                                    <span
-                                      className="w-2 h-2 rounded-full shrink-0"
-                                      style={{
-                                        backgroundColor: getPlanetVisualColor(b),
-                                      }}
-                                    />
-                                    <span className="truncate text-[11px]">
-                                      #{bIdx + 1} {shortClassLabel(b.planetClass)}
-                                    </span>
-                                    {b.moons.length > 0 && (
-                                      <span className="text-[9px] text-indigo-300 bg-indigo-950/80 px-1 rounded font-mono">
-                                        {b.moons.length}☾
-                                      </span>
-                                    )}
-                                    {b.hydrosphere?.biosphere && b.hydrosphere.biosphere !== 'none' && (
-                                      <span
-                                        className="text-[10px]"
-                                        title={`Biosphere: ${b.hydrosphere.biosphere} (${b.hydrosphere.solvent || 'water'})`}
-                                      >
-                                        🌱
-                                      </span>
-                                    )}
-                                  </button>
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    <span className="text-[10px] text-slate-400 font-mono">
-                                      {b.a.toFixed(2)} AU
-                                    </span>
                                     <button
                                       type="button"
                                       onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (e.shiftKey) {
+                                          handleTrackBody({
+                                            kind: 'planet',
+                                            zoneIdx: sZoneIdx,
+                                            bodyIdx: bIdx,
+                                          });
+                                        } else {
+                                          handleZoomToEntity({
+                                            kind: 'planet',
+                                            zoneIdx: sZoneIdx,
+                                            bodyIdx: bIdx,
+                                          });
+                                        }
+                                      }}
+                                      onContextMenu={(e) => {
+                                        e.preventDefault();
                                         e.stopPropagation();
                                         setSelectedEntity({
                                           kind: 'planet',
@@ -2934,37 +2920,48 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                           bodyIdx: bIdx,
                                         });
                                       }}
-                                      className="p-1 rounded text-slate-500 hover:text-sky-300 hover:bg-slate-800 cursor-pointer"
-                                      title="Open Detailed Stats Dossier"
+                                      onDoubleClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedEntity({
+                                          kind: 'planet',
+                                          zoneIdx: sZoneIdx,
+                                          bodyIdx: bIdx,
+                                        });
+                                      }}
+                                      className="flex items-center gap-1.5 truncate flex-1 text-left cursor-pointer mr-1 select-none"
+                                      title={`Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click / Right-Click: Open Detailed Stats`}
                                     >
-                                      <Maximize2 className="w-2.5 h-2.5" />
+                                      <span className="text-slate-600 text-[10px]">├─</span>
+                                      <span
+                                        className="w-2 h-2 rounded-full shrink-0"
+                                        style={{
+                                          backgroundColor: getPlanetVisualColor(b),
+                                        }}
+                                      />
+                                      <span className="truncate text-[11px]">
+                                        #{bIdx + 1} {shortClassLabel(b.planetClass)}
+                                      </span>
+                                      {b.moons.length > 0 && (
+                                        <span className="text-[9px] text-indigo-300 bg-indigo-950/80 px-1 rounded font-mono">
+                                          {b.moons.length}☾
+                                        </span>
+                                      )}
+                                      {b.hydrosphere?.biosphere && b.hydrosphere.biosphere !== 'none' && (
+                                        <span
+                                          className="text-[10px]"
+                                          title={`Biosphere: ${b.hydrosphere.biosphere} (${b.hydrosphere.solvent || 'water'})`}
+                                        >
+                                          🌱
+                                        </span>
+                                      )}
                                     </button>
-                                  </div>
-                                </div>
-
-                                {/* Ring Belt & Moons under this planet */}
-                                {(b.ringSystem || b.moons.length > 0) && (
-                                  <div className="ml-4 pl-2 border-l border-slate-800/80 space-y-0.5">
-                                    {b.ringSystem && (
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <span className="text-[10px] text-slate-400 font-mono">
+                                        {b.a.toFixed(2)} AU
+                                      </span>
                                       <button
                                         type="button"
                                         onClick={(e) => {
-                                          e.stopPropagation();
-                                          if (e.shiftKey) {
-                                            handleTrackBody({
-                                              kind: 'planet',
-                                              zoneIdx: sZoneIdx,
-                                              bodyIdx: bIdx,
-                                            });
-                                          } else {
-                                            handleZoomToEntity({
-                                              kind: 'planet',
-                                              zoneIdx: sZoneIdx,
-                                              bodyIdx: bIdx,
-                                            });
-                                          }
-                                        }}
-                                        onDoubleClick={(e) => {
                                           e.stopPropagation();
                                           setSelectedEntity({
                                             kind: 'planet',
@@ -2972,54 +2969,81 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                             bodyIdx: bIdx,
                                           });
                                         }}
-                                        className="w-full flex items-center justify-between px-1.5 py-0.5 rounded text-[10px] text-amber-300/85 hover:text-amber-200 hover:bg-amber-950/30 transition cursor-pointer select-none"
-                                        title={`Planetary Ring Belt: ${b.ringSystem.ringClass}\n• Inner–Outer: ${formatDistanceKm(b.ringSystem.innerRadiusKm)}–${formatDistanceKm(b.ringSystem.outerRadiusKm)}\n• Composition: ${b.ringSystem.compositionLabel}\n• Click: Zoom to\n• Double-Click: Open Stats`}
+                                        className="p-1 rounded text-slate-500 hover:text-sky-300 hover:bg-slate-800 cursor-pointer"
+                                        title="Open Detailed Stats Dossier"
                                       >
-                                        <span className="truncate">
-                                          └─ 🪐 {b.ringSystem.ringClass.replace(/\s*\([^)]*\)/g, '')}
-                                        </span>
-                                        <span className="text-[9px] text-amber-400/80 font-mono shrink-0 ml-1">
-                                          {b.ringSystem.innerRadiusKm.toLocaleString()}–{b.ringSystem.outerRadiusKm.toLocaleString()} km
-                                        </span>
+                                        <Maximize2 className="w-2.5 h-2.5" />
                                       </button>
-                                    )}
-                                    {b.moons.map((m, mIdx) => {
-                                      const isMoonTracked =
-                                        trackedTarget?.kind === 'moon' &&
-                                        trackedTarget.zoneIdx === sZoneIdx &&
-                                        trackedTarget.bodyIdx === bIdx &&
-                                        trackedTarget.moonIdx === mIdx;
+                                    </div>
+                                  </div>
 
-                                      return (
-                                        <div
-                                          key={`tree-moon-${sZoneIdx}-${bIdx}-${mIdx}`}
-                                          className={`flex items-center justify-between px-1.5 py-0.5 rounded text-[10px] transition ${
-                                            isMoonTracked
-                                              ? 'bg-indigo-950/80 text-indigo-200 border border-indigo-500/70'
-                                              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
-                                          }`}
+                                  {/* Ring Belt & Moons under this planet */}
+                                  {(b.ringSystem || b.moons.length > 0) && (
+                                    <div className="ml-4 pl-2 border-l border-slate-800/80 space-y-0.5">
+                                      {b.ringSystem && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (e.shiftKey) {
+                                              handleTrackBody({
+                                                kind: 'planet',
+                                                zoneIdx: sZoneIdx,
+                                                bodyIdx: bIdx,
+                                              });
+                                            } else {
+                                              handleZoomToEntity({
+                                                kind: 'planet',
+                                                zoneIdx: sZoneIdx,
+                                                bodyIdx: bIdx,
+                                              });
+                                            }
+                                          }}
+                                          onContextMenu={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setSelectedEntity({
+                                              kind: 'planet',
+                                              zoneIdx: sZoneIdx,
+                                              bodyIdx: bIdx,
+                                            });
+                                          }}
+                                          onDoubleClick={(e) => {
+                                            e.stopPropagation();
+                                            setSelectedEntity({
+                                              kind: 'planet',
+                                              zoneIdx: sZoneIdx,
+                                              bodyIdx: bIdx,
+                                            });
+                                          }}
+                                          className="w-full flex items-center justify-between px-1.5 py-0.5 rounded text-[10px] text-amber-300/85 hover:text-amber-200 hover:bg-amber-950/30 transition cursor-pointer select-none"
+                                          title={`Planetary Ring Belt: ${b.ringSystem.ringClass}\n• Inner–Outer: ${formatDistanceKm(b.ringSystem.innerRadiusKm)}–${formatDistanceKm(b.ringSystem.outerRadiusKm)}\n• Composition: ${b.ringSystem.compositionLabel}\n• Click: Zoom to\n• Double-Click / Right-Click: Open Stats`}
                                         >
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              if (e.shiftKey) {
-                                                handleTrackBody({
-                                                  kind: 'moon',
-                                                  zoneIdx: sZoneIdx,
-                                                  bodyIdx: bIdx,
-                                                  moonIdx: mIdx,
-                                                });
-                                              } else {
-                                                handleZoomToEntity({
-                                                  kind: 'moon',
-                                                  zoneIdx: sZoneIdx,
-                                                  bodyIdx: bIdx,
-                                                  moonIdx: mIdx,
-                                                });
-                                              }
-                                            }}
-                                            onDoubleClick={(e) => {
+                                          <span className="truncate">
+                                            └─ 🪐 {b.ringSystem.ringClass.replace(/\s*\([^)]*\)/g, '')}
+                                          </span>
+                                          <span className="text-[9px] text-amber-400/80 font-mono shrink-0 ml-1">
+                                            {b.ringSystem.innerRadiusKm.toLocaleString()}–{b.ringSystem.outerRadiusKm.toLocaleString()} km
+                                          </span>
+                                        </button>
+                                      )}
+                                      {b.moons.map((m, mIdx) => {
+                                        const isMoonTracked =
+                                          trackedTarget?.kind === 'moon' &&
+                                          trackedTarget.zoneIdx === sZoneIdx &&
+                                          trackedTarget.bodyIdx === bIdx &&
+                                          trackedTarget.moonIdx === mIdx;
+
+                                        return (
+                                          <div
+                                            key={`tree-moon-${sZoneIdx}-${bIdx}-${mIdx}`}
+                                            className={`flex items-center justify-between px-1.5 py-0.5 rounded text-[10px] transition ${
+                                              isMoonTracked
+                                                ? 'bg-indigo-950/80 text-indigo-200 border border-indigo-500/70'
+                                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                                            }`}
+                                            onContextMenu={(e) => {
+                                              e.preventDefault();
                                               e.stopPropagation();
                                               setSelectedEntity({
                                                 kind: 'moon',
@@ -3028,24 +3052,64 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                                 moonIdx: mIdx,
                                               });
                                             }}
-                                            className="flex items-center gap-1 truncate flex-1 text-left cursor-pointer select-none"
-                                            title={`Moon: ${m.name} (${m.moonClass})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}
                                           >
-                                            <span className="text-slate-600 text-[9px]">└─</span>
-                                            <span className="truncate">
-                                              {m.name || `Moon ${mIdx + 1}`}
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (e.shiftKey) {
+                                                  handleTrackBody({
+                                                    kind: 'moon',
+                                                    zoneIdx: sZoneIdx,
+                                                    bodyIdx: bIdx,
+                                                    moonIdx: mIdx,
+                                                  });
+                                                } else {
+                                                  handleZoomToEntity({
+                                                    kind: 'moon',
+                                                    zoneIdx: sZoneIdx,
+                                                    bodyIdx: bIdx,
+                                                    moonIdx: mIdx,
+                                                  });
+                                                }
+                                              }}
+                                              onContextMenu={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                setSelectedEntity({
+                                                  kind: 'moon',
+                                                  zoneIdx: sZoneIdx,
+                                                  bodyIdx: bIdx,
+                                                  moonIdx: mIdx,
+                                                });
+                                              }}
+                                              onDoubleClick={(e) => {
+                                                e.stopPropagation();
+                                                setSelectedEntity({
+                                                  kind: 'moon',
+                                                  zoneIdx: sZoneIdx,
+                                                  bodyIdx: bIdx,
+                                                  moonIdx: mIdx,
+                                                });
+                                              }}
+                                              className="flex items-center gap-1 truncate flex-1 text-left cursor-pointer select-none"
+                                              title={`Moon: ${m.name} (${m.moonClass})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click / Right-Click: Open Detailed Stats`}
+                                            >
+                                              <span className="text-slate-600 text-[9px]">└─</span>
+                                              <span className="truncate">
+                                                {m.name || `Moon ${mIdx + 1}`}
+                                              </span>
+                                            </button>
+                                            <span className="text-[9px] text-slate-500 font-mono shrink-0 ml-1">
+                                              {m.radiusKm.toLocaleString()} km
                                             </span>
-                                          </button>
-                                          <span className="text-[9px] text-slate-500 font-mono shrink-0 ml-1">
-                                            {m.radiusKm.toLocaleString()} km
-                                          </span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
                           })}
                         </div>
                       )}
@@ -3085,6 +3149,15 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                     });
                                   }
                                 }}
+                                onContextMenu={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setSelectedEntity({
+                                    kind: 'belt',
+                                    zoneIdx: zIdx,
+                                    bodyIdx: bIdx,
+                                  });
+                                }}
                                 onDoubleClick={(e) => {
                                   e.stopPropagation();
                                   setSelectedEntity({
@@ -3094,7 +3167,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                   });
                                 }}
                                 className="w-full text-left px-2 py-1 rounded text-[11px] text-amber-300/70 hover:text-amber-200 hover:bg-amber-950/40 flex items-center justify-between cursor-pointer transition select-none"
-                                title={`Circumbinary Belt: ${b.role || 'Belt'}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Double-Click: Open Detailed Stats`}
+                                title={`Circumbinary Belt: ${b.role || 'Belt'}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Double-Click / Right-Click: Open Detailed Stats`}
                               >
                                 <span>{b.role || 'Belt'}</span>
                                 <span className="text-[10px]">{b.a.toFixed(2)} AU</span>
@@ -3114,6 +3187,15 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                   ? 'bg-sky-950 border-sky-500 text-sky-200'
                                   : 'bg-slate-950/40 hover:bg-slate-900 border-transparent text-slate-300'
                               }`}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setSelectedEntity({
+                                  kind: 'planet',
+                                  zoneIdx: zIdx,
+                                  bodyIdx: bIdx,
+                                });
+                              }}
                             >
                               <button
                                 type="button"
@@ -3133,6 +3215,15 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                     });
                                   }
                                 }}
+                                onContextMenu={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setSelectedEntity({
+                                    kind: 'planet',
+                                    zoneIdx: zIdx,
+                                    bodyIdx: bIdx,
+                                  });
+                                }}
                                 onDoubleClick={(e) => {
                                   e.stopPropagation();
                                   setSelectedEntity({
@@ -3142,7 +3233,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                   });
                                 }}
                                 className="flex items-center gap-1.5 truncate flex-1 text-left cursor-pointer select-none"
-                                title={`Circumbinary Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}
+                                title={`Circumbinary Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click / Right-Click: Open Detailed Stats`}
                               >
                                 <span
                                   className="w-2 h-2 rounded-full shrink-0"
@@ -3886,6 +3977,15 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                 });
                               }
                             }}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setSelectedEntity({
+                                kind: 'belt',
+                                zoneIdx: zIdx,
+                                bodyIdx: bIdx,
+                              });
+                            }}
                             onDoubleClick={(e) => {
                               e.stopPropagation();
                               setSelectedEntity({
@@ -3895,6 +3995,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                               });
                             }}
                           >
+                            <title>{`${b.role || 'Asteroid Belt'} (${b.a.toFixed(2)} AU)\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Right-Click / Double-Click: Open Detailed Stats`}</title>
                             {/* Subtle diffuse zodiacal dust glow & wide transparent click hit-ring */}
                             {beltPath && (
                               <path
@@ -4368,6 +4469,16 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                           });
                                         }
                                       }}
+                                      onContextMenu={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setSelectedEntity({
+                                          kind: 'moon',
+                                          zoneIdx: zIdx,
+                                          bodyIdx: bIdx,
+                                          moonIdx: mIdx,
+                                        });
+                                      }}
                                       onDoubleClick={(e) => {
                                         e.stopPropagation();
                                         if (onOpenSurfaceGen && systemResult) {
@@ -4387,7 +4498,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                         }
                                       }}
                                     >
-                                      <title>{`${m.name} (${m.moonClass})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Detailed Stats`}</title>
+                                      <title>{`${m.name} (${m.moonClass})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Right-Click: Open Detailed Stats (Dossier)\n• Double-Click: Open Surface View`}</title>
                                       <ellipse
                                         cx={pProj.x}
                                         cy={pProj.y}
@@ -4468,6 +4579,15 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                       });
                                     }
                                   }}
+                                  onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setSelectedEntity({
+                                      kind: 'planet',
+                                      zoneIdx: zIdx,
+                                      bodyIdx: bIdx,
+                                    });
+                                  }}
                                   onDoubleClick={(e) => {
                                     e.stopPropagation();
                                     if (onOpenSurfaceGen && systemResult) {
@@ -4486,7 +4606,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                                     }
                                   }}
                                 >
-                                  <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}${b.ringSystem ? `\nRing System: ${b.ringSystem.ringClass} (${b.ringSystem.innerRadiusKm.toLocaleString()}–${b.ringSystem.outerRadiusKm.toLocaleString()} km, ${b.ringSystem.compositionLabel})` : ''}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Double-Click: Open Planetary Surface Generator`}</title>
+                                  <title>{`${claimInfo ? `[${claimInfo.empire.name} — ${claimInfo.designation}] ` : ''}Planet #${bIdx + 1}: ${b.planetClass.replace(/\s*\([^)]*\)/g, '')}${b.ringSystem ? `\nRing System: ${b.ringSystem.ringClass} (${b.ringSystem.innerRadiusKm.toLocaleString()}–${b.ringSystem.outerRadiusKm.toLocaleString()} km, ${b.ringSystem.compositionLabel})` : ''}\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track Orbit\n• Right-Click: Open Detailed Stats (Dossier)\n• Double-Click: Open Planetary Surface Generator`}</title>
                                   {/* Invisible click target for easy selection */}
                                   <circle
                                     cx={pProj.x}
@@ -4901,12 +5021,17 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                           handleZoomToEntity({ kind: 'star', starIdx: sIdx });
                         }
                       }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSelectedEntity({ kind: 'star', starIdx: sIdx });
+                      }}
                       onDoubleClick={(e) => {
                         e.stopPropagation();
                         setSelectedEntity({ kind: 'star', starIdx: sIdx });
                       }}
                     >
-                      <title>{`Star ${st.label} (${st.spectralType})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Double-Click: Open Detailed Stats`}</title>
+                      <title>{`Star ${st.label} (${st.spectralType})\n• Click: Zoom to\n• Shift+Click: Lock Camera & Track\n• Right-Click / Double-Click: Open Detailed Stats`}</title>
                       <defs>
                         <radialGradient
                           id={starGradId}
@@ -5045,7 +5170,7 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
                 fontFamily="monospace"
               >
                 3D Pitch {Math.round((orreryPitch * 180) / Math.PI)}° · Yaw{' '}
-                {Math.round(((orreryYaw * 180) / Math.PI) % 360)}° · Click: Dossier · Shift+Click: Track Body · Drag: Rotate · Shift+Drag: Pan
+                {Math.round(((orreryYaw * 180) / Math.PI) % 360)}° · Click: Zoom · Right-Click: Planet Data · Shift+Click: Track Orbit · Double-Click: Surface · Drag: Rotate
               </text>
             </g>
           </svg>
