@@ -35,6 +35,7 @@ import {
   ridgedFbm2D,
 } from './terrainNoise';
 import { evaluateDetailedBiomeTexel } from './detailedBiomeTextures';
+import { onBiomeTexturesLoaded } from '../../../core/textures/biomeTextureAtlas';
 
 interface FirstPersonSurfaceViewProps {
   surfaceModel: PlanetarySurfaceModel;
@@ -95,6 +96,13 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
   const [showGeologyPanel, setShowGeologyPanel] = useState<boolean>(false);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [hudHeadingDeg, setHudHeadingDeg] = useState<number>(0);
+  const [textureVersion, setTextureVersion] = useState<number>(0);
+
+  useEffect(() => {
+    return onBiomeTexturesLoaded(() => {
+      setTextureVersion((v) => v + 1);
+    });
+  }, []);
 
   // Mutable camera state for 60fps smooth first-person navigation
   const camRef = useRef<{
@@ -1043,7 +1051,7 @@ export const FirstPersonSurfaceView: React.FC<FirstPersonSurfaceViewProps> = ({
       mip2NZ,
       effCloudCover,
     };
-  }, [surfaceModel, activeTile, neighborTiles, pBarAtmo, hasAtmosphere]);
+  }, [surfaceModel, activeTile, neighborTiles, pBarAtmo, hasAtmosphere, textureVersion]);
 
   // Keyboard listener for WASD / Arrow movement
   useEffect(() => {

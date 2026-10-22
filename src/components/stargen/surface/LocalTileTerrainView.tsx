@@ -38,6 +38,7 @@ import {
   LocalTri,
 } from './tileTerrainRasterizer';
 import { evaluateDetailedBiomeTexel } from './detailedBiomeTextures';
+import { onBiomeTexturesLoaded } from '../../../core/textures/biomeTextureAtlas';
 
 interface LocalTileTerrainViewProps {
   surfaceModel: PlanetarySurfaceModel;
@@ -131,6 +132,15 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
   const [showGeologyPanel, setShowGeologyPanel] = useState<boolean>(false);
   const [showClouds3D, setShowClouds3D] = useState<boolean>(true);
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [textureVersion, setTextureVersion] = useState<number>(0);
+
+  useEffect(() => {
+    return onBiomeTexturesLoaded(() => {
+      tileMeshCache.clear();
+      setTextureVersion((v) => v + 1);
+    });
+  }, []);
+
   const dragRafRef = useRef<number | null>(null);
   const dragRef = useRef<{
     startX: number;
@@ -1370,7 +1380,7 @@ export const LocalTileTerrainView: React.FC<LocalTileTerrainViewProps> = ({
     tileMeshCache.set(cacheKey, result);
 
     return result;
-  }, [surfaceModel, activeTile, neighborTiles, pBarAtmo, hasAtmosphere]);
+  }, [surfaceModel, activeTile, neighborTiles, pBarAtmo, hasAtmosphere, textureVersion]);
 
   // Render the Per-Pixel Textured & Bump-Mapped 3D Hexagonal Biome Block + Infinite Perspective Plane to Canvas
   useEffect(() => {
