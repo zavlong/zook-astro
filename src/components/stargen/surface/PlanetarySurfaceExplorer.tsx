@@ -88,6 +88,11 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
   // Procedural Plant Ecosystem & Xenoflora
   const ecosystem = useMemo(() => {
+    const coveragePct = (moon ? moon.hydrosphere?.coveragePct : planet.hydrosphere?.coveragePct) ?? (surfaceModel.hasLiquid ? 70 : 0);
+    const hasLand = surfaceModel.hasLiquid
+      ? coveragePct < 100 && !surfaceModel.isNoSurface
+      : true;
+
     return generatePlantEcosystem({
       seed: surfaceModel.seed,
       hasBiosphere: surfaceModel.hasBiosphere,
@@ -97,6 +102,8 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       pressureBar: moon ? moon.pressureBar : planet.pressureBar,
       solventKey: surfaceModel.seaPalette?.solventKey || (moon ? moon.hydrosphere?.solvent : planet.hydrosphere?.solvent) || 'H2O',
       hasLiquid: surfaceModel.hasLiquid,
+      hasLand,
+      coveragePct,
       biomeGrid: surfaceModel.biomeGrid,
     });
   }, [surfaceModel, planet, moon, stars]);

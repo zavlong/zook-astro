@@ -153,6 +153,10 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
     const seed = isMoon && activeMoon
       ? Math.round(activeMoon.radiusKm * 31 + (activeMoon.surfaceTempK || 200))
       : Math.round(hostPlanet.a * 1000 + hostPlanet.massEarth * 100);
+    const covPct = hydro?.coveragePct ?? (hostPlanet.planetClass.includes('Ocean') ? 100 : 0);
+    const hasLand = covPct < 100 && !hostPlanet.planetClass.includes('Gas') && !hostPlanet.planetClass.includes('Supercritical');
+    const hasLiquid = covPct > 0;
+
     return generatePlantEcosystem({
       seed,
       hasBiosphere: Boolean(hydro?.biosphere),
@@ -162,7 +166,9 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
       gravityG: isMoon && activeMoon ? activeMoon.gravityG : hostPlanet.gravityG,
       pressureBar: pBar,
       solventKey: hydro?.solvent || 'H2O',
-      hasLiquid: hydro?.coveragePct !== undefined ? hydro.coveragePct > 0 : true,
+      hasLiquid,
+      hasLand,
+      coveragePct: covPct,
     });
   }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, systemResult, pBar]);
 

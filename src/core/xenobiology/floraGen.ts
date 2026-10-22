@@ -411,6 +411,38 @@ function getPigmentRegime(starTeff: number, solventKey: string): {
   }
 }
 
+// Planetary Biome Categories for Xenoflora Habitat Distribution
+export const WATER_BIOME_IDS = new Set<number>([0, 1, 2, 17, 23]);
+export const POLAR_ICE_BIOME_IDS = new Set<number>([8, 18, 21]);
+export const SOLID_LAND_BIOME_IDS = new Set<number>([
+  3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 18, 21, 22
+]);
+
+export const BIOME_NAMES: Record<number, string> = {
+  0: 'Abyssal Trench',
+  1: 'Deep Ocean',
+  2: 'Continental Shelf / Shallows',
+  3: 'Coastal Alluvial Basin',
+  4: 'Lowland Silicate Plains',
+  5: 'Temperate Continental Basin',
+  6: 'High-Latitude Rocky Steppe',
+  7: 'Tundra / Permafrost',
+  8: 'Polar Glacial Ice',
+  9: 'Arid Steppe / Scrub',
+  10: 'Hyper-Arid Dunes / Desert',
+  11: 'High Plateau / Badlands',
+  12: 'Mountain Cordillera',
+  13: 'Alpine Glacial Peaks',
+  14: 'Basalt Volcanic Crust',
+  15: 'Active Lava Caldera & Fissure',
+  16: 'Regolith Impact Craterlands',
+  17: 'Hydrocarbon Methane Sea',
+  18: 'Cryovolcanic Nitrogen Plains',
+  21: 'Cryotectonic Ice Fissure (Linea)',
+  22: 'Active Volcanic Shield & Lava Caldera',
+  23: 'Algal Sea',
+};
+
 /**
  * Generate the plant ecosystem summary and species catalog for a world.
  */
@@ -424,6 +456,8 @@ export function generatePlantEcosystem(params: {
   pressureBar?: number | null;
   solventKey?: string;
   hasLiquid?: boolean;
+  hasLand?: boolean;
+  coveragePct?: number;
   biomeGrid?: Uint8Array;
 }): PlanetaryEcosystemSummary {
   const {
@@ -435,7 +469,7 @@ export function generatePlantEcosystem(params: {
     gravityG = 1.0,
     pressureBar = 1.0,
     solventKey = 'H2O',
-    hasLiquid = true,
+    biomeGrid,
   } = params;
 
   if (!hasBiosphere) {
@@ -453,6 +487,44 @@ export function generatePlantEcosystem(params: {
       summaryText: 'Devoid of autotrophic vegetation. Extreme abiotic radiation and lack of self-replicating biochemical pathways prevent indigenous plant life.',
       speciesList: [],
     };
+  }
+
+  // 1. Analyze biome grid to determine which biomes actually exist on this planet
+  const presentBiomeIds = new Set<number>();
+  if (biomeGrid && biomeGrid.length > 0) {
+    for (let i = 0; i < biomeGrid.length; i++) {
+      presentBiomeIds.add(biomeGrid[i]);
+    }
+  }
+
+  // 2. Strict evaluation of whether this planet has solid dry land vs. is a global ocean world
+  let hasLand = params.hasLand;
+  if (hasLand === undefined) {
+    if (presentBiomeIds.size > 0) {
+      hasLand = Array.from(presentBiomeIds).some(id => SOLID_LAND_BIOME_IDS.has(id));
+    } else if (params.coveragePct !== undefined) {
+      hasLand = params.coveragePct < 100;
+    } else {
+      hasLand = true;
+    }
+  } else if (hasLand && presentBiomeIds.size > 0) {
+    // If biomeGrid is provided and has zero solid land biomes (only ocean + floating sea ice), force hasLand to false!
+    const hasAnySolidBiome = Array.from(presentBiomeIds).some(id => SOLID_LAND_BIOME_IDS.has(id));
+    if (!hasAnySolidBiome) {
+      hasLand = false;
+    }
+  }
+
+  // 3. Strict evaluation of whether this planet has surface liquid oceans / seas
+  let hasLiquid = params.hasLiquid;
+  if (hasLiquid === undefined) {
+    if (presentBiomeIds.size > 0) {
+      hasLiquid = Array.from(presentBiomeIds).some(id => WATER_BIOME_IDS.has(id));
+    } else if (params.coveragePct !== undefined) {
+      hasLiquid = params.coveragePct > 0;
+    } else {
+      hasLiquid = true;
+    }
   }
 
   const rng = createSeedRng(seed ^ 0x4f19b7d2);
@@ -500,20 +572,22 @@ export function generatePlantEcosystem(params: {
   interface ArchetypeConfig {
     formCategory: 'Tree' | 'Frond' | 'Cushion' | 'Mat' | 'Kelp' | 'Spire';
     growthForm: string;
+    habitatType: 'land' | 'aquatic' | 'amphibious';
     baseHeightM: number;
     baseSpreadM: number;
     nativeBiomes: { id: number; name: string }[];
     reproductionMethod: string;
     fieldNote: (biomes: string) => string;
     adaptations: string[];
-    isAquatic?: boolean;
   }
 
-  // Unicellular archetypes: no tree models, only colored soil, biological crusts, and algal plains
+  // Unicellular archetypes
   const unicellularArchetypes: ArchetypeConfig[] = [
+    // 1. Terrestrial Soil Crust (Land only)
     {
       formCategory: 'Mat',
       growthForm: 'Terrestrial Biological Soil Crust & Algal Mat',
+      habitatType: 'land',
       baseHeightM: 0.005,
       baseSpreadM: 6.0,
       nativeBiomes: [
@@ -528,14 +602,16 @@ export function generatePlantEcosystem(params: {
         'Direct atmospheric nitrogen fixation enriching barren soil',
       ],
     },
+    // 2. Continental Stromatolitic Mat (Land / Intertidal)
     {
       formCategory: 'Mat',
       growthForm: 'Continental Stromatolitic Algal Mat',
+      habitatType: 'land',
       baseHeightM: 0.035,
       baseSpreadM: 4.5,
       nativeBiomes: [
         { id: 5, name: 'Algal Plains' },
-        { id: 3, name: 'Coastal Algal Mat Basin' },
+        { id: 3, name: 'Coastal Alluvial Basin' },
       ],
       reproductionMethod: 'Colonial budding and benthic extracellular slime accretion',
       fieldNote: (biomes) => `Forms layered, terraced microbial mats along shallow shores and basins across ${biomes}.`,
@@ -545,9 +621,11 @@ export function generatePlantEcosystem(params: {
         'Carbonate mineral precipitation consolidating loose silt into stone',
       ],
     },
+    // 3. Endolithic Biofilm (Land only)
     {
       formCategory: 'Cushion',
       growthForm: 'Endolithic Radiotolerant Soil Biofilm',
+      habitatType: 'land',
       baseHeightM: 0.002,
       baseSpreadM: 2.8,
       nativeBiomes: [
@@ -563,14 +641,17 @@ export function generatePlantEcosystem(params: {
         'Osmotic sugar synthesis buffering rapid daily temperature swings',
       ],
     },
+    // 4. Sub-Polar Cryophilic Biofilm (Amphibious - can colonize floating sea ice or tundra)
     {
       formCategory: 'Spire',
       growthForm: 'Sub-Polar Cryophilic Algal Biofilm',
+      habitatType: 'amphibious',
       baseHeightM: 0.004,
       baseSpreadM: 3.2,
       nativeBiomes: [
-        { id: 6, name: 'Sub-Polar Algal Plains' },
+        { id: 8, name: 'Polar Glacial Ice' },
         { id: 7, name: 'Tundra / Permafrost' },
+        { id: 6, name: 'High-Latitude Rocky Steppe' },
       ],
       reproductionMethod: 'Cryo-dormant spore encapsulation in permafrost pores',
       fieldNote: (biomes) => `Cold-active microbial film colonizing snowpack, ice sheets, and permafrost in ${biomes}.`,
@@ -580,13 +661,16 @@ export function generatePlantEcosystem(params: {
         'Dark surface pigments absorbing solar thermal radiation to melt surrounding ice',
       ],
     },
+    // 5. Pelagic Marine Micro-Algae (Aquatic only)
     {
       formCategory: 'Kelp',
       growthForm: 'Pelagic Marine Micro-Algal Bloom',
+      habitatType: 'aquatic',
       baseHeightM: 0.001,
       baseSpreadM: 18.0,
       nativeBiomes: [
         { id: 23, name: 'Algal Sea' },
+        { id: 1, name: 'Deep Ocean' },
         { id: 2, name: 'Continental Shelf / Shallows' },
       ],
       reproductionMethod: 'Exponential asexual division in photic surface waters',
@@ -596,38 +680,78 @@ export function generatePlantEcosystem(params: {
         'Protective silica frustule shells resisting hydrodynamic shearing',
         'Bioluminescent flash responses deterring nocturnal micro-grazers',
       ],
-      isAquatic: true,
     },
+    // 6. Coastal Cyanobacterial Mat (Aquatic / Coast)
     {
       formCategory: 'Mat',
       growthForm: 'Estuarine Coastal Cyanobacterial Mat',
+      habitatType: 'aquatic',
       baseHeightM: 0.015,
       baseSpreadM: 5.0,
       nativeBiomes: [
-        { id: 3, name: 'Coastal Algal Mat Basin' },
         { id: 2, name: 'Continental Shelf / Shallows' },
+        { id: 1, name: 'Deep Ocean' },
       ],
       reproductionMethod: 'Horizontal gliding trichome filaments across intertidal silt',
-      fieldNote: (biomes) => `Fibrous microbial mat binding tidal silt and mudflats across ${biomes}.`,
+      fieldNote: (biomes) => `Fibrous microbial mat binding tidal silt and shallow shoals across ${biomes}.`,
       adaptations: [
         'Mucilage sheaths buffering extreme salinity shifts across tidal cycles',
         'Dynamic pigment migration adapting to changing water depths',
         'Facultative anoxygenic metabolism when buried under storm silt',
       ],
     },
+    // 7. Floating Neuston Biofilm Sheet (Aquatic only - open ocean)
+    {
+      formCategory: 'Mat',
+      growthForm: 'Pelagic Floating Neuston Biofilm Sheet',
+      habitatType: 'aquatic',
+      baseHeightM: 0.002,
+      baseSpreadM: 12.0,
+      nativeBiomes: [
+        { id: 1, name: 'Deep Ocean' },
+        { id: 23, name: 'Algal Sea' },
+      ],
+      reproductionMethod: 'Surface surfactant budding propelled across pelagic wave crests',
+      fieldNote: (biomes) => `Forms iridescent lipid biofilm slicks across open ocean currents in ${biomes}.`,
+      adaptations: [
+        'Hydrophobic lipid matrix keeping cell colonies floating on surface water tension',
+        'UV-quenching carotenoid shields protecting against unshielded pelagic sun',
+        'Direct uptake of atmospheric aerosols and dissolved ocean nutrients',
+      ],
+    },
+    // 8. Abyssal Chemotrophic Biofilm (Aquatic only - ocean depths)
+    {
+      formCategory: 'Cushion',
+      growthForm: 'Abyssal Chemotrophic Biofilm Crust',
+      habitatType: 'aquatic',
+      baseHeightM: 0.008,
+      baseSpreadM: 3.5,
+      nativeBiomes: [
+        { id: 0, name: 'Abyssal Trench' },
+        { id: 1, name: 'Deep Ocean' },
+      ],
+      reproductionMethod: 'Sub-sea mineral spore dispersal along seafloor hydrothermal currents',
+      fieldNote: (biomes) => `Chemosynthetic crust coating abyssal seabed basalt and hydrothermal rifts across ${biomes}.`,
+      adaptations: [
+        'Chemosynthetic sulfur oxidation generating metabolic energy in total darkness',
+        'Piezophilic cell membranes functioning under thousands of atmospheres of pressure',
+        'Metallic ion precipitation binding volcanic minerals into protective biofilms',
+      ],
+    },
   ];
 
   // Multicellular complex plant archetypes
   const multicellularArchetypes: ArchetypeConfig[] = [
-    // 1. Dominant Arboreal / High Canopy
+    // 1. Dominant Arboreal / High Canopy Tree (Land only)
     {
       formCategory: 'Tree',
       growthForm: g < 0.6 ? 'Towering Low-Gravity Mega-Canopy' : g > 1.4 ? 'Buttressed Ground-Hug Canopy' : 'Arborescent Vascular Canopy Tree',
+      habitatType: 'land',
       baseHeightM: g < 0.6 ? 48.0 : g > 1.4 ? 4.2 : 22.0,
       baseSpreadM: g < 0.6 ? 16.0 : g > 1.4 ? 7.5 : 9.0,
       nativeBiomes: [
         { id: 4, name: 'Lowland Silicate Plains' },
-        { id: 5, name: 'Forest' },
+        { id: 5, name: 'Temperate Continental Basin' },
       ],
       reproductionMethod: pBar > 2.5 
         ? 'Buoyant aeroplanktonic seed-balloons riding dense air currents' 
@@ -647,15 +771,17 @@ export function generatePlantEcosystem(params: {
           : 'Waxy outer cuticle minimizing transpiration moisture loss',
       ],
     },
-    // 2. Understory Frond / Shrub
+    // 2. Understory Frond / Shrub (Land only)
     {
       formCategory: 'Frond',
       growthForm: 'Broadleaf Siphon-Frond Understory Shrub',
+      habitatType: 'land',
       baseHeightM: 2.8,
       baseSpreadM: 2.2,
       nativeBiomes: [
-        { id: 5, name: 'Forest' },
-        { id: 3, name: 'Coastal Marsh & Mangrove Forest' },
+        { id: 4, name: 'Lowland Silicate Plains' },
+        { id: 5, name: 'Temperate Continental Basin' },
+        { id: 3, name: 'Coastal Alluvial Basin' },
       ],
       reproductionMethod: 'Hydraulic siphon-gametes released in riparian humidity',
       fieldNote: (biomes) => `A shade-tolerant understory shrub widespread in ${biomes}, colonizing forest floors through creeping root systems.`,
@@ -665,10 +791,11 @@ export function generatePlantEcosystem(params: {
         'Bio-synthetic alkaloids protecting tender foliage from micro-herbivores',
       ],
     },
-    // 3. Resilient Ground Cover / Succulent Cushion
+    // 3. Resilient Ground Cover / Succulent Cushion (Land only)
     {
       formCategory: 'Cushion',
       growthForm: 'Succulent Cushion-Dome Lithophyte',
+      habitatType: 'land',
       baseHeightM: 0.45,
       baseSpreadM: 1.8,
       nativeBiomes: [
@@ -684,14 +811,15 @@ export function generatePlantEcosystem(params: {
         'Internal water-storage tissue maintaining turgor through extended droughts',
       ],
     },
-    // 4. Boreal / Cold Plateau Conifer-Equivalent
+    // 4. Boreal / Cold Plateau Conifer-Equivalent (Land only)
     {
       formCategory: 'Spire',
       growthForm: 'Spire Needle-Fern / Columnar Autotroph',
+      habitatType: 'land',
       baseHeightM: 11.0,
       baseSpreadM: 2.8,
       nativeBiomes: [
-        { id: 6, name: 'Boreal Forest / Taiga' },
+        { id: 6, name: 'High-Latitude Rocky Steppe' },
         { id: 7, name: 'Tundra / Permafrost' },
       ],
       reproductionMethod: 'Hardened cryo-dormant spore nodules buried in permafrost',
@@ -702,15 +830,16 @@ export function generatePlantEcosystem(params: {
         'Resin-coated needle cuticle resisting frostbite and drying winds',
       ],
     },
-    // 5. Pioneer Mat Lichen / Biofilm
+    // 5. Pioneer Mat Lichen (Land only)
     {
       formCategory: 'Mat',
       growthForm: 'Symbiotic Crust-Lichen & Biofilm Carpet',
+      habitatType: 'land',
       baseHeightM: 0.08,
       baseSpreadM: 3.5,
       nativeBiomes: [
         { id: 16, name: 'Regolith Impact Craterlands' },
-        { id: 6, name: 'Boreal Forest / Taiga' },
+        { id: 6, name: 'High-Latitude Rocky Steppe' },
         { id: 11, name: 'High Plateau / Badlands' },
       ],
       reproductionMethod: 'Direct fragmentation and desiccated windborne soredia dust',
@@ -721,16 +850,17 @@ export function generatePlantEcosystem(params: {
         'Direct atmospheric moisture adsorption without requiring liquid surface water',
       ],
     },
-    // 6. Coastal / Marine Pelagic Kelp (If planet has liquid)
+    // 6. Coastal / Marine Pelagic Kelp (Aquatic only)
     {
       formCategory: 'Kelp',
       growthForm: 'Pelagic Marine Siphon-Kelp Reef',
+      habitatType: 'aquatic',
       baseHeightM: 18.0,
       baseSpreadM: 6.0,
       nativeBiomes: [
         { id: 2, name: 'Continental Shelf / Shallows' },
         { id: 23, name: 'Algal Sea' },
-        { id: 3, name: 'Coastal Marsh & Mangrove Forest' },
+        { id: 1, name: 'Deep Ocean' },
       ],
       reproductionMethod: 'Bioluminescent flagellated gametes released during planetary spring tides',
       fieldNote: (biomes) => `Large submerged kelp forming dense floating meadows and coastal reefs throughout ${biomes}.`,
@@ -739,16 +869,134 @@ export function generatePlantEcosystem(params: {
         'Elastic hydraulic stipe dissipating high-energy coastal wave turbulence',
         'Active cellular filtration concentrating trace dissolved minerals from seawater',
       ],
-      isAquatic: true,
     },
-    // 7. Wetland Alluvial Mangrove / Siphon-Reef
+    // 7. Floating Sargassum-like Pelagic Raft (Aquatic only - open ocean)
+    {
+      formCategory: 'Mat',
+      growthForm: 'Pelagic Floating Kelp-Raft & Surface Canopy',
+      habitatType: 'aquatic',
+      baseHeightM: 0.8,
+      baseSpreadM: 14.0,
+      nativeBiomes: [
+        { id: 1, name: 'Deep Ocean' },
+        { id: 23, name: 'Algal Sea' },
+        { id: 2, name: 'Continental Shelf / Shallows' },
+      ],
+      reproductionMethod: 'Vegetative thallus fragmentation drifting along global ocean gyres',
+      fieldNote: (biomes) => `Expansive free-floating macro-algal rafts drifting across open ocean gyres in ${biomes}, forming floating canopy ecosystems.`,
+      adaptations: [
+        'Pneumatic lipid-vacuole rafts maintaining vast surface canopies on open seas',
+        'Intertwined branching thalli resisting oceanic shear and storm swells',
+        'Foliar salt-excretion pores preventing mineral crust crystallization',
+      ],
+    },
+    // 8. Abyssal Hydrothermal Vent Chemotroph (Aquatic only - seabed vents)
+    {
+      formCategory: 'Spire',
+      growthForm: 'Abyssal Chalcogenide Chimney-Lichen',
+      habitatType: 'aquatic',
+      baseHeightM: 3.2,
+      baseSpreadM: 1.1,
+      nativeBiomes: [
+        { id: 0, name: 'Abyssal Trench' },
+        { id: 1, name: 'Deep Ocean' },
+      ],
+      reproductionMethod: 'Thermal plume convective spore dispersers triggering along rift fissures',
+      fieldNote: (biomes) => `Mineralized chimney autotroph colonizing seafloor hydrothermal vents and tectonic rifts in ${biomes}.`,
+      adaptations: [
+        'Chemosynthetic sulfur and iron oxidation producing metabolic energy in pitch blackness',
+        'Thermophilic proteins stable in superheated vent effluent',
+        'Heavy pyritic mineral sleeve withstanding crushing abyssal hydrostatic pressure',
+      ],
+    },
+    // 9. Floating Tendril-Ribbon Hydrophyte (Aquatic only)
+    {
+      formCategory: 'Kelp',
+      growthForm: 'Pelagic Tendril-Ribbon Hydrophyte',
+      habitatType: 'aquatic',
+      baseHeightM: 28.0,
+      baseSpreadM: 4.5,
+      nativeBiomes: [
+        { id: 1, name: 'Deep Ocean' },
+        { id: 2, name: 'Continental Shelf / Shallows' },
+      ],
+      reproductionMethod: 'Pelagic zoospore swarms drifting on deep photic currents',
+      fieldNote: (biomes) => `Immense trailing ribbons floating through oceanic photic currents in ${biomes}, trailing dozens of meters below the surface.`,
+      adaptations: [
+        'Ultra-flexible collagenous stipes trailing in ocean currents without snapping',
+        'Bioluminescent warning flashes deterring deep pelagic herbivores',
+        'High-efficiency diffuse blue-green light harvesting in deep photic layers',
+      ],
+    },
+    // 10. Sub-Ice Cryophilic Hanging Frond (Aquatic / Ice shelf)
+    {
+      formCategory: 'Frond',
+      growthForm: 'Sub-Ice Cryophilic Hanging Frond',
+      habitatType: 'aquatic',
+      baseHeightM: 2.4,
+      baseSpreadM: 3.0,
+      nativeBiomes: [
+        { id: 8, name: 'Polar Glacial Ice' },
+        { id: 2, name: 'Continental Shelf / Shallows' },
+        { id: 1, name: 'Deep Ocean' },
+      ],
+      reproductionMethod: 'Sub-ice micro-spores carried on frigid sub-glacial currents',
+      fieldNote: (biomes) => `Inverted photosynthetic frond anchoring to the underside of polar sea ice and ice shelves in ${biomes}.`,
+      adaptations: [
+        'Holdfast organ anchoring directly into sub-ice micro-brine channels',
+        'Concentrated polyol and glycerol sap preventing tissue freeze-lysis',
+        'Extremely sensitive low-light pigments capturing weak solar rays filtered through sea ice',
+      ],
+    },
+    // 11. Pelagic Floating Bulb-Cushion (Aquatic only)
+    {
+      formCategory: 'Cushion',
+      growthForm: 'Pelagic Floating Bulb-Cushion',
+      habitatType: 'aquatic',
+      baseHeightM: 0.6,
+      baseSpreadM: 1.8,
+      nativeBiomes: [
+        { id: 23, name: 'Algal Sea' },
+        { id: 2, name: 'Continental Shelf / Shallows' },
+        { id: 1, name: 'Deep Ocean' },
+      ],
+      reproductionMethod: 'Budding buoyant daughter spherules detached by surface wave action',
+      fieldNote: (biomes) => `Buoyant globular colonies clustering into floating mats across tropical surface currents in ${biomes}.`,
+      adaptations: [
+        'Cellular hydrocarbon-filled chambers providing persistent surface buoyancy',
+        'Hydrophobic outer membrane shedding excess water to maximize sunlight exposure',
+        'Symbiotic nitrogen-fixing bacteria embedded in internal fibrous chambers',
+      ],
+    },
+    // 12. Benthic Marine Siphon-Fan (Aquatic / Coasts)
+    {
+      formCategory: 'Frond',
+      growthForm: 'Benthic Marine Siphon-Fan',
+      habitatType: 'aquatic',
+      baseHeightM: 3.5,
+      baseSpreadM: 2.8,
+      nativeBiomes: [
+        { id: 2, name: 'Continental Shelf / Shallows' },
+        { id: 23, name: 'Algal Sea' },
+        { id: 1, name: 'Deep Ocean' },
+      ],
+      reproductionMethod: 'Planktonic flagellated gametes released during planetary spring tides',
+      fieldNote: (biomes) => `Fan-shaped benthic autotroph anchored to submerged rocks and continental shallows across ${biomes}.`,
+      adaptations: [
+        'Perforated flabellum blade allowing tidal water flow without detachment',
+        'Calcified base anchoring securely into marine bedrock and reefs',
+        'Elastic siphon tubules channeling nutrient-rich bottom currents',
+      ],
+    },
+    // 13. Wetland Alluvial Mangrove / Siphon-Reef (Amphibious - needs coasts/shallows)
     {
       formCategory: 'Frond',
       growthForm: 'Alluvial Stilt-Frond & Pneumatophore Shrub',
+      habitatType: 'amphibious',
       baseHeightM: 5.5,
       baseSpreadM: 4.0,
       nativeBiomes: [
-        { id: 3, name: 'Coastal Marsh & Mangrove Forest' },
+        { id: 3, name: 'Coastal Alluvial Basin' },
         { id: 2, name: 'Continental Shelf / Shallows' },
       ],
       reproductionMethod: 'Viviparous hydrochorous propagules drifting on estuary tides',
@@ -759,10 +1007,11 @@ export function generatePlantEcosystem(params: {
         'Interlocking stilt-root matrix preventing shoreline sediment erosion',
       ],
     },
-    // 8. Volcanic Caldera / Geothermal Extremophile Autotroph
+    // 14. Volcanic Caldera / Geothermal Extremophile (Land only)
     {
       formCategory: 'Spire',
       growthForm: 'Chemosynthetic Chalcogenide Chimney-Lichen',
+      habitatType: 'land',
       baseHeightM: 1.4,
       baseSpreadM: 0.9,
       nativeBiomes: [
@@ -782,12 +1031,32 @@ export function generatePlantEcosystem(params: {
 
   const archetypes = isMulticellular ? multicellularArchetypes : unicellularArchetypes;
 
-  // Pick top N archetypes based on planetary attributes
+  // Strict planetary habitat filtering:
+  // - If planet has NO solid land, EXCLUDE all land-only archetypes!
+  // - If planet has NO liquid oceans, EXCLUDE all aquatic-only archetypes!
   const candidatePool = archetypes.filter(arch => {
-    if (arch.isAquatic && !hasLiquid) return false;
+    if (arch.habitatType === 'aquatic' && !hasLiquid) return false;
+    if (arch.habitatType === 'land' && !hasLand) return false;
+    if (arch.habitatType === 'amphibious' && !hasLand && !hasLiquid) return false;
+
+    // If biomeGrid is available, verify that at least one of its biomes or a compatible biome is present
+    if (presentBiomeIds.size > 0) {
+      const hasDirectBiome = arch.nativeBiomes.some(b => presentBiomeIds.has(b.id));
+      if (!hasDirectBiome) {
+        // Must have at least a compatible habitat type on the planet
+        const isWaterArch = arch.habitatType === 'aquatic';
+        const isAmphiArch = arch.habitatType === 'amphibious';
+        const hasWaterBiome = Array.from(presentBiomeIds).some(id => WATER_BIOME_IDS.has(id) || id === 8);
+        const hasSolidBiome = Array.from(presentBiomeIds).some(id => SOLID_LAND_BIOME_IDS.has(id));
+
+        if (isWaterArch && !hasWaterBiome) return false;
+        if (!isWaterArch && !isAmphiArch && !hasSolidBiome) return false;
+      }
+    }
     return true;
   });
 
+  // Pick diverse archetypes deterministically for this seed
   const selectedArchetypes = candidatePool.slice(0, speciesCount);
 
   let minCanopyH = 999;
@@ -813,13 +1082,42 @@ export function generatePlantEcosystem(params: {
     const colorIdx = i % pigmentInfo.baseHexColors.length;
     const baseColor = pigmentInfo.baseHexColors[colorIdx];
 
+    // Resolve native biomes: prioritize biomes that ACTUALLY exist on this planet
+    let resolvedBiomes = arch.nativeBiomes.filter(b => presentBiomeIds.size === 0 || presentBiomeIds.has(b.id));
+    if (resolvedBiomes.length === 0) {
+      if (arch.habitatType === 'aquatic' || !hasLand) {
+        const waterPresent = Array.from(presentBiomeIds).filter(id => WATER_BIOME_IDS.has(id) || id === 8);
+        if (waterPresent.length > 0) {
+          resolvedBiomes = waterPresent.slice(0, 2).map(id => ({
+            id,
+            name: BIOME_NAMES[id] || 'Ocean',
+          }));
+        } else {
+          resolvedBiomes = arch.nativeBiomes;
+        }
+      } else {
+        const landPresent = Array.from(presentBiomeIds).filter(id => SOLID_LAND_BIOME_IDS.has(id));
+        if (landPresent.length > 0) {
+          resolvedBiomes = landPresent.slice(0, 2).map(id => ({
+            id,
+            name: BIOME_NAMES[id] || 'Plains',
+          }));
+        } else {
+          resolvedBiomes = arch.nativeBiomes;
+        }
+      }
+    }
+
+    const nativeBiomeIds = resolvedBiomes.map(b => b.id);
+    const nativeBiomeNames = resolvedBiomes.map(b => b.name);
+
     // Semantically aligned Latin binomial and English common names
     const { scientificName, commonName } = generateCoherentSpeciesName({
       regimeKey: pigmentInfo.regimeKey,
       formCategory: arch.formCategory,
       isMulticellular,
       scaledHeight,
-      nativeBiomeIds: arch.nativeBiomes.map(b => b.id),
+      nativeBiomeIds,
       speciesIndex: i,
       rng: specRng,
       usedScientificNames,
@@ -829,7 +1127,7 @@ export function generatePlantEcosystem(params: {
     // Canopy coverage %
     const coverage = Math.round(10 + specRng() * 25);
 
-    const descNote = arch.fieldNote(arch.nativeBiomes.map(b => b.name).join(', '));
+    const descNote = arch.fieldNote(nativeBiomeNames.join(', '));
 
     speciesList.push({
       id: `flora_${seed}_${i}`,
@@ -844,8 +1142,8 @@ export function generatePlantEcosystem(params: {
       averageSpreadM: Math.max(0.1, scaledSpread),
       structuralPolymer: structuralBase,
       reproductionMethod: arch.reproductionMethod,
-      nativeBiomeIds: arch.nativeBiomes.map(b => b.id),
-      nativeBiomeNames: arch.nativeBiomes.map(b => b.name),
+      nativeBiomeIds,
+      nativeBiomeNames,
       canopyCoveragePct: coverage,
       adaptations: arch.adaptations,
       description: descNote,
@@ -853,7 +1151,11 @@ export function generatePlantEcosystem(params: {
   }
 
   // Concise planetary ecosystem summary text
-  const summaryText = !isMulticellular
+  const summaryText = !hasLand && hasLiquid
+    ? !isMulticellular
+      ? `${diversityTier}: ${speciesList.length} distinct unicellular pelagic autotrophic taxa blooming across global ocean waters.`
+      : `${diversityTier}: ${speciesList.length} distinct pelagic marine autotrophic taxa (global ocean world with no dry land).`
+    : !isMulticellular
     ? `${diversityTier}: ${speciesList.length} distinct unicellular autotrophic taxa colonizing land and shallow seas as colored soil crusts and algal mats with ${pigmentInfo.pigmentName.toLowerCase()} pigments.`
     : `${diversityTier}: ${speciesList.length} distinct autotrophic taxa dominated by ${pigmentInfo.pigmentName.toLowerCase()} light harvesting, with canopy heights reaching up to ${maxCanopyH}m.`;
 
