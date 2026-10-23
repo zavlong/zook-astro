@@ -163,7 +163,8 @@ export const DEFAULT_SECTOR_CONFIG: SectorHexConfig = {
   rows: 10,
   density: 0.38,
   meanAge: 4.8,
-  ageSigma: 1.8,
+  ageSigma: 2.2,
+  ageRange: 7.5,
   metallicityMean: 0.04,
   metallicitySigma: 0.22,
   hasNebula: false,
@@ -453,8 +454,15 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
       if (config.ageDistribution === 'uniform' && config.ageRange) {
         rawAge = config.meanAge + (sysRng.next() - 0.5) * config.ageRange;
       } else {
-        const sigma = config.ageSigma || (config.ageRange ? config.ageRange / 3.2 : 1.0);
-        rawAge = config.meanAge + sysRng.nextGaussian(0, sigma);
+        const sigma = config.ageSigma || (config.ageRange ? config.ageRange / 2.2 : 2.0);
+        // Multi-epoch continuous star formation history:
+        // 72% characteristic local peak (Gaussian with wider sigma),
+        // 28% broad continuum across the sector's full ageRange (interlopers, older disk stars, or younger clusters).
+        if (config.ageRange && sysRng.next() < 0.28) {
+          rawAge = config.meanAge + (sysRng.next() - 0.5) * config.ageRange;
+        } else {
+          rawAge = config.meanAge + sysRng.nextGaussian(0, sigma);
+        }
       }
       age = +Math.max(0.1, Math.min(12.8, rawAge)).toFixed(2);
     }

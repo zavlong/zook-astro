@@ -176,13 +176,17 @@ export function computeSectorConstituentColor(
       if (overflow > 0) mass *= 1.0 + overflow * 1.45;
     }
 
-    // 2. Star Age based on sector age distribution
+    // 2. Star Age based on sector age distribution (with wider multi-epoch spread)
     let starAge: number;
     if (ageDistribution === 'uniform') {
       starAge = Math.max(0.08, Math.min(12.8, meanAge + (secRng.next() - 0.5) * ageRange));
     } else {
-      const sigma = Math.max(0.2, ageRange / 3.2);
-      starAge = Math.max(0.08, Math.min(12.8, meanAge + secRng.nextGaussian(0, sigma)));
+      const sigma = Math.max(0.3, ageRange / 2.2);
+      if (secRng.next() < 0.28) {
+        starAge = Math.max(0.08, Math.min(12.8, meanAge + (secRng.next() - 0.5) * ageRange));
+      } else {
+        starAge = Math.max(0.08, Math.min(12.8, meanAge + secRng.nextGaussian(0, sigma)));
+      }
     }
 
     const feh = Math.max(-1.8, Math.min(0.5, metallicityMean + secRng.nextGaussian(0, 0.12)));
@@ -591,24 +595,24 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
 
         // Stellar Age & Age Range Astrophysics:
         // - Bulge: wide age range (effectively a uniform distribution spanning all epochs)
-        // - Arms: young mean age and narrow range (active starburst)
-        // - Halo: high mean age and narrow range (all stars are ancient)
-        // - Disk: intermediate solar age
+        // - Arms: active starburst + underlying disk population passing through density wave
+        // - Halo: accreted sub-populations spanning ancient epochs
+        // - Disk: multi-billion-year continuous star formation
         if (bulgeWeight > 0.35 || rNorm < 0.16) {
           baseAge = 6.8 + secRng.nextGaussian(0, 0.35);
-          ageRange = 11.2; // Uniform distribution across 11.2 Gyr span (~1.2 to 12.4 Gyr)
+          ageRange = 11.6; // Uniform distribution across 11.6 Gyr span (~1.0 to 12.6 Gyr)
           ageDistribution = 'uniform';
         } else if (isArmSector) {
-          baseAge = 0.8 + 1.4 * Math.min(1.2, rNorm) + secRng.nextGaussian(0, 0.25);
-          ageRange = 1.6 + 1.2 * Math.min(1.2, rNorm); // Narrow age range (recent star formation)
+          baseAge = 1.4 + 2.0 * Math.min(1.2, rNorm) + secRng.nextGaussian(0, 0.25);
+          ageRange = 6.8 + 2.8 * Math.min(1.2, rNorm); // Wide age spread: young starbursts + underlying older disk stars
           ageDistribution = 'normal';
         } else if (rNorm > 0.92) {
-          baseAge = 11.4 + secRng.nextGaussian(0, 0.25);
-          ageRange = 1.5; // Narrow age range (all stars are old Population II)
+          baseAge = 10.4 + secRng.nextGaussian(0, 0.25);
+          ageRange = 5.6; // Accreted dwarf galaxies & globular cluster spread
           ageDistribution = 'normal';
         } else {
           baseAge = 4.2 + 3.8 * rNorm + secRng.nextGaussian(0, 0.4);
-          ageRange = 3.6 + 2.4 * rNorm;
+          ageRange = 7.6 + 2.8 * rNorm; // Broad disk age range spanning 7.6 to 10.4 Gyr
           ageDistribution = 'normal';
         }
 
@@ -621,9 +625,9 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
         const edgeTaper = rNorm <= 0.85 ? 1.0 : Math.exp(-Math.pow((rNorm - 0.85) / 0.42, 1.6));
         baseDensity = Math.max(0.01, Math.min(3.5, (0.75 * sersic + noise) * edgeTaper * config.overallDensityScale));
 
-        // Ellipticals are old Population II throughout with narrow age range
-        baseAge = 10.8 + secRng.nextGaussian(0, 0.4);
-        ageRange = 2.0;
+        // Ellipticals: ancient primary population with secondary merger remnants
+        baseAge = 10.2 + secRng.nextGaussian(0, 0.4);
+        ageRange = 5.8;
         ageDistribution = 'normal';
         baseFeh = 0.25 - 0.70 * rNorm + secRng.nextGaussian(0, 0.1);
 
@@ -636,11 +640,11 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
 
         if (rNorm < 0.20) {
           baseAge = 7.0 + secRng.nextGaussian(0, 0.4);
-          ageRange = 10.5;
+          ageRange = 11.2;
           ageDistribution = 'uniform';
         } else {
-          baseAge = 8.5 + 2.0 * rNorm + secRng.nextGaussian(0, 0.4);
-          ageRange = 2.5;
+          baseAge = 8.2 + 2.2 * rNorm + secRng.nextGaussian(0, 0.4);
+          ageRange = 6.5;
           ageDistribution = 'normal';
         }
         baseFeh = 0.20 - 0.75 * rNorm + secRng.nextGaussian(0, 0.1);
@@ -657,18 +661,18 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
 
         if (ringWeight > 0.35) {
           isArmSector = true;
-          baseAge = 0.6 + secRng.nextGaussian(0, 0.2); // Fresh collisional starburst
-          ageRange = 1.2;
+          baseAge = 1.0 + secRng.nextGaussian(0, 0.2); // Fresh collisional starburst + pre-existing disk stars
+          ageRange = 6.2;
           ageDistribution = 'normal';
           baseFeh = 0.18 + secRng.nextGaussian(0, 0.06);
         } else if (rNorm < 0.20) {
           baseAge = 6.8 + secRng.nextGaussian(0, 0.35);
-          ageRange = 11.0;
+          ageRange = 11.5;
           ageDistribution = 'uniform';
           baseFeh = 0.30 + secRng.nextGaussian(0, 0.08);
         } else {
-          baseAge = 11.2 + secRng.nextGaussian(0, 0.3);
-          ageRange = 1.6;
+          baseAge = 10.5 + secRng.nextGaussian(0, 0.3);
+          ageRange = 5.5;
           ageDistribution = 'normal';
           baseFeh = -0.10 - 0.5 * rNorm;
         }
@@ -685,13 +689,13 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
 
         if (clump1 > 0.35 || clump2 > 0.35 || clump3 > 0.35) {
           isArmSector = true;
-          baseAge = 0.5 + secRng.nextGaussian(0, 0.2);
-          ageRange = 1.0;
+          baseAge = 0.8 + secRng.nextGaussian(0, 0.2);
+          ageRange = 6.0;
           ageDistribution = 'normal';
           baseFeh = -0.15 + secRng.nextGaussian(0, 0.1);
         } else {
           baseAge = 4.2 + 3.0 * rNorm + secRng.nextGaussian(0, 0.5);
-          ageRange = 5.0;
+          ageRange = 8.5;
           ageDistribution = 'uniform';
           baseFeh = -0.45 - 0.5 * rNorm;
         }

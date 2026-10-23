@@ -1611,7 +1611,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                       ageSigma:
                         selectedSector.ageDistribution === 'uniform'
                           ? +(selectedSector.ageRange / Math.sqrt(12)).toFixed(2)
-                          : +(selectedSector.ageRange / 3.2).toFixed(2),
+                          : +(selectedSector.ageRange / 2.2).toFixed(2),
                       metallicityMean: selectedSector.metallicityMean,
                       metallicitySigma: 0.22,
                       hasNebula: selectedSector.hasNebula,

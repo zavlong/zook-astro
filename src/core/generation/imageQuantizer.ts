@@ -227,31 +227,31 @@ export function quantizeImageToGalaxy(
       if (isWhiteCore) {
         // Core Bulge: High density, wide uniform age range
         meanAge = 6.8 + secRng.nextGaussian(0, 0.3);
-        ageRange = 11.2;
+        ageRange = 11.6;
         ageDistribution = 'uniform';
         region = density > 1.4 ? 'Galactic Core Nexus' : 'Galactic Bulge';
       } else if (isBlueStarburst) {
         // Blue starburst knots / spiral arm ridges
         meanAge = +Math.max(0.4, Math.min(2.5, 0.6 + (rn / Math.max(0.1, bn)) * 1.8 + secRng.nextGaussian(0, 0.2))).toFixed(2);
-        ageRange = 1.8;
+        ageRange = 6.5;
         ageDistribution = 'normal';
         region = density > 0.7 ? 'Starburst Knot' : 'Spiral Arm Ridge';
       } else if (isRedPopulation) {
         // Mature red/yellow stellar disk or halo
         meanAge = +Math.max(4.5, Math.min(12.5, 5.5 + ((rn - bn) / Math.max(0.1, rn)) * 6.5 + secRng.nextGaussian(0, 0.4))).toFixed(2);
-        ageRange = rNorm > 0.85 ? 1.5 : 3.8;
+        ageRange = rNorm > 0.85 ? 5.6 : 7.6;
         ageDistribution = 'normal';
         region = rNorm > 0.85 ? 'Galactic Halo' : 'Intermediate Disk';
       } else if (density <= 0.04) {
         // Intergalactic void
-        meanAge = 11.5 + secRng.nextGaussian(0, 0.3);
-        ageRange = 1.5;
+        meanAge = 11.2 + secRng.nextGaussian(0, 0.3);
+        ageRange = 5.2;
         ageDistribution = 'normal';
         region = 'Intergalactic Void';
       } else {
         // Solar-type intermediate disk
         meanAge = +Math.max(3.0, Math.min(8.0, 4.5 + rNorm * 2.5 + secRng.nextGaussian(0, 0.3))).toFixed(2);
-        ageRange = 4.2;
+        ageRange = 7.8;
         ageDistribution = 'normal';
         region = 'Galactic Disk';
       }

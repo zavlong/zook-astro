@@ -1047,7 +1047,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     const derivedSigma =
       newAgeDistribution === 'uniform'
         ? +(clampedAgeRange / Math.sqrt(12)).toFixed(2)
-        : +(clampedAgeRange / 3.2).toFixed(2);
+        : +(clampedAgeRange / 2.2).toFixed(2);
 
     setConfig((prev) => ({
       ...prev,
