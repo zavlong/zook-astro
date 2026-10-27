@@ -27,6 +27,9 @@ import {
   ChevronDown,
   Cloud,
   Save,
+  Edit3,
+  Move,
+  Plus,
 } from 'lucide-react';
 import {
   SectorHexConfig,
@@ -46,7 +49,14 @@ import {
   checkSystemMatchesFilters,
   type SectorFilterCategory,
   type MassFilterBracket,
+  generateProceduralHyperlanes,
+  formatHexCoord,
+  recomputeSectorStats,
+  recomputeSectorIntegratedColor,
+  deriveSectorSystemPropsFromSysResult,
 } from '../../core/generation/sectorHex';
+import { runRealisticGenerator, RealisticStarSystemResult } from '../../core/generation/realisticStarGen';
+import { SystemEditorModal } from './SystemEditorModal';
 import {
   getProceduralStarSpriteDataUrl,
   getStarAssetPath,
@@ -579,6 +589,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   const [empireTargetSystem, setEmpireTargetSystem] = useState<SectorHexSystem | null>(null);
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
 
+  // Sector Editing & System Architect State
+  const [isSectorEditMode, setIsSectorEditMode] = useState<boolean>(false);
+  const [isSystemEditorOpen, setIsSystemEditorOpen] = useState<boolean>(false);
+  const [systemToEdit, setSystemToEdit] = useState<SectorHexSystem | null>(null);
+  const [isMovingSystem, setIsMovingSystem] = useState<boolean>(false);
+
   const importInputRef = useRef<HTMLInputElement>(null);
 
   // Synchronize empires from localStorage whenever sector seed or scale changes
@@ -907,8 +923,260 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     });
   };
 
-  const handleMouseUp = () => {
+  const handlePlaceNewSystem = useCallback(
+    (col: number, row: number, mass?: number, name?: string) => {
+      const padding = 60;
+      const usableW = gridData.sectorWidth - padding * 2;
+      const usableH = gridData.sectorHeight - padding * 2;
+      const cellW = usableW / config.columns;
+      const cellH = usableH / config.rows;
+      const x = Math.round(padding + (col - 0.5) * cellW);
+      const y = Math.round(padding + (row - 0.5) * cellH);
+      const coord = formatHexCoord(col, row);
+
+      const cellSeedNum = Math.floor(Math.random() * 8999) + 1000;
+      const systemId = `SYS-${coord}-${cellSeedNum.toString(16).toUpperCase()}`;
+
+      const sysResult = runRealisticGenerator({
+        sysMass: mass || (config.density > 1.2 ? 1.5 : 1.0),
+        age: config.meanAge,
+        feh: config.metallicityMean,
+        id: systemId,
+        name: name || `System ${coord}`,
+        forcedMult: 'auto',
+      });
+
+      const newSystem = deriveSectorSystemPropsFromSysResult(
+        sysResult,
+        col,
+        row,
+        x,
+        y,
+        config,
+        gridData.sectorWidth,
+        gridData.sectorHeight,
+        gridData.parsecWidth,
+        gridData.parsecHeight,
+        systemId,
+        name || `System ${coord}`
+      );
+
+      const newSystems = [...gridData.systems.filter((s) => s.coord !== coord), newSystem];
+      const newHyperlanes = generateProceduralHyperlanes(newSystems, gridData.hexVertices);
+      const newStats = recomputeSectorStats(newSystems, config, newHyperlanes.length);
+      const newColor = recomputeSectorIntegratedColor(newSystems, config.density);
+
+      const updatedGrid: SectorHexGridData = {
+        ...gridData,
+        systems: newSystems,
+        hyperlanes: newHyperlanes,
+        stats: newStats,
+        integratedColorHex: newColor,
+      };
+
+      setGridData(updatedGrid);
+      universeCache.cacheLoadedSystem(newSystem.id, sysResult);
+      universeCache.cacheLoadedSector(sectorCacheKey, updatedGrid);
+
+      setSelectedSystem(newSystem);
+      setSelectedCoord(newSystem.coord);
+      setBannerNotice(`✨ Placed new star system: ${newSystem.name} (${newSystem.coord})`);
+    },
+    [gridData, config, sectorCacheKey]
+  );
+
+  const handleDeleteSystem = useCallback(
+    (sysToDelete: SectorHexSystem) => {
+      const newSystems = gridData.systems.filter((s) => s.id !== sysToDelete.id);
+      const newHyperlanes = generateProceduralHyperlanes(newSystems, gridData.hexVertices);
+      const newStats = recomputeSectorStats(newSystems, config, newHyperlanes.length);
+      const newColor = recomputeSectorIntegratedColor(newSystems, config.density);
+
+      const updatedGrid: SectorHexGridData = {
+        ...gridData,
+        systems: newSystems,
+        hyperlanes: newHyperlanes,
+        stats: newStats,
+        integratedColorHex: newColor,
+      };
+
+      setGridData(updatedGrid);
+      universeCache.cacheLoadedSector(sectorCacheKey, updatedGrid);
+
+      setSelectedSystem(newSystems[0] || null);
+      setSelectedCoord(newSystems[0]?.coord || null);
+      setIsMovingSystem(false);
+      setBannerNotice(`🗑️ Deleted system ${sysToDelete.name} (${sysToDelete.coord})`);
+    },
+    [gridData, config, sectorCacheKey]
+  );
+
+  const handleMoveSystem = useCallback(
+    (sysToMove: SectorHexSystem, targetCol: number, targetRow: number) => {
+      const padding = 60;
+      const usableW = gridData.sectorWidth - padding * 2;
+      const usableH = gridData.sectorHeight - padding * 2;
+      const cellW = usableW / config.columns;
+      const cellH = usableH / config.rows;
+      const newX = Math.round(padding + (targetCol - 0.5) * cellW);
+      const newY = Math.round(padding + (targetRow - 0.5) * cellH);
+      const newCoord = formatHexCoord(targetCol, targetRow);
+      const newParsecX = +(((newX - padding) / usableW) * gridData.parsecWidth - gridData.parsecWidth / 2).toFixed(1);
+      const newParsecY = +(((newY - padding) / usableH) * gridData.parsecHeight - gridData.parsecHeight / 2).toFixed(1);
+
+      const movedSystem: SectorHexSystem = {
+        ...sysToMove,
+        col: targetCol,
+        row: targetRow,
+        coord: newCoord,
+        x: newX,
+        y: newY,
+        parsecX: newParsecX,
+        parsecY: newParsecY,
+      };
+
+      const newSystems = gridData.systems.map((s) => (s.id === sysToMove.id ? movedSystem : s));
+      const newHyperlanes = generateProceduralHyperlanes(newSystems, gridData.hexVertices);
+      const newStats = recomputeSectorStats(newSystems, config, newHyperlanes.length);
+
+      const updatedGrid: SectorHexGridData = {
+        ...gridData,
+        systems: newSystems,
+        hyperlanes: newHyperlanes,
+        stats: newStats,
+      };
+
+      setGridData(updatedGrid);
+      universeCache.cacheLoadedSector(sectorCacheKey, updatedGrid);
+
+      setSelectedSystem(movedSystem);
+      setSelectedCoord(movedSystem.coord);
+      setIsMovingSystem(false);
+      setBannerNotice(`↔️ Relocated ${movedSystem.name} to hex ${newCoord}`);
+    },
+    [gridData, config, sectorCacheKey]
+  );
+
+  const handleSaveEditedSystem = useCallback(
+    (
+      updatedSysResult: RealisticStarSystemResult,
+      sectorUpdates?: {
+        name?: string;
+        coord?: string;
+        age?: number;
+        mass?: number;
+        metallicity?: number;
+      }
+    ) => {
+      if (!systemToEdit) return;
+
+      let targetCol = systemToEdit.col;
+      let targetRow = systemToEdit.row;
+      let targetX = systemToEdit.x;
+      let targetY = systemToEdit.y;
+
+      if (sectorUpdates?.coord && sectorUpdates.coord !== systemToEdit.coord && sectorUpdates.coord.length === 4) {
+        const c = parseInt(sectorUpdates.coord.slice(0, 2), 10);
+        const r = parseInt(sectorUpdates.coord.slice(2, 4), 10);
+        if (!isNaN(c) && !isNaN(r) && c >= 1 && c <= config.columns && r >= 1 && r <= config.rows) {
+          targetCol = c;
+          targetRow = r;
+          const padding = 60;
+          const usableW = gridData.sectorWidth - padding * 2;
+          const usableH = gridData.sectorHeight - padding * 2;
+          const cellW = usableW / config.columns;
+          const cellH = usableH / config.rows;
+          targetX = Math.round(padding + (targetCol - 0.5) * cellW);
+          targetY = Math.round(padding + (targetRow - 0.5) * cellH);
+        }
+      }
+
+      const updatedSystem = deriveSectorSystemPropsFromSysResult(
+        updatedSysResult,
+        targetCol,
+        targetRow,
+        targetX,
+        targetY,
+        config,
+        gridData.sectorWidth,
+        gridData.sectorHeight,
+        gridData.parsecWidth,
+        gridData.parsecHeight,
+        systemToEdit.id,
+        sectorUpdates?.name || systemToEdit.name
+      );
+
+      const newSystems = gridData.systems.map((s) => (s.id === systemToEdit.id ? updatedSystem : s));
+      const newHyperlanes = generateProceduralHyperlanes(newSystems, gridData.hexVertices);
+      const newStats = recomputeSectorStats(newSystems, config, newHyperlanes.length);
+      const newColor = recomputeSectorIntegratedColor(newSystems, config.density);
+
+      const updatedGrid: SectorHexGridData = {
+        ...gridData,
+        systems: newSystems,
+        hyperlanes: newHyperlanes,
+        stats: newStats,
+        integratedColorHex: newColor,
+      };
+
+      setGridData(updatedGrid);
+      universeCache.cacheLoadedSystem(updatedSystem.id, updatedSysResult);
+      universeCache.cacheLoadedSector(sectorCacheKey, updatedGrid);
+
+      setSelectedSystem(updatedSystem);
+      setSelectedCoord(updatedSystem.coord);
+      setSystemToEdit(null);
+      setIsSystemEditorOpen(false);
+      setBannerNotice(`💾 Saved changes to star system ${updatedSystem.name}!`);
+    },
+    [systemToEdit, gridData, config, sectorCacheKey]
+  );
+
+  const handleMouseUp = (e: React.MouseEvent) => {
     setIsDragging(false);
+    if (!containerRef.current) return;
+    const dx = e.clientX - dragStartRef.current.x;
+    const dy = e.clientY - dragStartRef.current.y;
+
+    // Check for click in place (not a drag)
+    if (Math.hypot(dx, dy) < 6) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const mouseScreenX = e.clientX - rect.left;
+      const mouseScreenY = e.clientY - rect.top;
+      const worldX = (mouseScreenX - pan.x) / zoom;
+      const worldY = (mouseScreenY - pan.y) / zoom;
+
+      const padding = 60;
+      const usableW = gridData.sectorWidth - padding * 2;
+      const usableH = gridData.sectorHeight - padding * 2;
+      const c = Math.min(config.columns, Math.max(1, Math.floor(((worldX - padding) / usableW) * config.columns) + 1));
+      const r = Math.min(config.rows, Math.max(1, Math.floor(((worldY - padding) / usableH) * config.rows) + 1));
+      const clickedCoord = formatHexCoord(c, r);
+
+      const existing = gridData.systems.find(
+        (s) => s.coord === clickedCoord || Math.hypot(s.x - worldX, s.y - worldY) < 22
+      );
+
+      if (existing) {
+        if (isMovingSystem && selectedSystem && selectedSystem.id !== existing.id) {
+          // Cannot move onto occupied hex
+          setBannerNotice(`Hex ${clickedCoord} is already occupied by ${existing.name}.`);
+          setIsMovingSystem(false);
+        } else {
+          setSelectedSystem(existing);
+          setSelectedCoord(existing.coord);
+        }
+      } else {
+        if (isMovingSystem && selectedSystem) {
+          handleMoveSystem(selectedSystem, c, r);
+        } else if (isSectorEditMode) {
+          handlePlaceNewSystem(c, r);
+        } else {
+          setSelectedSystem(null);
+          setSelectedCoord(clickedCoord);
+        }
+      }
+    }
   };
 
   // Transition state when returning to Galaxy Map
@@ -1592,6 +1860,23 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             <span>{isSpawnEmpireMode ? 'Select Habitable Star...' : 'Spawn Empire'}</span>
           </button>
 
+          {/* Sector Edit Mode Button */}
+          <button
+            onClick={() => {
+              setIsSectorEditMode((prev) => !prev);
+              setIsMovingSystem(false);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg transition cursor-pointer ${
+              isSectorEditMode
+                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30 ring-2 ring-amber-300'
+                : 'bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-600/70 hover:border-amber-400'
+            }`}
+            title="Toggle Sector Edit Mode: place, move, edit and delete star systems"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            <span>{isSectorEditMode ? 'Exit Edit Mode' : 'Edit Sector'}</span>
+          </button>
+
           <button
             onClick={handleRollNewSector}
             className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg shadow-cyan-500/20 transition cursor-pointer"
@@ -1630,6 +1915,76 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           </button>
         </div>
       </div>
+      )}
+
+      {/* Sector Edit Mode Banner Bar */}
+      {isSectorEditMode && (
+        <div className="w-full bg-gradient-to-r from-amber-950/90 via-slate-900/95 to-amber-950/90 border-b border-amber-500/50 px-4 py-2 flex items-center justify-between z-20 text-xs font-mono shadow-lg">
+          <div className="flex items-center gap-3">
+            <span className="flex h-2.5 w-2.5 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+            </span>
+            <span className="font-bold text-amber-300">SECTOR ARCHITECT EDIT MODE</span>
+            <span className="text-slate-400 text-[11px] hidden lg:inline">
+              Click empty space to place a star system &bull; Click any star to edit, move or delete
+            </span>
+            {isMovingSystem && selectedSystem && (
+              <span className="px-2.5 py-0.5 rounded bg-amber-500 text-slate-950 font-bold animate-pulse">
+                Click destination hex to move {selectedSystem.name} ({selectedSystem.coord})
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (selectedCoord) {
+                  const c = parseInt(selectedCoord.slice(0, 2), 10);
+                  const r = parseInt(selectedCoord.slice(2, 4), 10);
+                  handlePlaceNewSystem(c, r);
+                } else {
+                  handlePlaceNewSystem(Math.round(config.columns / 2), Math.round(config.rows / 2));
+                }
+              }}
+              className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold flex items-center gap-1.5 transition shadow cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Place Star System</span>
+            </button>
+            {selectedSystem && (
+              <>
+                <button
+                  onClick={() => {
+                    setSystemToEdit(selectedSystem);
+                    setIsSystemEditorOpen(true);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold flex items-center gap-1.5 transition shadow cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Edit System & Planets</span>
+                </button>
+                <button
+                  onClick={() => setIsMovingSystem((prev) => !prev)}
+                  className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 transition shadow cursor-pointer ${
+                    isMovingSystem
+                      ? 'bg-amber-400 text-slate-950 ring-2 ring-amber-300'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                  }`}
+                >
+                  <Move className="w-3.5 h-3.5" />
+                  <span>{isMovingSystem ? 'Cancel Move' : 'Move Star'}</span>
+                </button>
+                <button
+                  onClick={() => handleDeleteSystem(selectedSystem)}
+                  className="px-2.5 py-1 rounded-lg bg-red-950/80 hover:bg-red-900 border border-red-700/60 text-red-200 font-bold flex items-center gap-1.5 transition shadow cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Star</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {/* ============================================================================ */}
@@ -3289,6 +3644,28 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     PgDn
                   </kbd>
                 </button>
+
+                {/* Edit System & Planets & Delete Action Buttons */}
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={() => {
+                      setSystemToEdit(selectedSystem);
+                      setIsSystemEditorOpen(true);
+                    }}
+                    className="flex-1 py-2 px-3 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 text-cyan-200 font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+                    title="Open Comprehensive System & Planet Architect"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Edit System & Planets</span>
+                  </button>
+                  <button
+                    onClick={() => handleDeleteSystem(selectedSystem)}
+                    className="py-2 px-2.5 rounded-lg bg-red-950/70 hover:bg-red-900/80 border border-red-800/60 text-red-300 font-mono text-xs flex items-center justify-center transition cursor-pointer"
+                    title="Delete this star system from sector"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
 
               {/* ============================================================================ */}
@@ -3710,6 +4087,30 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 </span>
               </div>
             </div>
+          ) : selectedCoord ? (
+            <div className="p-6 h-full flex flex-col items-center justify-center text-center text-slate-400 font-mono text-xs gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-cyan-950/40 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-950/50">
+                <Hexagon className="w-8 h-8 animate-pulse text-cyan-400" />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-slate-200">Empty Sector Hex</div>
+                <div className="text-cyan-400 text-xs mt-0.5">Quadrant Coordinate: {selectedCoord}</div>
+              </div>
+              <p className="text-slate-500 text-[11px] max-w-[240px] leading-relaxed">
+                This sector cell is currently vacant. You can establish a new star system here.
+              </p>
+              <button
+                onClick={() => {
+                  const c = parseInt(selectedCoord.slice(0, 2), 10);
+                  const r = parseInt(selectedCoord.slice(2, 4), 10);
+                  handlePlaceNewSystem(c, r);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-mono font-bold text-xs flex items-center gap-2 shadow-lg shadow-amber-600/25 transition cursor-pointer hover:scale-105 active:scale-95"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Place Star System Here</span>
+              </button>
+            </div>
           ) : (
             <div className="p-6 h-full flex flex-col items-center justify-center text-center text-slate-500 font-mono text-xs gap-3">
               <Hexagon className="w-10 h-10 text-slate-700 animate-pulse" />
@@ -3741,6 +4142,20 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
         activeEmpireId={activeEmpireId}
         onImportSector={handleImportSector}
       />
+
+      {/* Universal Star & Planet Architect Modal */}
+      {isSystemEditorOpen && (systemToEdit || selectedSystem) && (
+        <SystemEditorModal
+          isOpen={isSystemEditorOpen}
+          systemResult={(systemToEdit || selectedSystem)!.sysResult}
+          sectorSystem={systemToEdit || selectedSystem}
+          onSave={handleSaveEditedSystem}
+          onClose={() => {
+            setIsSystemEditorOpen(false);
+            setSystemToEdit(null);
+          }}
+        />
+      )}
     </div>
   );
 };

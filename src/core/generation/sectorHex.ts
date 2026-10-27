@@ -1750,3 +1750,279 @@ export function generateProceduralHyperlanes(
 
   return mappedHyperlanes;
 }
+
+/**
+ * Recomputes all statistical metrics for a sector when star systems are added, edited, or deleted.
+ */
+export function recomputeSectorStats(
+  systems: SectorHexSystem[],
+  config: SectorHexConfig,
+  hyperlaneCount: number
+): SectorHexGridData['stats'] {
+  const totalHexes = config.columns * config.rows;
+  const occupiedHexes = new Set(systems.map((s) => s.coord)).size;
+  const occupancyPct = totalHexes > 0 ? +((occupiedHexes / totalHexes) * 100).toFixed(1) : 0;
+
+  let obCount = 0;
+  let afCount = 0;
+  let gCount = 0;
+  let kmCount = 0;
+  let remnantCount = 0;
+  let multipleSystemCount = 0;
+  let heavyMassCount = 0;
+  let giantCount = 0;
+  let habitableCount = 0;
+  let nonMsCount = 0;
+
+  for (const s of systems) {
+    if (s.spectralCat === 'ob') obCount++;
+    else if (s.spectralCat === 'af') afCount++;
+    else if (s.spectralCat === 'g') gCount++;
+    else if (s.spectralCat === 'km') kmCount++;
+    else if (s.spectralCat === 'remnant') remnantCount++;
+
+    if (s.nStars > 1) multipleSystemCount++;
+    if (s.mass >= 3.0) heavyMassCount++;
+    if (s.isGiantSystem) giantCount++;
+    if (s.candidateHabitable) habitableCount++;
+    if (isNonMainSequenceSystem(s)) nonMsCount++;
+  }
+
+  return {
+    totalHexes,
+    occupiedHexes,
+    occupancyPct,
+    totalStars: systems.length,
+    hyperlaneCount,
+    obCount,
+    afCount,
+    gCount,
+    kmCount,
+    remnantCount,
+    multipleSystemCount,
+    heavyMassCount,
+    giantCount,
+    habitableCount,
+    nonMsCount,
+  };
+}
+
+/**
+ * Recomputes the luminosity-weighted integrated star color of a sector after modifications.
+ */
+export function recomputeSectorIntegratedColor(
+  systems: SectorHexSystem[],
+  density: number = 1.0
+): string {
+  let sumSectorR = 0;
+  let sumSectorG = 0;
+  let sumSectorB = 0;
+  let totalSectorLum = 0;
+
+  for (const sys of systems) {
+    for (const st of sys.sysResult?.hierarchy?.stars || []) {
+      const lum = Math.max(1e-4, typeof st.lumNum === 'number' ? st.lumNum : 0.001);
+      const rgb = hexToRgb(st.colorHex || '#ffffff');
+      sumSectorR += lum * rgb.r;
+      sumSectorG += lum * rgb.g;
+      sumSectorB += lum * rgb.b;
+      totalSectorLum += lum;
+    }
+  }
+
+  if (totalSectorLum <= 0) return '#ffd2a1';
+  const avgR = Math.round(sumSectorR / totalSectorLum);
+  const avgG = Math.round(sumSectorG / totalSectorLum);
+  const avgB = Math.round(sumSectorB / totalSectorLum);
+  let integratedColorHex = rgbToHex(avgR, avgG, avgB);
+  if (density > 1.0) {
+    const factor = Math.min(0.96, Math.pow((density - 1.0) / 2.0, 0.85) * 0.95);
+    integratedColorHex = desaturateToWhite(integratedColorHex, factor);
+  }
+  return integratedColorHex;
+}
+
+/**
+ * Constructs or synchronizes a SectorHexSystem wrapper from a RealisticStarSystemResult.
+ */
+export function deriveSectorSystemPropsFromSysResult(
+  sysResult: RealisticStarSystemResult,
+  col: number,
+  row: number,
+  x: number,
+  y: number,
+  _config: SectorHexConfig,
+  sectorWidth: number,
+  sectorHeight: number,
+  parsecWidth: number,
+  parsecHeight: number,
+  customId?: string,
+  customName?: string
+): SectorHexSystem {
+  const primaryStar = sysResult.hierarchy.stars[0] || {
+    spectralType: 'G2V',
+    mass: 1.0,
+    colorHex: '#fff4ea',
+    Teff: 5778,
+    lumNum: 1.0,
+    category: 'Main Sequence',
+    radius: 1.0,
+  };
+  const companionStars = sysResult.hierarchy.stars.slice(1);
+  const nStars = sysResult.hierarchy.stars.length;
+  const archName =
+    sysResult.hierarchy.archName ||
+    (nStars === 1 ? 'Single Star' : nStars === 2 ? 'Binary Star System' : `${nStars}-Star System`);
+
+  const categoryStr = primaryStar.category || '';
+  const typeStr = primaryStar.spectralType || '';
+  const isRemnant =
+    categoryStr.toLowerCase().includes('remnant') ||
+    typeStr.includes('Dwarf (D') ||
+    typeStr.includes('White Dwarf') ||
+    typeStr.includes('Neutron') ||
+    typeStr.includes('Black Hole');
+
+  let spectralCat: SpectralCategory;
+  if (isRemnant) {
+    spectralCat = 'remnant';
+  } else {
+    const firstLetter = typeStr.trim().charAt(0).toUpperCase();
+    if (firstLetter === 'O' || firstLetter === 'B') {
+      spectralCat = 'ob';
+    } else if (firstLetter === 'A' || firstLetter === 'F') {
+      spectralCat = 'af';
+    } else if (firstLetter === 'G') {
+      spectralCat = 'g';
+    } else {
+      spectralCat = 'km';
+    }
+  }
+
+  let planetCount = 0;
+  let beltCount = 0;
+  let candidateHabitable = false;
+  let habitableWorldCount = 0;
+  const habitableTypesSet = new Set<string>();
+
+  for (const zone of sysResult.zones) {
+    for (const body of zone.bodies) {
+      if (body.kind === 'planet') {
+        planetCount++;
+        const isWaterHZ = isWaterWorldBody(body.planetClass, body.surfaceTempK, body.hydrosphere);
+        const isAmmonia = isAmmoniaWorldBody(body.planetClass, body.surfaceTempK, body.hydrosphere);
+        const isMulti = hasMulticellularBiosphere(body.hydrosphere);
+        const isTerrestrial = hasTerrestrialBiosphere(body.planetClass, body.hydrosphere, body);
+
+        if (isWaterHZ || isAmmonia || isMulti || isTerrestrial) {
+          candidateHabitable = true;
+          habitableWorldCount++;
+          if (isAmmonia) habitableTypesSet.add('Ammonia World');
+          else if (isWaterHZ) habitableTypesSet.add('Habitable World');
+          if (isMulti) habitableTypesSet.add('Multicellular Life');
+          if (isTerrestrial) habitableTypesSet.add('Terrestrial Life');
+        }
+
+        if (body.moons && body.moons.length > 0) {
+          for (const moon of body.moons) {
+            const isMoonWaterHZ = isWaterWorldBody(moon.moonClass, moon.surfaceTempK, moon.hydrosphere);
+            const isMoonAmmonia = isAmmoniaWorldBody(moon.moonClass, moon.surfaceTempK, moon.hydrosphere);
+            const isMoonMulti = hasMulticellularBiosphere(moon.hydrosphere);
+            const isMoonTerrestrial = hasTerrestrialBiosphere(moon.moonClass, moon.hydrosphere, moon);
+
+            if (isMoonWaterHZ || isMoonAmmonia || isMoonMulti || isMoonTerrestrial) {
+              candidateHabitable = true;
+              habitableWorldCount++;
+              if (isMoonAmmonia) habitableTypesSet.add('Ammonia Moon');
+              else if (isMoonWaterHZ) habitableTypesSet.add('Habitable Moon');
+              if (isMoonMulti) habitableTypesSet.add('Multicellular Life');
+              if (isMoonTerrestrial) habitableTypesSet.add('Terrestrial Life');
+            }
+          }
+        }
+      } else if (body.kind === 'belt') {
+        beltCount++;
+      }
+    }
+  }
+
+  const isNeutronOrBHSystem =
+    categoryStr.toLowerCase().includes('neutron') ||
+    categoryStr.toLowerCase().includes('black hole') ||
+    typeStr.includes('Neutron') ||
+    typeStr.includes('PSR') ||
+    typeStr.includes('Black Hole') ||
+    typeStr.includes('BH') ||
+    sysResult.hierarchy.stars.some((s) => {
+      const c = (s.category || '').toLowerCase();
+      const sp = (s.spectralType || '').toLowerCase();
+      return c.includes('neutron') || sp.includes('psr') || c.includes('black hole') || sp.includes('bh');
+    });
+
+  if (isNeutronOrBHSystem) {
+    candidateHabitable = false;
+    habitableWorldCount = 0;
+    habitableTypesSet.clear();
+  }
+
+  const habitableTypes = Array.from(habitableTypesSet);
+  const lumNum = typeof primaryStar.lumNum === 'number' ? primaryStar.lumNum : 1;
+  const MIN_BD_R = 0.08;
+  const rSolar = isRemnant ? MIN_BD_R : Math.max(MIN_BD_R, primaryStar.radius || 1.0);
+  const rBase = 24 + 4.5 * Math.sqrt(rSolar);
+  const rMulti = nStars > 1 ? (nStars === 2 ? 4 : 7) : 0;
+  const influenceRadius = Math.round(Math.min(46, Math.max(24, rBase + rMulti)));
+
+  const padding = 60;
+  const usableW = sectorWidth - padding * 2;
+  const usableH = sectorHeight - padding * 2;
+  const parsecX = +(((x - padding) / usableW) * parsecWidth - parsecWidth / 2).toFixed(1);
+  const parsecY = +(((y - padding) / usableH) * parsecHeight - parsecHeight / 2).toFixed(1);
+  const coord = formatHexCoord(col, row);
+
+  const mass = sysResult.step1?.sysMass || primaryStar.mass || 1.0;
+  const age = sysResult.step1?.age || 4.6;
+  const metallicity = sysResult.step1?.feh ?? 0.0;
+  const id =
+    customId ||
+    sysResult.step1?.id ||
+    `SYS-${coord}-${Math.floor(Math.random() * 8999 + 1000).toString(16).toUpperCase()}`;
+  const name = customName || sysResult.step1?.name || `System ${coord}`;
+  const isGiantSystem = mass >= 10.0;
+
+  return {
+    age,
+    mass,
+    metallicity,
+    id,
+    x,
+    y,
+    influenceRadius,
+    parsecX,
+    parsecY,
+    name,
+    col,
+    row,
+    coord,
+    primaryClass: primaryStar.spectralType,
+    primaryMass: primaryStar.mass,
+    spectralCat,
+    colorHex: primaryStar.colorHex,
+    glowColor: primaryStar.colorHex,
+    teff: primaryStar.Teff,
+    lumLsun: +lumNum.toFixed(3),
+    isRemnant,
+    remnantType: isRemnant ? primaryStar.spectralType : null,
+    nStars,
+    archName,
+    companionStars,
+    planetCount,
+    beltCount,
+    candidateHabitable,
+    habitableWorldCount,
+    habitableTypes,
+    isGiantSystem,
+    sysResult,
+  };
+}
+

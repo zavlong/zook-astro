@@ -22,6 +22,7 @@ import {
   Lock,
   FileText,
   Globe,
+  Edit3,
 } from 'lucide-react';
 import {
   CustomStellarConfig,
@@ -65,6 +66,7 @@ import {
 } from './math/kepler';
 import { SystemJsonManagerModal } from './modals/SystemJsonManagerModal';
 import { PreProgramStarModal } from './modals/PreProgramStarModal';
+import { SystemEditorModal } from './modals/SystemEditorModal';
 import { StarDossierModal } from './modals/StarDossierModal';
 import { BinarySplitModal } from './modals/BinarySplitModal';
 import { BeltDossierModal } from './modals/BeltDossierModal';
@@ -141,9 +143,10 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
   // Click-to-Blow-Up Selected Entity Modal State
   const [selectedEntity, setSelectedEntity] = useState<SelectedMapEntity | null>(null);
 
-  // Modals (JSON Import/Export & Pre-Program Star Data)
+  // Modals (JSON Import/Export & Pre-Program Star Data & Universal Architect)
   const [showJsonModal, setShowJsonModal] = useState<boolean>(false);
   const [showPreProgramModal, setShowPreProgramModal] = useState<boolean>(false);
+  const [showSystemEditorModal, setShowSystemEditorModal] = useState<boolean>(false);
   const [customStellarConfig, setCustomStellarConfig] = useState<
     CustomStellarConfig | undefined
   >(undefined);
@@ -5683,6 +5686,17 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
               <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
               Roll Planets Only
             </button>
+            {/* Universal Star & Planet Architect Button */}
+            <button
+              type="button"
+              onClick={() => setShowSystemEditorModal(true)}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md shadow-cyan-600/25 border border-cyan-400/40"
+              title="Edit all stars, planetary zones, orbits, physical parameters, atmospheres, oceans, biospheres, and moons in this system"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>Edit System & Planets</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setShowPreProgramModal(true)}
@@ -5972,6 +5986,24 @@ export const RealisticStarGenApp: React.FC<RealisticStarGenAppProps> = ({
             setShowJsonModal(false);
           }}
           onClose={() => setShowJsonModal(false)}
+        />
+      )}
+
+      {/* Universal Star & Planet Architect Modal */}
+      {showSystemEditorModal && systemResult && (
+        <SystemEditorModal
+          isOpen={showSystemEditorModal}
+          systemResult={systemResult}
+          onSave={(updated) => {
+            const sysId = updated.step1?.id || initialParams?.id || 'system';
+            universeCache.cacheLoadedSystem(sysId, updated);
+            universeCache.setLastActiveSystem(updated);
+            setSystemResult(updated);
+            setSelectedEntity(null);
+            fitOrreryToFullSystem(updated);
+            setShowSystemEditorModal(false);
+          }}
+          onClose={() => setShowSystemEditorModal(false)}
         />
       )}
     </div>
