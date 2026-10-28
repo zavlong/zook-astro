@@ -25,7 +25,10 @@ import {
   RealisticStarNode,
   RealisticMoon,
 } from '../stargen/types';
-import { RealisticPlanetOrBelt } from '../../core/generation/realisticStarGen';
+import {
+  RealisticPlanetOrBelt,
+  getStarStats,
+} from '../../core/generation/realisticStarGen';
 import { SectorHexSystem } from '../../core/generation/sectorHex';
 import { teffToHex } from '../../core/astrophysics/colors';
 
@@ -109,6 +112,68 @@ export const BIOSPHERE_TYPES = [
   'Terrestrial Flora & Fauna',
   'Complex Sentient Biosphere',
 ];
+
+export const STAR_LABELS = ['A', 'B', 'C', 'D'] as const;
+
+export const EVOLUTIONARY_CATEGORIES = [
+  'Main Sequence',
+  'Subgiant Branch',
+  'Red Giant Branch',
+  'Brown Dwarf',
+  'White Dwarf',
+  'Neutron Star',
+  'Stellar Black Hole',
+];
+
+/**
+ * Computes Holman & Wiegert (1999) astronomical stability limits and regime
+ * for a binary or multiple stellar split.
+ */
+export function calculateSplitLimits(aBin: number, eBin: number, mA: number, mB: number) {
+  const mTot = Math.max(0.01, mA + mB);
+  const muA = mB / mTot;
+  const muB = mA / mTot;
+  const muM = Math.min(muA, muB);
+  const e = Math.min(0.95, Math.max(0, eBin));
+  const sA =
+    aBin *
+    (0.464 -
+      0.38 * muA -
+      0.631 * e +
+      0.586 * muA * e +
+      0.15 * e * e -
+      0.198 * muA * e * e);
+  const sB =
+    aBin *
+    (0.464 -
+      0.38 * muB -
+      0.631 * e +
+      0.586 * muB * e +
+      0.15 * e * e -
+      0.198 * muB * e * e);
+  const pM =
+    aBin *
+    (1.6 +
+      5.1 * e -
+      2.22 * e * e +
+      4.12 * muM -
+      4.27 * e * muM -
+      5.09 * muM * muM +
+      4.61 * e * e * muM * muM);
+  const sc = Math.pow(Math.max(0.1, mTot), 0.75);
+  const reg =
+    aBin < 0.5 * sc
+      ? 'P-Type (Circumbinary)'
+      : aBin <= 50 * sc
+      ? 'Mixed (Truncated S + P)'
+      : 'S-Type (Wide)';
+  return {
+    sMaxA: +Math.max(0, sA).toFixed(2),
+    sMaxB: +Math.max(0, sB).toFixed(2),
+    pMin: +Math.max(0.01, pM).toFixed(2),
+    regime: reg,
+  };
+}
 
 export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
   isOpen,
@@ -213,6 +278,252 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
         if (field === 'Teff' && typeof value === 'number') {
           target.colorHex = teffToHex(value);
         }
+      }
+      return copy;
+    });
+  };
+
+  const handleAddStar = () => {
+    setDraftResult((prev) => {
+      const copy = JSON.parse(JSON.stringify(prev)) as RealisticStarSystemResult;
+      const currentCount = copy.hierarchy.stars.length;
+      if (currentCount >= 4) return copy;
+
+      const newIdx = currentCount;
+      const label = STAR_LABELS[newIdx];
+      const primaryMass = copy.hierarchy.stars[0]?.mass || 1.0;
+      const defaultMass = Math.max(0.08, +(primaryMass * (0.7 / (newIdx + 0.3))).toFixed(2));
+      const newStar = getStarStats(defaultMass, sysAge, sysFeh, label);
+      copy.hierarchy.stars.push(newStar);
+
+      // Add corresponding binary split
+      if (newIdx === 1) {
+        const lim = calculateSplitLimits(30.0, 0.15, primaryMass, newStar.mass);
+        copy.hierarchy.splits = [
+          {
+            pair: 'AB',
+            a_AU: 30.0,
+            e: 0.15,
+            regime: lim.regime,
+            sMaxA: lim.sMaxA,
+            sMaxB: lim.sMaxB,
+            pMin: lim.pMin,
+          },
+        ];
+        copy.hierarchy.archName = `Binary (${lim.regime})`;
+      } else if (newIdx === 2) {
+        const mAB = copy.hierarchy.stars[0].mass + copy.hierarchy.stars[1].mass;
+        const lim = calculateSplitLimits(350.0, 0.25, mAB, newStar.mass);
+        copy.hierarchy.splits.push({
+          pair: 'AB + C',
+          a_AU: 350.0,
+          e: 0.25,
+          regime: lim.regime,
+          sMaxA: lim.sMaxA,
+          sMaxB: lim.sMaxB,
+          pMin: lim.pMin,
+        });
+        copy.hierarchy.archName = 'Trinary ((A+B) + C)';
+      } else if (newIdx === 3) {
+        const mAB = copy.hierarchy.stars[0].mass + copy.hierarchy.stars[1].mass;
+        const mCD = copy.hierarchy.stars[2].mass + newStar.mass;
+        const lim = calculateSplitLimits(1800.0, 0.35, mAB, mCD);
+        copy.hierarchy.splits.push({
+          pair: 'AB + CD',
+          a_AU: 1800.0,
+          e: 0.35,
+          regime: lim.regime,
+          sMaxA: lim.sMaxA,
+          sMaxB: lim.sMaxB,
+          pMin: lim.pMin,
+        });
+        copy.hierarchy.archName = 'Quadruple ((A+B) + (C+D))';
+      }
+
+      return copy;
+    });
+  };
+
+  const handleDeleteStar = (starIdx: number) => {
+    if (starIdx === 0) return; // Cannot delete primary star A
+    setDraftResult((prev) => {
+      const copy = JSON.parse(JSON.stringify(prev)) as RealisticStarSystemResult;
+      if (starIdx >= copy.hierarchy.stars.length) return copy;
+
+      const removedLabel = copy.hierarchy.stars[starIdx].label;
+      const newStars = copy.hierarchy.stars.filter((_, idx) => idx !== starIdx);
+      newStars.forEach((s, idx) => {
+        s.label = STAR_LABELS[idx];
+      });
+      copy.hierarchy.stars = newStars;
+
+      if (newStars.length === 1) {
+        copy.hierarchy.splits = [];
+        copy.hierarchy.archName = 'Single Star';
+      } else if (newStars.length === 2) {
+        copy.hierarchy.splits = copy.hierarchy.splits.slice(0, 1);
+        if (copy.hierarchy.splits[0]) {
+          copy.hierarchy.splits[0].pair = 'AB';
+          const lim = calculateSplitLimits(
+            copy.hierarchy.splits[0].a_AU,
+            copy.hierarchy.splits[0].e,
+            newStars[0].mass,
+            newStars[1].mass
+          );
+          copy.hierarchy.splits[0].regime = lim.regime;
+          copy.hierarchy.splits[0].sMaxA = lim.sMaxA;
+          copy.hierarchy.splits[0].sMaxB = lim.sMaxB;
+          copy.hierarchy.splits[0].pMin = lim.pMin;
+          copy.hierarchy.archName = `Binary (${lim.regime})`;
+        }
+      } else if (newStars.length === 3) {
+        copy.hierarchy.splits = copy.hierarchy.splits.slice(0, 2);
+        if (copy.hierarchy.splits[0]) copy.hierarchy.splits[0].pair = 'AB';
+        if (copy.hierarchy.splits[1]) copy.hierarchy.splits[1].pair = 'AB + C';
+        copy.hierarchy.archName = 'Trinary ((A+B) + C)';
+      }
+
+      // Reassign any zones referencing the removed star label to primary star A
+      copy.zones.forEach((z) => {
+        if (z.starLabel === removedLabel) {
+          z.starLabel = 'A';
+          z.title = `Star A (${newStars[0].spectralType})`;
+        }
+      });
+
+      return copy;
+    });
+  };
+
+  const handleSetStarCount = (targetCount: number) => {
+    if (targetCount < 1 || targetCount > 4) return;
+    setDraftResult((prev) => {
+      const copy = JSON.parse(JSON.stringify(prev)) as RealisticStarSystemResult;
+      const currentCount = copy.hierarchy.stars.length;
+      if (targetCount === currentCount) return copy;
+
+      if (targetCount < currentCount) {
+        copy.hierarchy.stars = copy.hierarchy.stars.slice(0, targetCount);
+        copy.hierarchy.stars.forEach((s, idx) => {
+          s.label = STAR_LABELS[idx];
+        });
+        if (targetCount === 1) {
+          copy.hierarchy.splits = [];
+          copy.hierarchy.archName = 'Single Star';
+        } else if (targetCount === 2) {
+          copy.hierarchy.splits = copy.hierarchy.splits.slice(0, 1);
+          if (copy.hierarchy.splits[0]) copy.hierarchy.splits[0].pair = 'AB';
+          copy.hierarchy.archName = 'Binary Star System';
+        } else if (targetCount === 3) {
+          copy.hierarchy.splits = copy.hierarchy.splits.slice(0, 2);
+          if (copy.hierarchy.splits[0]) copy.hierarchy.splits[0].pair = 'AB';
+          if (copy.hierarchy.splits[1]) copy.hierarchy.splits[1].pair = 'AB + C';
+          copy.hierarchy.archName = 'Trinary ((A+B) + C)';
+        }
+      } else {
+        const primaryMass = copy.hierarchy.stars[0]?.mass || 1.0;
+        for (let idx = currentCount; idx < targetCount; idx++) {
+          const label = STAR_LABELS[idx];
+          const defaultMass = Math.max(0.08, +(primaryMass * (0.7 / (idx + 0.3))).toFixed(2));
+          const newStar = getStarStats(defaultMass, sysAge, sysFeh, label);
+          copy.hierarchy.stars.push(newStar);
+
+          if (idx === 1) {
+            const lim = calculateSplitLimits(30.0, 0.15, copy.hierarchy.stars[0].mass, newStar.mass);
+            copy.hierarchy.splits = [
+              {
+                pair: 'AB',
+                a_AU: 30.0,
+                e: 0.15,
+                regime: lim.regime,
+                sMaxA: lim.sMaxA,
+                sMaxB: lim.sMaxB,
+                pMin: lim.pMin,
+              },
+            ];
+          } else if (idx === 2) {
+            const mAB = copy.hierarchy.stars[0].mass + copy.hierarchy.stars[1].mass;
+            const lim = calculateSplitLimits(350.0, 0.25, mAB, newStar.mass);
+            copy.hierarchy.splits.push({
+              pair: 'AB + C',
+              a_AU: 350.0,
+              e: 0.25,
+              regime: lim.regime,
+              sMaxA: lim.sMaxA,
+              sMaxB: lim.sMaxB,
+              pMin: lim.pMin,
+            });
+          } else if (idx === 3) {
+            const mAB = copy.hierarchy.stars[0].mass + copy.hierarchy.stars[1].mass;
+            const mCD = copy.hierarchy.stars[2].mass + newStar.mass;
+            const lim = calculateSplitLimits(1800.0, 0.35, mAB, mCD);
+            copy.hierarchy.splits.push({
+              pair: 'AB + CD',
+              a_AU: 1800.0,
+              e: 0.35,
+              regime: lim.regime,
+              sMaxA: lim.sMaxA,
+              sMaxB: lim.sMaxB,
+              pMin: lim.pMin,
+            });
+          }
+        }
+        if (targetCount === 2) copy.hierarchy.archName = 'Binary Star System';
+        else if (targetCount === 3) copy.hierarchy.archName = 'Trinary ((A+B) + C)';
+        else if (targetCount === 4) copy.hierarchy.archName = 'Quadruple ((A+B) + (C+D))';
+      }
+
+      return copy;
+    });
+  };
+
+  const handleAutoCalculateStar = (starIdx: number) => {
+    setDraftResult((prev) => {
+      const copy = JSON.parse(JSON.stringify(prev)) as RealisticStarSystemResult;
+      const target = copy.hierarchy.stars[starIdx];
+      if (!target) return copy;
+      const currentMass = Math.max(0.08, target.mass || 1.0);
+      const computed = getStarStats(currentMass, sysAge, sysFeh, target.label);
+      target.radius = computed.radius;
+      target.Teff = computed.Teff;
+      target.lum = computed.lum;
+      target.lumNum = computed.lumNum;
+      target.logg = computed.logg;
+      target.spectralType = computed.spectralType;
+      target.category = computed.category;
+      target.colorHex = computed.colorHex;
+      return copy;
+    });
+  };
+
+  const updateSplitField = (splitIdx: number, field: 'a_AU' | 'e', value: number) => {
+    setDraftResult((prev) => {
+      const copy = JSON.parse(JSON.stringify(prev)) as RealisticStarSystemResult;
+      const split = copy.hierarchy.splits[splitIdx];
+      if (!split) return copy;
+      split[field] = value;
+      const stars = copy.hierarchy.stars;
+      const mA = stars[0]?.mass || 1.0;
+      const mB = stars[1]?.mass || 0.5;
+      const mC = stars[2]?.mass || 0.3;
+      const mD = stars[3]?.mass || 0.2;
+      let leftMass = mA;
+      let rightMass = mB;
+      if (splitIdx === 1) {
+        leftMass = mA + mB;
+        rightMass = mC;
+      } else if (splitIdx === 2) {
+        leftMass = mA + mB;
+        rightMass = mC + mD;
+      }
+      const lim = calculateSplitLimits(split.a_AU, split.e, leftMass, rightMass);
+      split.regime = lim.regime;
+      split.sMaxA = lim.sMaxA;
+      split.sMaxB = lim.sMaxB;
+      split.pMin = lim.pMin;
+
+      if (splitIdx === 0 && copy.hierarchy.stars.length === 2) {
+        copy.hierarchy.archName = `Binary (${lim.regime})`;
       }
       return copy;
     });
@@ -457,10 +768,14 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
   // Save All Changes
   // --------------------------------------------------------------------------
   const handleSaveAll = () => {
+    // Recompute total system stellar mass from stars
+    const totalMass = draftResult.hierarchy?.stars?.reduce((sum, s) => sum + (s.mass || 0), 0) || 0;
+    const resolvedMass = totalMass > 0 ? +totalMass.toFixed(2) : sysMass;
+
     // Sync step1 header
     if (!draftResult.step1) {
       draftResult.step1 = {
-        sysMass: sysMass,
+        sysMass: resolvedMass,
         age: sysAge,
         feh: sysFeh,
         forcedMult: 'auto',
@@ -468,14 +783,14 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
     }
     draftResult.step1.name = sysName;
     draftResult.step1.age = sysAge;
-    draftResult.step1.sysMass = sysMass;
+    draftResult.step1.sysMass = resolvedMass;
     draftResult.step1.feh = sysFeh;
 
     onSave(draftResult, {
       name: sysName,
       coord: sysCoord,
       age: sysAge,
-      mass: sysMass,
+      mass: resolvedMass,
       metallicity: sysFeh,
     });
 
@@ -1301,14 +1616,44 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
           {/* ================================================================= */}
           {activeTab === 'stars' && (
             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
                 <div>
                   <h3 className="text-sm font-mono font-bold uppercase tracking-wider text-amber-400">
                     Host Stars & Multi-Star Hierarchy
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Configure stellar masses, effective temperatures, spectral types, and luminosity classes.
+                    Add or remove stars (1-4), adjust masses, calculate stellar parameters, and edit orbital separations.
                   </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {/* Star count selector */}
+                  <div className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
+                    <span className="text-[10px] font-mono text-slate-400 px-2 uppercase font-semibold">Stars:</span>
+                    {([1, 2, 3, 4] as const).map((cnt) => (
+                      <button
+                        key={`star-cnt-${cnt}`}
+                        onClick={() => handleSetStarCount(cnt)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition ${
+                          draftResult.hierarchy.stars.length === cnt
+                            ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                        }`}
+                      >
+                        {cnt}★ {cnt === 1 ? 'Single' : cnt === 2 ? 'Binary' : cnt === 3 ? 'Trinary' : 'Quad'}
+                      </button>
+                    ))}
+                  </div>
+
+                  {draftResult.hierarchy.stars.length < 4 && (
+                    <button
+                      onClick={handleAddStar}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-mono text-xs font-semibold transition hover:scale-105 active:scale-95 shadow-md shadow-amber-950/40"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Companion Star</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1317,7 +1662,7 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
                   return (
                     <div
                       key={`star-${sIdx}`}
-                      className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/90 shadow-lg space-y-4"
+                      className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/90 shadow-lg space-y-4 relative group"
                     >
                       <div className="flex items-center justify-between border-b border-slate-800/70 pb-3">
                         <div className="flex items-center gap-3">
@@ -1331,8 +1676,17 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
                             {star.label}
                           </div>
                           <div>
-                            <div className="font-bold font-mono text-sm text-white">
-                              Star {star.label} &bull; {star.spectralType}
+                            <div className="font-bold font-mono text-sm text-white flex items-center gap-2">
+                              <span>Star {star.label} &bull; {star.spectralType}</span>
+                              {sIdx === 0 ? (
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono">
+                                  Primary Host
+                                </span>
+                              ) : (
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 font-mono">
+                                  Companion
+                                </span>
+                              )}
                             </div>
                             <div className="text-xs font-mono text-slate-400">
                               {star.category} &bull; {star.Teff} K
@@ -1341,6 +1695,15 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
                         </div>
 
                         <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleAutoCalculateStar(sIdx)}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 font-mono text-xs font-semibold transition"
+                            title="Auto-calculate radius, Teff, luminosity, logg, and spectral class from mass and age"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>Auto-Calc</span>
+                          </button>
+
                           <input
                             type="color"
                             value={star.colorHex || '#ffd2a1'}
@@ -1348,6 +1711,16 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
                             className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
                             title="Star Color"
                           />
+
+                          {sIdx > 0 && (
+                            <button
+                              onClick={() => handleDeleteStar(sIdx)}
+                              className="p-1.5 rounded-lg text-rose-400 hover:text-rose-200 hover:bg-rose-950/50 border border-rose-800/40 transition"
+                              title={`Remove Star ${star.label}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -1364,13 +1737,17 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
                         </div>
                         <div>
                           <label className="text-[11px] font-mono text-slate-400">Category</label>
-                          <input
-                            type="text"
+                          <select
                             value={star.category}
                             onChange={(e) => updateStarField(sIdx, 'category', e.target.value)}
                             className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-amber-400 focus:outline-none"
-                            placeholder="Main Sequence, Red Giant, etc."
-                          />
+                          >
+                            {EVOLUTIONARY_CATEGORIES.map((cat) => (
+                              <option key={cat} value={cat}>
+                                {cat}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                         <div>
                           <label className="text-[11px] font-mono text-slate-400">Mass (M☉)</label>
@@ -1428,6 +1805,79 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
                   );
                 })}
               </div>
+
+              {draftResult.hierarchy.splits && draftResult.hierarchy.splits.length > 0 && (
+                <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/90 shadow-lg space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800/70 pb-3">
+                    <div className="flex items-center gap-2">
+                      <Orbit className="w-4 h-4 text-cyan-400" />
+                      <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-cyan-300">
+                        Binary & Multiple Star Orbital Separations
+                      </h4>
+                    </div>
+                    <span className="text-[11px] font-mono text-slate-400">
+                      Architecture: <span className="text-amber-300 font-semibold">{draftResult.hierarchy.archName}</span>
+                    </span>
+                  </div>
+
+                  <div className="space-y-3">
+                    {draftResult.hierarchy.splits.map((split, spIdx) => (
+                      <div
+                        key={`split-${spIdx}`}
+                        className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-4"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="px-2.5 py-1 rounded-lg bg-cyan-950/80 border border-cyan-700/60 text-cyan-300 font-mono text-xs font-bold">
+                            Pair: {split.pair}
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">
+                            Regime: {split.regime}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-center">
+                          <div>
+                            <label className="text-[10px] font-mono text-slate-400">Semi-Major Axis (AU)</label>
+                            <input
+                              type="number"
+                              step="0.5"
+                              min="0.05"
+                              max="10000"
+                              value={split.a_AU}
+                              onChange={(e) => updateSplitField(spIdx, 'a_AU', parseFloat(e.target.value) || 1.0)}
+                              className="w-full mt-1 px-2.5 py-1 rounded bg-slate-900 border border-slate-700 text-xs font-mono focus:border-cyan-400 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-mono text-slate-400">Eccentricity (e)</label>
+                            <input
+                              type="number"
+                              step="0.02"
+                              min="0"
+                              max="0.95"
+                              value={split.e}
+                              onChange={(e) => updateSplitField(spIdx, 'e', parseFloat(e.target.value) || 0)}
+                              className="w-full mt-1 px-2.5 py-1 rounded bg-slate-900 border border-slate-700 text-xs font-mono focus:border-cyan-400 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-mono text-slate-400">Stable Limit S_max (AU)</label>
+                            <div className="mt-1 px-2 py-1 rounded bg-slate-900/60 border border-slate-800 text-xs font-mono text-slate-300">
+                              A: {split.sMaxA} | B: {split.sMaxB}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-mono text-slate-400">Circum Critical P_min (AU)</label>
+                            <div className="mt-1 px-2 py-1 rounded bg-slate-900/60 border border-slate-800 text-xs font-mono text-emerald-400">
+                              {split.pMin} AU
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1460,7 +1910,7 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-mono text-slate-400">Progenitor Mass (M☉)</label>
+                    <label className="text-xs font-mono text-slate-400">System Total Mass (M☉)</label>
                     <input
                       type="number"
                       step="0.05"
@@ -1495,6 +1945,76 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
                       className="w-full mt-1.5 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-mono focus:border-indigo-400 focus:outline-none"
                     />
                   </div>
+                </div>
+              </div>
+
+              {/* Multi-Star Multiplicity Controls in System Parameters */}
+              <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/90 shadow-lg space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800/70 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Sun className="w-4 h-4 text-amber-400" />
+                    <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-amber-300">
+                      Stellar Multiplicity & Architecture
+                    </h4>
+                  </div>
+                  <span className="text-xs font-mono text-amber-400 font-semibold">
+                    {draftResult.hierarchy.archName}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-1 bg-slate-950/90 p-1.5 rounded-xl border border-slate-800">
+                    <span className="text-[11px] font-mono text-slate-400 px-2 uppercase font-semibold">
+                      Star Count:
+                    </span>
+                    {([1, 2, 3, 4] as const).map((cnt) => (
+                      <button
+                        key={`sys-param-star-cnt-${cnt}`}
+                        onClick={() => handleSetStarCount(cnt)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition ${
+                          draftResult.hierarchy.stars.length === cnt
+                            ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                        }`}
+                      >
+                        {cnt}★ {cnt === 1 ? 'Single' : cnt === 2 ? 'Binary' : cnt === 3 ? 'Trinary' : 'Quadruple'}
+                      </button>
+                    ))}
+                  </div>
+
+                  {draftResult.hierarchy.stars.length < 4 && (
+                    <button
+                      onClick={handleAddStar}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-mono text-xs font-semibold transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Companion Star</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2">
+                  {draftResult.hierarchy.stars.map((s, idx) => (
+                    <div
+                      key={`star-summary-${idx}`}
+                      className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2.5"
+                    >
+                      <div
+                        className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-black border border-white/40"
+                        style={{ backgroundColor: s.colorHex || '#ffd2a1' }}
+                      >
+                        {s.label}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-mono font-bold text-white truncate">
+                          Star {s.label} ({s.spectralType})
+                        </div>
+                        <div className="text-[10px] font-mono text-slate-400">
+                          {s.mass} M☉ &bull; {s.Teff} K
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
