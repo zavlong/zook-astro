@@ -572,8 +572,8 @@ export function generateTileTrees(params: {
 
   const trees: ProceduralTree[] = [];
 
-  // Fine 28x28 distribution grid for densely packed forest canopy (~784 grid cells)
-  const gridN = 28;
+  // Fine 22x22 distribution grid for densely packed forest canopy (~484 grid cells)
+  const gridN = 22;
   const step = 2.0 / gridN;
 
   for (let gx = 0; gx < gridN; gx++) {

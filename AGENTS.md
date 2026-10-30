@@ -17,10 +17,10 @@ To maximize model efficiency across all chats, coordinate tasks by routing work 
      - Delegate the accompanying UI controls, badges, modals, and codebase lookups to a **Flash 3.8 (`flash`)** subagent.
 
 ## Modular Architecture & Efficiency Guidelines
-- Keep files focused and maintainable; avoid monolithic multi-thousand-line files.
-- Pure math, physics, noise algorithms, and static palettes belong in pure `.ts` modules under `src/core/` or dedicated utility files, decoupled from React `.tsx` components.
-- Sub-panels, complex modals, and distinct UI tools should be extracted into dedicated components in `panels/` or `modals/`.
-- Reusable routines used across multiple views must be placed in shared library files rather than duplicated inline. (See `.agents/rules/modular-architecture.md`).
+- **500-Line File Target**: Keep files focused, modular, and under **~500 lines** whenever logically separable; avoid monolithic multi-thousand-line files.
+- **Shared Custom Libraries**: Centralize reusable math (`clamp`, `lerp`, `smoothstep`, `log10`, `hash2`, `hash3`), color conversion (`hexToRgb`, `rgbToHex`), and formatting helpers in `src/core/math/` and `src/core/utils/` instead of duplicating inline across components.
+- **Pure Domain Modules**: Pure math, physics, noise algorithms, and static palettes belong in pure `.ts` modules under `src/core/` or dedicated utility files, decoupled from React `.tsx` components.
+- **View & Sub-Component Extraction**: Distinct views (Schematic, Orrery, Surface modes), sub-panels, and modals must be extracted into dedicated `React.memo` components under `views/`, `panels/`, or `modals/`. (See `.agents/rules/modular-architecture.md`).
 
 ## Automatic Git Commits & Pushes
 - Upon completing every user request, refactor, or feature update:

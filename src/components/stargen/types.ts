@@ -74,17 +74,7 @@ export interface Point3D {
   z: number;
 }
 
-export function log10(x: number): number {
-  return Math.log(Math.max(1e-12, x)) / Math.LN10;
-}
-
-export function clamp(x: number, a: number, b: number): number {
-  return Math.max(a, Math.min(b, x));
-}
-
-export function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * Math.max(0, Math.min(1, t));
-}
+export { clamp, lerp, log10 } from '../../core/math/mathUtils';
 
 export function shortClassLabel(fullClass: string): string {
   if (fullClass.includes('Hot Jupiter')) return 'Hot Jupiter';

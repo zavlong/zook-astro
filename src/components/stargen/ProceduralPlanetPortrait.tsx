@@ -10,6 +10,9 @@ import {
   generatePlanetarySurfaceModel,
   renderSurfaceProjectedGlobeToCanvas,
 } from './surface/surfaceGenMath';
+import { clamp, lerp, smoothstep, hash3 } from '../../core/math/mathUtils';
+import { hexToRgb } from '../../core/math/colorUtils';
+import { renderFastPlanetIconToCanvas } from './fastPlanetIcon';
 
 interface ProceduralPlanetPortraitProps {
   planet: RealisticPlanetBody;
@@ -19,29 +22,6 @@ interface ProceduralPlanetPortraitProps {
   bodyIndex: number;
   moonIndex?: number;
   onOpenSurfaceGen?: () => void;
-}
-
-// Fast deterministic hash & 3D gradient/value noise for procedural planetary rendering
-function hash3(x: number, y: number, z: number, seed: number): number {
-  let h =
-    Math.imul(x, 374761393) +
-    Math.imul(y, 668265263) +
-    Math.imul(z, 2147483647) +
-    Math.imul(seed, 1274126177);
-  h = (h ^ (h >>> 13)) * 1274126177;
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
-}
-
-function smoothstep(t: number): number {
-  return t * t * (3 - 2 * t);
-}
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-function clamp(x: number, a: number, b: number): number {
-  return Math.max(a, Math.min(b, x));
 }
 
 function noise3D(x: number, y: number, z: number, seed: number): number {
@@ -103,15 +83,6 @@ function ridgedFbm3D(x: number, y: number, z: number, seed: number, octaves = 4)
   return val / norm;
 }
 
-type RGB = [number, number, number];
-
-function hexToRgb(hex: string): RGB {
-  const clean = hex.replace('#', '');
-  const num = parseInt(clean, 16);
-  if (isNaN(num)) return [255, 244, 230];
-  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
-}
-
 const iconDataUrlCache = new Map<string, string>();
 
 /**
@@ -159,7 +130,6 @@ function renderPlanetGlobeToCanvas(
   });
 }
 
-
 /**
  * Generates and caches a low-res procedural 3D planet/moon icon data URL (with transparent background)
  * for use on the 3D/2D Orbital Map, Linear System Overview, and Inspector tabs.
@@ -199,21 +169,32 @@ export function getProceduralPlanetIconDataUrl(
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
-  renderPlanetGlobeToCanvas(
-    canvas,
-    planet,
-    moon,
-    starColorHex,
-    starTeff,
-    moonIndex,
-    true,
-    qYaw,
-    qPitch,
-    true,
-    includeSpriteRings
-  );
+  if (size <= 64) {
+    renderFastPlanetIconToCanvas(
+      canvas,
+      planet,
+      moon,
+      starColorHex,
+      moonIndex,
+      includeSpriteRings
+    );
+  } else {
+    renderPlanetGlobeToCanvas(
+      canvas,
+      planet,
+      moon,
+      starColorHex,
+      starTeff,
+      moonIndex,
+      true,
+      qYaw,
+      qPitch,
+      true,
+      includeSpriteRings
+    );
+  }
   const url = canvas.toDataURL('image/png');
-  if (iconDataUrlCache.size > 600) {
+  if (iconDataUrlCache.size > 800) {
     iconDataUrlCache.clear();
   }
   iconDataUrlCache.set(key, url);

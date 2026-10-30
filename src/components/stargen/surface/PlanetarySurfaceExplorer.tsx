@@ -288,29 +288,15 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     return () => cancelAnimationFrame(rafId);
   }, [displayMode, autoSpinGlobe, isDraggingGlobe]);
 
-  // Render 2D Cartographic Surface Map (2x supersampled 720x360 with bilinear sub-texel blending + Goldberg hex overlay)
-  useEffect(() => {
-    if (displayMode !== 'map') return;
-    const canvas = mapCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
+  // Pre-compute and cache the 720x360 base map + static Goldberg borders so mouse hover / tile selection is < 1ms
+  const baseMapPixels = useMemo<Uint8ClampedArray>(() => {
     const width = 720;
     const height = 360;
-    canvas.width = width;
-    canvas.height = height;
-
-    const imgData = ctx.createImageData(width, height);
-    const data = imgData.data;
-
+    const buf = new Uint8ClampedArray(width * height * 4);
     const topo = goldbergGrid.topology;
-    const selTileId = selectedTile.tileId;
-    const hovTileId = hoveredTile?.tileId ?? -1;
 
     for (let y = 0; y < height; y++) {
       const mapY = (y / height) * 180;
-      const yDown = Math.min(height - 1, y + 1);
       for (let x = 0; x < width; x++) {
         const mapX = (x / width) * 360;
         const pIdx = (y * width + x) * 4;
@@ -321,46 +307,86 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
         if (showTileGrid && !isBlankSurfaceLayer) {
           const hIdx = y * width + x;
-          const tId = topo.hiResTileId[hIdx];
-          const isBorder = topo.hiResIsBorder[hIdx] === 1;
-          const xRight = (x + 1) % width;
-          const tRight = topo.hiResTileId[y * width + xRight];
-          const tDown = topo.hiResTileId[yDown * width + x];
-
-          const isSelBorder =
-            isBorder && (tId === selTileId || tRight === selTileId || tDown === selTileId);
-          const isHovBorder =
-            isBorder && (tId === hovTileId || tRight === hovTileId || tDown === hovTileId);
-
-          if (isSelBorder) {
-            r = Math.round(r * 0.15 + 56 * 0.85);
-            g = Math.round(g * 0.15 + 189 * 0.85);
-            b = Math.round(b * 0.15 + 248 * 0.85);
-          } else if (isHovBorder) {
-            r = Math.round(r * 0.2 + 250 * 0.8);
-            g = Math.round(g * 0.2 + 204 * 0.8);
-            b = Math.round(b * 0.2 + 21 * 0.8);
-          } else if (isBorder) {
+          if (topo.hiResIsBorder[hIdx] === 1) {
+            const tId = topo.hiResTileId[hIdx];
             const isPent = topo.cells[tId].isPentagon;
             const alpha = isPent ? 0.42 : 0.26;
             r = Math.round(r * (1 - alpha) + (isPent ? 251 : 226) * alpha);
             g = Math.round(g * (1 - alpha) + (isPent ? 191 : 232) * alpha);
             b = Math.round(b * (1 - alpha) + (isPent ? 36 : 240) * alpha);
-          } else if (tId === selTileId) {
-            r = Math.round(r * 0.85 + 56 * 0.15);
-            g = Math.round(g * 0.85 + 189 * 0.15);
-            b = Math.round(b * 0.85 + 248 * 0.15);
-          } else if (tId === hovTileId) {
-            r = Math.round(r * 0.9 + 250 * 0.1);
-            g = Math.round(g * 0.9 + 204 * 0.1);
-            b = Math.round(b * 0.9 + 21 * 0.1);
           }
         }
 
-        data[pIdx] = r;
-        data[pIdx + 1] = g;
-        data[pIdx + 2] = b;
-        data[pIdx + 3] = 255;
+        buf[pIdx] = r;
+        buf[pIdx + 1] = g;
+        buf[pIdx + 2] = b;
+        buf[pIdx + 3] = 255;
+      }
+    }
+    return buf;
+  }, [surfaceModel, activeLayer, showCloudsOverlay, showTileGrid, isBlankSurfaceLayer, goldbergGrid]);
+
+  // Render 2D Cartographic Surface Map (fast memcpy from cached baseMapPixels + interactive tile highlight)
+  useEffect(() => {
+    if (displayMode !== 'map') return;
+    const canvas = mapCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = 720;
+    const height = 360;
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+
+    const imgData = ctx.createImageData(width, height);
+    const data = imgData.data;
+    data.set(baseMapPixels);
+
+    if (showTileGrid && !isBlankSurfaceLayer) {
+      const topo = goldbergGrid.topology;
+      const selTileId = selectedTile.tileId;
+      const hovTileId = hoveredTile?.tileId ?? -1;
+
+      for (let y = 0; y < height; y++) {
+        const yDown = Math.min(height - 1, y + 1);
+        const rowOff = y * width;
+        const downOff = yDown * width;
+        for (let x = 0; x < width; x++) {
+          const hIdx = rowOff + x;
+          const tId = topo.hiResTileId[hIdx];
+          const isBorder = topo.hiResIsBorder[hIdx] === 1;
+
+          if (!isBorder && tId !== selTileId && tId !== hovTileId) continue;
+
+          const pIdx = hIdx * 4;
+          const r = data[pIdx];
+          const g = data[pIdx + 1];
+          const b = data[pIdx + 2];
+
+          if (isBorder) {
+            const xRight = (x + 1) % width;
+            const tRight = topo.hiResTileId[rowOff + xRight];
+            const tDown = topo.hiResTileId[downOff + x];
+            if (tId === selTileId || tRight === selTileId || tDown === selTileId) {
+              data[pIdx] = Math.round(r * 0.15 + 56 * 0.85);
+              data[pIdx + 1] = Math.round(g * 0.15 + 189 * 0.85);
+              data[pIdx + 2] = Math.round(b * 0.15 + 248 * 0.85);
+            } else if (hovTileId >= 0 && (tId === hovTileId || tRight === hovTileId || tDown === hovTileId)) {
+              data[pIdx] = Math.round(r * 0.2 + 250 * 0.8);
+              data[pIdx + 1] = Math.round(g * 0.2 + 204 * 0.8);
+              data[pIdx + 2] = Math.round(b * 0.2 + 21 * 0.8);
+            }
+          } else if (tId === selTileId) {
+            data[pIdx] = Math.round(r * 0.85 + 56 * 0.15);
+            data[pIdx + 1] = Math.round(g * 0.85 + 189 * 0.15);
+            data[pIdx + 2] = Math.round(b * 0.85 + 248 * 0.15);
+          } else if (tId === hovTileId) {
+            data[pIdx] = Math.round(r * 0.9 + 250 * 0.1);
+            data[pIdx + 1] = Math.round(g * 0.9 + 204 * 0.1);
+            data[pIdx + 2] = Math.round(b * 0.9 + 21 * 0.1);
+          }
+        }
       }
     }
 
@@ -371,7 +397,6 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
       ctx.lineWidth = 1;
 
-      // Parallels every 30 degrees
       for (let lat = -60; lat <= 60; lat += 30) {
         const y = ((90 - lat) / 180) * height;
         ctx.beginPath();
@@ -380,7 +405,6 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         ctx.stroke();
       }
 
-      // Meridians every 60 degrees
       for (let lon = -120; lon <= 120; lon += 60) {
         const x = ((lon + 180) / 360) * width;
         ctx.beginPath();
@@ -389,14 +413,12 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
         ctx.stroke();
       }
 
-      // Equator
       ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
       ctx.beginPath();
       ctx.moveTo(0, height * 0.5);
       ctx.lineTo(width, height * 0.5);
       ctx.stroke();
 
-      // Prime Meridian
       ctx.beginPath();
       ctx.moveTo(width * 0.5, 0);
       ctx.lineTo(width * 0.5, height);
@@ -421,9 +443,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     ctx.fill();
   }, [
     displayMode,
-    activeLayer,
-    showCloudsOverlay,
-    surfaceModel,
+    baseMapPixels,
     showGrid,
     showTileGrid,
     selectedCoords,

@@ -3,20 +3,21 @@
  * High-performance procedural noise & color utilities for 3D surface generation
  */
 
+import { hexToRgb } from '../../../core/math/colorUtils';
+export { hexToRgb };
+
 // Texture bitflags
 export const FLAG_WATER = 1;
 export const FLAG_LAVA = 2;
 export const FLAG_ICE_SPEC = 4;
 
-export function hexToRgb(hex: string): [number, number, number] {
-  const clean = (hex || '#888888').replace('#', '');
-  const num = parseInt(clean, 16) || 0x888888;
-  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
-}
-
 export function hash2(x: number, y: number, seed: number): number {
-  const h = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453123;
-  return h - Math.floor(h);
+  let h =
+    Math.imul(x | 0, 374761393) +
+    Math.imul(y | 0, 668265263) +
+    Math.imul(seed | 0, 1274126177);
+  h = (h ^ (h >>> 13)) * 1274126177;
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
 }
 
 export function valueNoise2D(x: number, y: number, seed: number): number {
