@@ -45,3 +45,20 @@ export function scaleRgb(rgb: RgbTuple, factor: number): RgbTuple {
     clamp(Math.round(rgb[2] * factor), 0, 255),
   ];
 }
+
+export function hexToRgbObj(hex: string): { r: number; g: number; b: number } {
+  const [r, g, b] = hexToRgb(hex);
+  return { r, g, b };
+}
+
+export function desaturateToWhite(hex: string, factor: number): string {
+  const clamped = clamp(factor, 0, 1);
+  if (clamped <= 0) return hex;
+  const [r, g, b] = hexToRgb(hex);
+  return rgbToHex(
+    r + (255 - r) * clamped,
+    g + (255 - g) * clamped,
+    b + (255 - b) * clamped
+  );
+}
+

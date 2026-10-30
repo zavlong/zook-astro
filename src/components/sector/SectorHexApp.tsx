@@ -1,52 +1,23 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
-  Hexagon,
   Sparkles,
-  RefreshCw,
-  Search,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
-  Atom,
-  Copy,
-  Check,
-  Filter,
-  Info,
-  Sliders,
   X,
-  Grid,
-  Route,
   Crown,
   Compass,
-  Shield,
-  Flag,
   Trash2,
   Download,
   Upload,
-  Tag,
-  ChevronDown,
-  Cloud,
-  Save,
-  Edit3,
-  Move,
-  Plus,
 } from 'lucide-react';
 import {
   SectorHexConfig,
   SectorHexGridData,
   SectorHexSystem,
-  type SectorHyperlane,
   DEFAULT_SECTOR_CONFIG,
   generateSectorHexGrid,
-  isNonMainSequenceSystem,
   isBlackHoleStar,
   isSupermassiveBlackHole,
-  hasWaterWorld,
-  hasAmmoniaWorld,
-  hasMulticellularLife,
-  hasTerrestrialLife,
-  hasTerrestrialBiosphere,
   checkSystemMatchesFilters,
+  computeSystemFilterTraits,
   type SectorFilterCategory,
   type MassFilterBracket,
   generateProceduralHyperlanes,
@@ -62,7 +33,6 @@ import {
   getStarAssetPath,
   type StarAssetDescriptor,
 } from '../../core/generation/starAssets';
-import { BlackHoleIcon } from '../ui/BlackHoleIcon';
 import { GenerationLoadingOverlay, yieldToMainThread } from '../ui/GenerationLoadingOverlay';
 import {
   SectorEmpire,
@@ -72,13 +42,24 @@ import {
   saveLastSectorConfig,
   downloadEmpiresJSON,
   importEmpiresFromJSON,
-  parsePlanetKey,
 } from '../../core/generation/empireGen';
 import { SpawnEmpireModal } from './SpawnEmpireModal';
 import { SectorExportImportModal } from './SectorExportImportModal';
 import { ParsedSectorImportResult } from '../../core/export/sectorFormatExporters';
 import { StarGenParams } from '../../core/generation/realisticStarGen';
 import { universeCache } from '../../core/storage/universeCache';
+import {
+  SectorTopToolbar,
+  SECTOR_PRESETS,
+  type SectorPresetKey,
+  type SectorPreset,
+} from './panels/SectorTopToolbar';
+import { SectorParametersModal } from './modals/SectorParametersModal';
+import { SectorFilterOverlayBar } from './panels/SectorFilterOverlayBar';
+import {
+  SectorSystemInspector,
+  getBiosphereDisplay,
+} from './panels/SectorSystemInspector';
 
 interface SectorHexAppProps {
   onLaunchStarGen: (params: StarGenParams, coord?: string) => void;
@@ -90,143 +71,6 @@ interface SectorHexAppProps {
 }
 
 export type { SectorFilterCategory, MassFilterBracket };
-
-type SectorPresetKey = 'disk' | 'young-cluster' | 'old-halo' | 'dense-core' | 'galactic-nucleus';
-
-interface SectorPreset {
-  id: SectorPresetKey;
-  label: string;
-  description: string;
-  density: number;
-  meanAge: number;
-  ageSigma: number;
-  metallicityMean: number;
-  metallicitySigma: number;
-  coord?: string;
-}
-
-const SECTOR_PRESETS: SectorPreset[] = [
-  {
-    id: 'disk',
-    label: 'Galactic Thin Disk',
-    description: 'Solar neighborhood mix of stars with moderate metallicity and balanced ages.',
-    density: 0.38,
-    meanAge: 4.8,
-    ageSigma: 1.8,
-    metallicityMean: 0.04,
-    metallicitySigma: 0.22,
-  },
-  {
-    id: 'young-cluster',
-    label: 'Young Open Cluster',
-    description: 'Recent star-forming nursery with high OB frequency and enriched metals.',
-    density: 0.55,
-    meanAge: 0.9,
-    ageSigma: 0.5,
-    metallicityMean: 0.24,
-    metallicitySigma: 0.12,
-  },
-  {
-    id: 'old-halo',
-    label: 'Ancient Galactic Halo',
-    description: 'Ancient, metal-poor Population II stars with abundant white dwarf remnants.',
-    density: 0.24,
-    meanAge: 10.2,
-    ageSigma: 1.6,
-    metallicityMean: -0.95,
-    metallicitySigma: 0.35,
-  },
-  {
-    id: 'dense-core',
-    label: 'Galactic Bulge Core',
-    description: 'High stellar density environment with chaotic stellar interactions.',
-    density: 0.65,
-    meanAge: 7.5,
-    ageSigma: 2.0,
-    metallicityMean: 0.18,
-    metallicitySigma: 0.28,
-  },
-  {
-    id: 'galactic-nucleus',
-    label: 'Galactic Nucleus (2525)',
-    description: 'Center of galaxy (Sector 2525) with 1,000,000 M☉ Supermassive Black Hole (Sagittarius A*), S-stars, and relativistic debris.',
-    density: 1.25,
-    meanAge: 8.5,
-    ageSigma: 2.2,
-    metallicityMean: 0.25,
-    metallicitySigma: 0.18,
-    coord: '2525',
-  },
-];
-
-const getBiosphereDisplay = (sys: SectorHexSystem): string => {
-  const zones = sys.sysResult?.zones;
-  if (zones && zones.length > 0) {
-    let bioCount = 0;
-    let hasWaterBio = false;
-    let hasAmmoniaBio = false;
-    let hasMultiBio = false;
-    let hasTerrestrialBio = false;
-
-    for (const zone of zones) {
-      for (const body of zone.bodies) {
-        if (body.kind === 'planet') {
-          if (body.hydrosphere?.biosphere) {
-            bioCount++;
-            const solv = (body.hydrosphere.solvent || '').toLowerCase();
-            const bio = body.hydrosphere.biosphere.toLowerCase();
-            if (solv.includes('nh3') || solv.includes('ammonia') || bio.includes('ammonia')) {
-              hasAmmoniaBio = true;
-            } else {
-              hasWaterBio = true;
-            }
-            if (bio.includes('multicellular')) {
-              hasMultiBio = true;
-            }
-            if (hasTerrestrialBiosphere(body.planetClass, body.hydrosphere, body)) {
-              hasTerrestrialBio = true;
-            }
-          }
-          if (body.moons) {
-            for (const moon of body.moons) {
-              if (moon.hydrosphere?.biosphere) {
-                bioCount++;
-                const solv = (moon.hydrosphere.solvent || '').toLowerCase();
-                const bio = moon.hydrosphere.biosphere.toLowerCase();
-                if (solv.includes('nh3') || solv.includes('ammonia') || bio.includes('ammonia')) {
-                  hasAmmoniaBio = true;
-                } else {
-                  hasWaterBio = true;
-                }
-                if (bio.includes('multicellular')) {
-                  hasMultiBio = true;
-                }
-                if (hasTerrestrialBiosphere(moon.moonClass, moon.hydrosphere, moon)) {
-                  hasTerrestrialBio = true;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    if (bioCount === 0) {
-      return '<none>';
-    }
-    const kindLabel =
-      hasWaterBio && hasAmmoniaBio
-        ? 'water & ammonia'
-        : hasAmmoniaBio
-        ? 'ammonia'
-        : 'water';
-    const complexity = hasMultiBio ? 'multicellular' : 'unicellular';
-    const terrestrialNote = hasTerrestrialBio ? ', terrestrial' : '';
-    return `${bioCount} ${kindLabel} (${complexity}${terrestrialNote})`;
-  }
-
-  return '<none>';
-};
 
 export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   onLaunchStarGen,
@@ -446,7 +290,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     }
   }, [gridData]);
 
-  // Pre-indexed O(1) lookup table for planetary filter flags & biosphere summary per system
+  // Pre-indexed O(1) lookup table for planetary filter flags & biosphere summary per system (single pass!)
   const systemTraitsMap = useMemo(() => {
     const map = new Map<
       string,
@@ -460,16 +304,24 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       }
     >();
     for (const sys of gridData.systems) {
+      const traits = computeSystemFilterTraits(sys);
       map.set(sys.id, {
-        hasWater: hasWaterWorld(sys),
-        hasAmmonia: hasAmmoniaWorld(sys),
-        hasMulti: hasMulticellularLife(sys),
-        hasTerrestrial: hasTerrestrialLife(sys),
-        isNonMs: isNonMainSequenceSystem(sys),
+        ...traits,
         biosphereDisplay: getBiosphereDisplay(sys),
       });
     }
     return map;
+  }, [gridData.systems]);
+
+  // Precompute cached system IDs Set for O(1) lookup in the SVG render loop
+  const cachedSystemIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const sys of gridData.systems) {
+      if (universeCache.hasCachedSystem(sys.id)) {
+        set.add(sys.id);
+      }
+    }
+    return set;
   }, [gridData.systems]);
 
   // Dynamic filter matching count
@@ -528,9 +380,6 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   // Hover state
   const [hoveredSystem, setHoveredSystem] = useState<SectorHexSystem | null>(null);
 
-  // Copied state
-  const [copiedId, setCopiedId] = useState<boolean>(false);
-
   // Hyperlanes & visibility toggles (default false for maximum performance)
   const [showHyperlanes, setShowHyperlanes] = useState<boolean>(false);
   const [showHexBoundaries, setShowHexBoundaries] = useState<boolean>(false);
@@ -564,14 +413,6 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       height: gridData.sectorHeight,
     };
   }, [gridData.sectorWidth, gridData.sectorHeight]);
-
-  // Connected hyperlanes for currently selected system
-  const connectedLanes: SectorHyperlane[] = useMemo(() => {
-    if (!selectedSystem || !gridData.hyperlanes) return [];
-    return gridData.hyperlanes.filter(
-      (l) => l.sourceId === selectedSystem.id || l.targetId === selectedSystem.id
-    );
-  }, [selectedSystem, gridData.hyperlanes]);
 
   // ============================================================================
   // ALIEN EMPIRE & TERRITORY MANAGEMENT STATE (PERSISTED IN LOCALSTORAGE)
@@ -1359,13 +1200,6 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     }
   };
 
-  // Copy ID
-  const handleCopyId = (id: string) => {
-    navigator.clipboard.writeText(id);
-    setCopiedId(true);
-    setTimeout(() => setCopiedId(false), 1800);
-  };
-
   // Launch StarGen Lab with cinematic warp zoom transition
   const handleLaunchSystemGenerator = useCallback(
     (system: SectorHexSystem) => {
@@ -1728,582 +1562,68 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       {/* ============================================================================ */}
       {/* TOP COMMAND & SECTOR CONFIGURATION TOOLBAR                                   */}
       {/* ============================================================================ */}
-      {showUI && (
-        <div className="w-full px-4 py-2.5 bg-slate-950/85 backdrop-blur-md border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 z-20">
-        {/* Back to Galaxy Map button if opened from GalaxyGen */}
-        {onBackToGalaxy && (
-          <button
-            onClick={handleBackToGalaxyWithTransition}
-            className="px-2.5 py-1.5 rounded-xl bg-indigo-950/90 hover:bg-indigo-900 text-indigo-200 border border-indigo-700/80 flex items-center gap-1.5 cursor-pointer transition shadow text-xs font-mono font-bold group"
-            title="Return to 50x50 Galaxy Sector Map (Hotkey: Page Up)"
-          >
-            <span className="group-hover:-translate-x-0.5 transition-transform">&larr;</span>
-            <span>Galaxy Map</span>
-            <kbd className="px-1.5 py-0.5 text-[9px] bg-slate-900/90 border border-indigo-500/50 rounded text-indigo-300 font-sans font-normal ml-0.5">
-              PgUp
-            </kbd>
-          </button>
-        )}
-
-        {/* Title & Sector Info */}
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-600 via-indigo-600 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 border border-cyan-400/30">
-            <Hexagon className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-white tracking-wide flex items-center gap-1.5">
-                SECTOR HEX GENERATOR
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950/80 text-cyan-400 border border-cyan-800">
-                  Seed #{config.seed}
-                </span>
-                {isFromCache && (
-                  <span
-                    className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-800 flex items-center gap-1 shadow-sm"
-                    title="Sector state restored from persistent universe cache"
-                  >
-                    <span>💾</span>
-                    <span>Cached Sector</span>
-                  </span>
-                )}
-              </h2>
-            </div>
-            <p className="text-[11px] text-slate-400 flex items-center gap-2 flex-wrap">
-              <span className="text-cyan-300 font-semibold">{config.columns}&times;{config.rows} Hex Grid</span>
-              <span className="text-slate-600">&bull;</span>
-              <span>{gridData.stats.occupiedHexes.toLocaleString()} Systems ({gridData.stats.occupancyPct}% density)</span>
-              <span className="text-slate-600">&bull;</span>
-              <span className="flex items-center gap-1.5 font-mono">
-                <span className="w-2.5 h-2.5 rounded-full border border-white/40 shadow-sm" style={{ backgroundColor: gridData.integratedColorHex }} />
-                <span>Sector Integrated Light: <strong style={{ color: gridData.integratedColorHex }}>{gridData.integratedColorHex}</strong></span>
-              </span>
-              {gridData.hasNebula && (
-                <>
-                  <span className="text-slate-600">&bull;</span>
-                  <span className="text-fuchsia-300 font-semibold bg-fuchsia-950/70 border border-fuchsia-800/80 px-2 py-0.5 rounded-full text-[10.5px] flex items-center gap-1 shadow-sm">
-                    <span>🌌</span>
-                    <span>{gridData.nebula?.name || 'Nebula Noise Clouds'}</span>
-                  </span>
-                </>
-              )}
-            </p>
-          </div>
-        </div>
-
-        {/* Preset Selector Buttons */}
-        <div className="hidden xl:flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800 text-xs font-mono">
-          {SECTOR_PRESETS.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => handleSelectPreset(p)}
-              className={`px-2.5 py-1 rounded-lg transition text-[11px] cursor-pointer ${
-                activePreset === p.id
-                  ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold shadow-md shadow-cyan-500/20'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-              }`}
-              title={p.description}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Sector Dimensions, Density & Star Count Button */}
-        <button
-          onClick={() => setShowConfigModal(true)}
-          className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700/80 hover:border-cyan-500 text-xs font-mono font-medium flex items-center gap-2 transition shadow cursor-pointer"
-          title="Customize Sector Scale (up to 100x100), Density, Age & Metallicity"
-        >
-          <Sliders className="w-3.5 h-3.5 text-cyan-400" />
-          <span>Scale: <strong className="text-white">{config.columns}&times;{config.rows}</strong></span>
-          <span className="text-slate-500">&bull;</span>
-          <span>Density: <strong className={config.density > 1.0 ? 'text-amber-300 font-bold' : 'text-emerald-300'}>{Math.round(config.density * 100)}%{config.density > 1.0 ? ' (Overdensity)' : ''}</strong></span>
-          <span className="text-slate-500">&bull;</span>
-          <span>Stars: <strong className="text-cyan-300">{gridData.systems.length}</strong></span>
-          <span className="text-slate-500">&bull;</span>
-          <span className="hidden md:inline">Age: <strong className="text-cyan-300">{config.meanAge.toFixed(1)} Gyr{config.ageRange ? ` (±${(config.ageRange / 2).toFixed(1)} Gyr${config.ageDistribution === 'uniform' ? ', Uniform' : ''})` : ''}</strong></span>
-        </button>
-
-        {/* Search Star or Coordinate */}
-        <form onSubmit={handleSearchSubmit} className="flex items-center gap-1.5">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              placeholder="Search star or coord (e.g. 0408, Centauri)..."
-              value={searchCoord}
-              onChange={(e) => setSearchCoord(e.target.value)}
-              className="w-56 pl-8 pr-2 py-1 text-xs font-mono bg-slate-900/90 border border-slate-800 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
-            />
-          </div>
-          <button
-            type="submit"
-            className="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-mono transition"
-          >
-            Go
-          </button>
-        </form>
-
-        {/* Global Action Buttons */}
-        <div className="flex items-center gap-2">
-          {/* Spawn Empire Button */}
-          <button
-            onClick={handleStartSpawnEmpire}
-            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg transition cursor-pointer ${
-              isSpawnEmpireMode
-                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30 ring-2 ring-amber-300 animate-pulse'
-                : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white shadow-emerald-500/25'
-            }`}
-            title="Establish an alien empire on a system with a habitable world"
-          >
-            <Crown className="w-3.5 h-3.5" />
-            <span>{isSpawnEmpireMode ? 'Select Habitable Star...' : 'Spawn Empire'}</span>
-          </button>
-
-          {/* Sector Edit Mode Button */}
-          <button
-            onClick={() => {
-              setIsSectorEditMode((prev) => !prev);
-              setIsMovingSystem(false);
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg transition cursor-pointer ${
-              isSectorEditMode
-                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30 ring-2 ring-amber-300'
-                : 'bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-600/70 hover:border-amber-400'
-            }`}
-            title="Toggle Sector Edit Mode: place, move, edit and delete star systems"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            <span>{isSectorEditMode ? 'Exit Edit Mode' : 'Edit Sector'}</span>
-          </button>
-
-          <button
-            onClick={handleRollNewSector}
-            className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg shadow-cyan-500/20 transition cursor-pointer"
-            title="Generate a brand new randomized stellar sector"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Roll New Sector</span>
-          </button>
-
-          <button
-            onClick={() => setShowSectorExportModal(true)}
-            className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-700/80 hover:border-cyan-500 text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg transition cursor-pointer"
-            title="Export or Import Individual Sector (Stargen Sector JSON, Stellaris Static Galaxy .txt, or SpaceEngine .sc)"
-          >
-            <Download className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Export / Import Sector</span>
-          </button>
-
-          <button
-            onClick={() => {
-              const galConfig = universeCache.getActiveGalaxyConfig();
-              const secCount = universeCache.getLoadedSectorCount();
-              const sysCount = universeCache.getLoadedSystemCount();
-              const saved = universeCache.saveCurrentUniverse(
-                galConfig,
-                galConfig.name || `Galaxy Seed #${galConfig.seed}`,
-                `Saved from Sector ${config.name || config.coord || ''} with ${secCount} sectors and ${sysCount} systems.`
-              );
-              setBannerNotice(`💾 Saved Universe & Galaxy (Seed #${saved.seed}) with ${secCount} sectors & ${sysCount} systems!`);
-            }}
-            className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition cursor-pointer"
-            title="Save Galaxy & Universe: persists galaxy parameters, seeds, and all cached sectors & star systems"
-          >
-            <Save className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Save Galaxy</span>
-          </button>
-        </div>
-      </div>
-      )}
-
-      {/* Sector Edit Mode Banner Bar */}
-      {isSectorEditMode && (
-        <div className="w-full bg-gradient-to-r from-amber-950/90 via-slate-900/95 to-amber-950/90 border-b border-amber-500/50 px-4 py-2 flex items-center justify-between z-20 text-xs font-mono shadow-lg">
-          <div className="flex items-center gap-3">
-            <span className="flex h-2.5 w-2.5 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
-            </span>
-            <span className="font-bold text-amber-300">SECTOR ARCHITECT EDIT MODE</span>
-            <span className="text-slate-400 text-[11px] hidden lg:inline">
-              Click empty space to place a star system &bull; Click any star to edit, move or delete
-            </span>
-            {isMovingSystem && selectedSystem && (
-              <span className="px-2.5 py-0.5 rounded bg-amber-500 text-slate-950 font-bold animate-pulse">
-                Click destination hex to move {selectedSystem.name} ({selectedSystem.coord})
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                if (selectedCoord) {
-                  const c = parseInt(selectedCoord.slice(0, 2), 10);
-                  const r = parseInt(selectedCoord.slice(2, 4), 10);
-                  handlePlaceNewSystem(c, r);
-                } else {
-                  handlePlaceNewSystem(Math.round(config.columns / 2), Math.round(config.rows / 2));
-                }
-              }}
-              className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold flex items-center gap-1.5 transition shadow cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Place Star System</span>
-            </button>
-            {selectedSystem && (
-              <>
-                <button
-                  onClick={() => {
-                    setSystemToEdit(selectedSystem);
-                    setIsSystemEditorOpen(true);
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold flex items-center gap-1.5 transition shadow cursor-pointer"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>Edit System & Planets</span>
-                </button>
-                <button
-                  onClick={() => setIsMovingSystem((prev) => !prev)}
-                  className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 transition shadow cursor-pointer ${
-                    isMovingSystem
-                      ? 'bg-amber-400 text-slate-950 ring-2 ring-amber-300'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
-                  }`}
-                >
-                  <Move className="w-3.5 h-3.5" />
-                  <span>{isMovingSystem ? 'Cancel Move' : 'Move Star'}</span>
-                </button>
-                <button
-                  onClick={() => handleDeleteSystem(selectedSystem)}
-                  className="px-2.5 py-1 rounded-lg bg-red-950/80 hover:bg-red-900 border border-red-700/60 text-red-200 font-bold flex items-center gap-1.5 transition shadow cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Delete Star</span>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <SectorTopToolbar
+        showUI={showUI}
+        onBackToGalaxy={onBackToGalaxy}
+        onBackToGalaxyWithTransition={handleBackToGalaxyWithTransition}
+        config={config}
+        isFromCache={isFromCache}
+        gridData={gridData}
+        activePreset={activePreset}
+        onSelectPreset={handleSelectPreset}
+        presets={SECTOR_PRESETS}
+        onOpenConfigModal={() => setShowConfigModal(true)}
+        searchCoord={searchCoord}
+        onSearchCoordChange={setSearchCoord}
+        onSearchSubmit={handleSearchSubmit}
+        isSpawnEmpireMode={isSpawnEmpireMode}
+        onStartSpawnEmpire={handleStartSpawnEmpire}
+        isSectorEditMode={isSectorEditMode}
+        onToggleSectorEditMode={() => {
+          setIsSectorEditMode((prev) => !prev);
+          setIsMovingSystem(false);
+        }}
+        onRollNewSector={handleRollNewSector}
+        onOpenSectorExportModal={() => setShowSectorExportModal(true)}
+        setBannerNotice={setBannerNotice}
+        isMovingSystem={isMovingSystem}
+        onToggleMovingSystem={() => setIsMovingSystem((prev) => !prev)}
+        selectedCoord={selectedCoord}
+        selectedSystem={selectedSystem}
+        onPlaceNewSystem={handlePlaceNewSystem}
+        onOpenSystemEditor={(system) => {
+          setSystemToEdit(system);
+          setIsSystemEditorOpen(true);
+        }}
+        onDeleteSystem={handleDeleteSystem}
+      />
 
       {/* ============================================================================ */}
       {/* GRID SIZE, DENSITY, AGE & METALLICITY CUSTOMIZATION MODAL (UP TO 100x100!)   */}
       {/* ============================================================================ */}
-      {showConfigModal && (
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="w-full max-w-md bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-2xl flex flex-col gap-4 font-mono text-xs max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Grid className="w-4 h-4 text-cyan-400" />
-                <h3 className="text-sm font-bold text-white tracking-wide">
-                  Customize Sector Parameters
-                </h3>
-              </div>
-              <button
-                onClick={() => setShowConfigModal(false)}
-                className="text-slate-400 hover:text-white transition p-1"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Quick Grid Dimension Presets */}
-            <div>
-              <label className="text-[11px] text-slate-400 uppercase font-semibold mb-2 block">
-                Quick Dimension Presets
-              </label>
-              <div className="grid grid-cols-4 gap-2">
-                {[
-                  { label: '10×10', cols: 10, rows: 10, desc: '100 hexes' },
-                  { label: '25×25', cols: 25, rows: 25, desc: '625 hexes' },
-                  { label: '50×50', cols: 50, rows: 50, desc: '2.5k hexes' },
-                  { label: '100×100', cols: 100, rows: 100, desc: '10k hexes!' },
-                ].map((preset) => (
-                  <button
-                    key={preset.label}
-                    onClick={() => {
-                      setDraftCols(preset.cols);
-                      setDraftRows(preset.rows);
-                    }}
-                    className={`p-2 rounded-xl border text-center transition cursor-pointer ${
-                      draftCols === preset.cols && draftRows === preset.rows
-                        ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 font-bold'
-                        : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="font-bold">{preset.label}</div>
-                    <div className="text-[9.5px] text-slate-500">{preset.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Columns & Rows Custom Sliders */}
-            <div className="space-y-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800">
-              {/* Columns */}
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-slate-400">Grid Width (Columns):</span>
-                  <span className="text-cyan-300 font-bold">{draftCols} columns</span>
-                </div>
-                <input
-                  type="range"
-                  min={4}
-                  max={100}
-                  step={1}
-                  value={draftCols}
-                  onChange={(e) => setDraftCols(parseInt(e.target.value))}
-                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                />
-              </div>
-
-              {/* Rows */}
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-slate-400">Grid Height (Rows):</span>
-                  <span className="text-cyan-300 font-bold">{draftRows} rows</span>
-                </div>
-                <input
-                  type="range"
-                  min={4}
-                  max={100}
-                  step={1}
-                  value={draftRows}
-                  onChange={(e) => setDraftRows(parseInt(e.target.value))}
-                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                />
-              </div>
-
-              {/* Total Hex Count Preview */}
-              <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1 border-t border-slate-800/80">
-                <span>Total Hex Cells:</span>
-                <span className="text-slate-200 font-bold">{(draftCols * draftRows).toLocaleString()} hexes</span>
-              </div>
-            </div>
-
-            {/* Stellar Density Slider */}
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-slate-400">Stellar Occupancy Density:</span>
-                <span className={`font-bold ${draftDensity > 1.0 ? 'text-amber-300' : 'text-emerald-300'}`}>
-                  {Math.round(draftDensity * 100)}%{draftDensity > 1.0 ? ' (Overdensity Overflow)' : ''}
-                </span>
-              </div>
-              <input
-                type="range"
-                min={0.05}
-                max={3.5}
-                step={0.05}
-                value={draftDensity}
-                onChange={(e) => setDraftDensity(parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-              />
-              {draftDensity > 1.0 ? (
-                <div className="mt-2 p-2 rounded-lg bg-amber-950/40 border border-amber-800/60 text-[10px] text-amber-300/90 leading-relaxed font-mono">
-                  🔥 <strong>Overdensity Overflow Active:</strong> 100% of hexes are occupied. The excess density overflows onto mass, spawning heavy O/B stars, multiple-star hierarchies (binaries, trinaries, quadruples), and collapsed stellar remnants (black holes, neutron stars, white dwarfs)!
-                </div>
-              ) : (
-                <div className="text-[10px] text-slate-400 flex items-center justify-between mt-2 pt-1 border-t border-slate-800/80">
-                  <span>Estimated Systems:</span>
-                  <span className="text-emerald-400 font-bold">
-                    ~{Math.round(draftCols * draftRows * draftDensity).toLocaleString()} star systems
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Average Stellar Age & Age Range */}
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2.5">
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-slate-400">Average Stellar Age:</span>
-                  <span className="text-cyan-300 font-bold">{draftAge.toFixed(1)} Gyr</span>
-                </div>
-                <input
-                  type="range"
-                  min={0.2}
-                  max={12.5}
-                  step={0.1}
-                  value={draftAge}
-                  onChange={(e) => setDraftAge(parseFloat(e.target.value))}
-                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                />
-                <div className="text-[9.5px] text-slate-500 mt-1 flex justify-between">
-                  <span>Young Starburst (0.2 Gyr)</span>
-                  <span>Solar (4.8 Gyr)</span>
-                  <span>Ancient Halo (12.0 Gyr)</span>
-                </div>
-                {draftAge < 1.0 && (
-                  <div className="mt-1.5 p-1.5 rounded bg-fuchsia-950/60 border border-fuchsia-800/60 text-[10px] text-fuchsia-300 flex items-center gap-1.5">
-                    <span>🌌</span>
-                    <span>Young Sector (&lt;1.0 Gyr): Qualifies for procedural purple-red H-II emission nebulae clouds.</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="border-t border-slate-800/80 pt-2">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-slate-400">Stellar Age Range (Spread):</span>
-                  <span className="text-cyan-300 font-bold">&plusmn;{(draftAgeRange / 2).toFixed(1)} Gyr ({draftAgeRange.toFixed(1)} Gyr span)</span>
-                </div>
-                <input
-                  type="range"
-                  min={0.5}
-                  max={12.0}
-                  step={0.1}
-                  value={draftAgeRange}
-                  onChange={(e) => setDraftAgeRange(parseFloat(e.target.value))}
-                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                />
-                <div className="flex items-center justify-between text-[9.5px] text-slate-500 mt-1">
-                  <span>Narrow (Halo / Arms &plusmn;0.6 Gyr)</span>
-                  <span>Wide (Bulge &plusmn;5.6 Gyr)</span>
-                </div>
-              </div>
-
-              <div className="border-t border-slate-800/80 pt-2 flex items-center justify-between">
-                <span className="text-slate-400 text-xs">Age Distribution:</span>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setDraftAgeDistribution('normal')}
-                    className={`px-2 py-0.5 rounded text-[10px] font-mono cursor-pointer transition ${
-                      draftAgeDistribution === 'normal'
-                        ? 'bg-blue-600 text-white font-bold'
-                        : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    Normal (Gaussian)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDraftAgeDistribution('uniform')}
-                    className={`px-2 py-0.5 rounded text-[10px] font-mono cursor-pointer transition ${
-                      draftAgeDistribution === 'uniform'
-                        ? 'bg-amber-600 text-white font-bold'
-                        : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    Uniform (Bulge)
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Average Metallicity [Fe/H] Slider */}
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-slate-400">Average Metallicity ([Fe/H]):</span>
-                <span className="text-amber-300 font-bold">
-                  {draftFeh > 0 ? `+${draftFeh.toFixed(2)}` : draftFeh.toFixed(2)} dex
-                </span>
-              </div>
-              <input
-                type="range"
-                min={-1.6}
-                max={0.5}
-                step={0.02}
-                value={draftFeh}
-                onChange={(e) => setDraftFeh(parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
-              />
-              <div className="text-[9.5px] text-slate-500 mt-1 flex justify-between">
-                <span>Metal-Poor (-1.6 dex)</span>
-                <span>Solar (0.0 dex)</span>
-                <span>Super Metal-Rich (+0.5 dex)</span>
-              </div>
-            </div>
-
-            {/* Master Seed Input */}
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between gap-3">
-              <div>
-                <span className="text-slate-400 block mb-0.5">Master Seed:</span>
-                <input
-                  type="number"
-                  value={draftSeed}
-                  onChange={(e) => setDraftSeed(parseInt(e.target.value) || 1)}
-                  className="w-28 px-2 py-1 bg-slate-950 border border-slate-800 rounded text-slate-200 text-xs font-bold"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => setDraftSeed(Math.floor(Math.random() * 90000) + 1000)}
-                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition cursor-pointer self-end"
-              >
-                Randomize Seed
-              </button>
-            </div>
-
-            {/* Background Atmosphere: Plain Black vs Nebula Noise Clouds */}
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-slate-400">Background Atmosphere:</span>
-                <span className={`font-bold text-xs ${draftHasNebula ? 'text-fuchsia-300' : 'text-slate-300'}`}>
-                  {draftHasNebula ? 'Nebula Noise Clouds' : 'Plain Black Space'}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setDraftHasNebula(false)}
-                  className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer border ${
-                    !draftHasNebula
-                      ? 'bg-slate-800 text-white border-slate-600 shadow'
-                      : 'bg-slate-950/70 text-slate-400 border-slate-800 hover:text-slate-200'
-                  }`}
-                >
-                  Plain Black
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDraftHasNebula(true)}
-                  className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer border ${
-                    draftHasNebula
-                      ? 'bg-fuchsia-950/70 text-fuchsia-200 border-fuchsia-600 shadow'
-                      : 'bg-slate-950/70 text-slate-400 border-slate-800 hover:text-slate-200'
-                  }`}
-                >
-                  Noise Clouds
-                </button>
-              </div>
-              <p className="text-[10px] text-slate-500 mt-1.5">
-                {draftHasNebula
-                  ? 'Active H-II ionization clouds and fractal dust fill the sector background.'
-                  : 'Deep space plain black background devoid of emission nebulae.'}
-              </p>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
-              <button
-                onClick={() => setShowConfigModal(false)}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() =>
-                  handleApplyCustomGrid(
-                    draftCols,
-                    draftRows,
-                    draftDensity,
-                    draftAge,
-                    draftAgeRange,
-                    draftAgeDistribution,
-                    draftFeh,
-                    draftSeed,
-                    draftHasNebula
-                  )
-                }
-                className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold transition shadow-lg shadow-cyan-500/20 cursor-pointer"
-              >
-                Apply &amp; Regenerate
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <SectorParametersModal
+        isOpen={showConfigModal}
+        onClose={() => setShowConfigModal(false)}
+        draftCols={draftCols}
+        setDraftCols={setDraftCols}
+        draftRows={draftRows}
+        setDraftRows={setDraftRows}
+        draftDensity={draftDensity}
+        setDraftDensity={setDraftDensity}
+        draftAge={draftAge}
+        setDraftAge={setDraftAge}
+        draftAgeRange={draftAgeRange}
+        setDraftAgeRange={setDraftAgeRange}
+        draftAgeDistribution={draftAgeDistribution}
+        setDraftAgeDistribution={setDraftAgeDistribution}
+        draftFeh={draftFeh}
+        setDraftFeh={setDraftFeh}
+        draftSeed={draftSeed}
+        setDraftSeed={setDraftSeed}
+        draftHasNebula={draftHasNebula}
+        setDraftHasNebula={setDraftHasNebula}
+        onApply={handleApplyCustomGrid}
+      />
 
       {/* ============================================================================ */}
       {/* MAIN VIEWPORT: HEX CANVAS + RIGHT INSPECTOR                                   */}
@@ -2350,20 +1670,11 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
             style={{ willChange: 'transform' }}
           >
             <defs>
-              <filter id="nebula-soft-blur" x="-30%" y="-30%" width="160%" height="160%">
-                <feGaussianBlur stdDeviation="36" result="blur" />
-              </filter>
-              <filter id="nebula-dust-blur" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="7" result="blur" />
-              </filter>
-              <filter id="sector-noise-clouds" x="0%" y="0%" width="100%" height="100%">
-                <feTurbulence type="fractalNoise" baseFrequency="0.0028" numOctaves="4" seed={config.seed} result="noise" />
-                <feColorMatrix type="matrix" values="
-                  0.95 0    0    0 0.18
-                  0    0.15 0    0 0.02
-                  0.5  0    0.85 0 0.22
-                  0    0    0    0.38 0" result="coloredNoise" />
-              </filter>
+              <radialGradient id="sector-ambient-nebula-glow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="#86198f" stopOpacity="0.28" />
+                <stop offset="45%" stopColor="#4a044e" stopOpacity="0.16" />
+                <stop offset="100%" stopColor="#080314" stopOpacity="0" />
+              </radialGradient>
 
               {gridData.nebula?.blobs.map((blob, idx) => (
                 <radialGradient
@@ -2414,19 +1725,16 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                 strokeDasharray="6,4"
               />
 
-              {/* Clipped Environment: Nebula Noise Clouds & Parsec Coordinates */}
+              {/* Clipped Environment: Hardware-Accelerated Radial Nebula Clouds & Parsec Coordinates (Zero SVG Filter Lag) */}
               <g clipPath="url(#sector-hex-clip)">
-                {/* Procedural H-II Purple-Red Cloud Nebula & Fractal Noise Clouds */}
                 {gridData.hasNebula && showNebulae && (
                   <g className="sector-nebula-layer pointer-events-none">
-                    {/* Fractal Noise Clouds Atmosphere */}
                     <rect
                       x={0}
                       y={0}
                       width={gridData.sectorWidth}
                       height={gridData.sectorHeight}
-                      filter="url(#sector-noise-clouds)"
-                      opacity={0.65}
+                      fill="url(#sector-ambient-nebula-glow)"
                       style={{ mixBlendMode: 'screen' }}
                     />
                     {gridData.nebula && (
@@ -2436,14 +1744,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                             key={`nebula-blob-${idx}`}
                             cx={blob.cx}
                             cy={blob.cy}
-                            rx={blob.rx}
-                            ry={blob.ry}
+                            rx={blob.rx * 1.15}
+                            ry={blob.ry * 1.15}
                             transform={`rotate(${blob.rotation}, ${blob.cx}, ${blob.cy})`}
                             fill={`url(#nebula-blob-grad-${idx})`}
-                            filter="url(#nebula-soft-blur)"
                           />
                         ))}
-                        {/* Subtle dark interstellar dust absorption filaments */}
                         {gridData.nebula.dustLanes.map((dust, idx) => (
                           <line
                             key={`nebula-dust-${idx}`}
@@ -2452,10 +1758,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                             x2={dust.x2}
                             y2={dust.y2}
                             stroke="#05030a"
-                            strokeWidth={dust.strokeWidth}
-                            opacity={dust.opacity}
+                            strokeWidth={dust.strokeWidth * 1.25}
+                            opacity={dust.opacity * 0.8}
                             strokeLinecap="round"
-                            filter="url(#nebula-dust-blur)"
                           />
                         ))}
                       </g>
@@ -2687,7 +1992,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
                     )}
 
                     {/* Explored & Cached System Highlight Ring & Pip */}
-                    {universeCache.hasCachedSystem(system.id) && (
+                    {cachedSystemIds.has(system.id) && (
                       <g className="pointer-events-none">
                         <circle
                           r={system.influenceRadius + 3.5}
@@ -2910,314 +2215,64 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
           </svg>
 
           {/* Bottom Left Floating Navigation & View Controls */}
-          {showUI && (
-            <div className="absolute bottom-4 left-4 flex flex-col gap-2 z-10 pointer-events-auto">
-              {/* Spectral Filter Chips Bar */}
-              <div className="flex flex-wrap items-center gap-1 bg-slate-950/90 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-slate-800 shadow-xl text-xs font-mono">
-              <span className="text-[10px] text-slate-500 uppercase mr-1 flex items-center gap-1">
-                <Filter className="w-3 h-3 text-cyan-400" /> Filter:
-              </span>
-              {(
-                [
-                  { id: 'all', label: 'All', color: 'text-slate-200' },
-                  { id: 'ob', label: 'O/B', color: 'text-blue-400' },
-                  { id: 'af', label: 'A/F', color: 'text-cyan-300' },
-                  { id: 'g', label: 'G (Sol)', color: 'text-amber-300' },
-                  { id: 'km', label: 'K/M', color: 'text-red-400' },
-                  { id: 'remnant', label: 'Remnants', color: 'text-purple-400' },
-                  { id: 'non-ms', label: 'Non-MS (≠ V)', color: 'text-amber-400', title: 'Non-Main Sequence Stars (Luminosity Class NOT V: Giants, Supergiants, Subgiants, Remnants)' },
-                  { id: 'water-world', label: 'Water Worlds', color: 'text-sky-400', title: 'Systems with liquid-water (H2O / aqueous brine) worlds or moons' },
-                  { id: 'ammonia-world', label: 'Ammonia Worlds', color: 'text-teal-300', title: 'Systems with Cryo-Ammonia (NH3-H2O) worlds or moons' },
-                  { id: 'multicellular', label: 'Multicellular Life', color: 'text-emerald-400', title: 'Systems harboring worlds or moons with active multicellular biospheres' },
-                  { id: 'terrestrial-life', label: 'Terrestrial Life', color: 'text-lime-400', title: 'Systems harboring worlds or moons with active land-based terrestrial life and non-frozen land (majority rocky composition; excludes ocean worlds)' },
-                ] as const
-              ).map((f) => {
-                const isSelected = f.id === 'all' ? !hasActiveFilters : activeFilterCats.has(f.id);
-                return (
-                  <button
-                    key={f.id}
-                    onClick={() => {
-                      toggleFilterCat(f.id);
-                      setShowMassMenu(false);
-                    }}
-                    title={'title' in f ? f.title : undefined}
-                    className={`px-2 py-0.5 rounded text-[10px] transition cursor-pointer flex items-center gap-1 ${
-                      isSelected
-                        ? 'bg-cyan-600 text-white font-bold shadow'
-                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    <span className={isSelected ? 'text-white' : f.color}>{f.label}</span>
-                    {f.id !== 'all' && isSelected && (
-                      <span className="text-[9px] opacity-75 leading-none">&times;</span>
-                    )}
-                  </button>
-                );
-              })}
-
-              {/* Mass Filter Button with Interactive Popover */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowMassMenu((prev) => !prev)}
-                  className={`px-2 py-0.5 rounded text-[10px] transition cursor-pointer flex items-center gap-1 ${
-                    massBracket !== 'all'
-                      ? 'bg-indigo-600 text-white font-bold shadow'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                  }`}
-                  title="Filter systems by Stellar Mass (Combines with other filters)"
-                >
-                  <span className={massBracket !== 'all' ? 'text-white' : 'text-indigo-400 font-semibold'}>
-                    {getMassFilterButtonLabel()}
-                  </span>
-                  <ChevronDown className="w-2.5 h-2.5 opacity-70" />
-                </button>
-
-                {/* Mass Filter Popover Dropdown */}
-                {showMassMenu && (
-                  <div
-                    className="absolute bottom-full left-0 mb-2 w-72 bg-slate-950/98 backdrop-blur-xl border border-slate-700/80 rounded-xl p-3 shadow-2xl z-50 font-mono text-xs flex flex-col gap-2.5 animate-fade-in"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-                      <span className="text-[11px] font-bold text-slate-200 uppercase tracking-wide flex items-center gap-1.5">
-                        <Sliders className="w-3 h-3 text-indigo-400" />
-                        <span>Filter by Stellar Mass</span>
-                      </span>
-                      <button
-                        onClick={() => setShowMassMenu(false)}
-                        className="text-slate-400 hover:text-white transition p-0.5"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    {/* Quick Mass Presets */}
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[9.5px] uppercase text-slate-500 font-semibold">Mass Presets</span>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {[
-                          { id: 'all', label: 'All Masses', sub: 'Reset mass filter' },
-                          { id: 'low', label: '< 0.8 M☉', sub: 'Low Mass / Red Dwarfs' },
-                          { id: 'solar', label: '0.8 – 2.0 M☉', sub: 'Solar & Intermediate' },
-                          { id: 'intermediate', label: '2.0 – 8.0 M☉', sub: 'Intermediate Stars' },
-                          { id: 'massive', label: '> 8.0 M☉', sub: 'Massive Stars' },
-                          { id: 'giant', label: '10 – 50 M☉', sub: 'Giant Star Systems' },
-                          { id: 'supermassive', label: '> 999k M☉', sub: 'Sagittarius A* SMBH' },
-                        ].map((p) => (
-                          <button
-                            key={p.id}
-                            onClick={() => {
-                              setMassBracket(p.id as MassFilterBracket);
-                            }}
-                            className={`p-1.5 rounded-lg border text-left transition cursor-pointer ${
-                              massBracket === p.id
-                                ? 'bg-indigo-950/90 border-indigo-500 text-white shadow-sm'
-                                : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800'
-                            }`}
-                          >
-                            <div className="text-[10.5px] font-bold">{p.label}</div>
-                            <div className="text-[8.5px] text-slate-400 truncate">{p.sub}</div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Custom Min / Max Inputs */}
-                    <div className="border-t border-slate-800 pt-2 flex flex-col gap-1.5">
-                      <span className="text-[9.5px] uppercase text-slate-500 font-semibold">Custom Mass Range (M☉)</span>
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1">
-                          <span className="text-[9px] text-slate-500 block">Min</span>
-                          <input
-                            type="number"
-                            step="0.1"
-                            min="0.08"
-                            value={customMinMass}
-                            onChange={(e) => {
-                              setCustomMinMass(e.target.value);
-                              setMassBracket('custom');
-                            }}
-                            className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs font-mono focus:outline-none focus:border-indigo-500"
-                          />
-                        </div>
-                        <span className="text-slate-600 mt-3">&mdash;</span>
-                        <div className="flex-1">
-                          <span className="text-[9px] text-slate-500 block">Max</span>
-                          <input
-                            type="number"
-                            step="0.5"
-                            min="0.1"
-                            value={customMaxMass}
-                            onChange={(e) => {
-                              setCustomMaxMass(e.target.value);
-                              setMassBracket('custom');
-                            }}
-                            className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs font-mono focus:outline-none focus:border-indigo-500"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-[10px]">
-                      <button
-                        onClick={() => {
-                          setMassBracket('all');
-                          setActiveFilterCats(new Set());
-                          setShowMassMenu(false);
-                        }}
-                        className="text-slate-400 hover:text-white transition"
-                      >
-                        Reset All
-                      </button>
-                      <button
-                        onClick={() => setShowMassMenu(false)}
-                        className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold"
-                      >
-                        Done
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Active matching count badge & Clear Button */}
-              {hasActiveFilters && (
-                <div className="flex items-center gap-1.5 ml-1">
-                  <span className="text-[9.5px] text-cyan-300 bg-cyan-950/70 border border-cyan-800/80 px-1.5 py-0.5 rounded font-bold">
-                    {matchingStarsCount} / {gridData.systems.length}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setActiveFilterCats(new Set());
-                      setMassBracket('all');
-                    }}
-                    className="text-[9px] text-slate-400 hover:text-rose-300 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 px-1.5 py-0.5 rounded transition flex items-center gap-0.5 cursor-pointer"
-                    title="Clear all active filters"
-                  >
-                    <X className="w-2.5 h-2.5" />
-                    <span>Clear</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Canvas Zoom & Reset Controls */}
-            <div className="flex items-center gap-1.5 bg-slate-950/90 backdrop-blur-md px-2 py-1.5 rounded-xl border border-slate-800 shadow-xl text-xs font-mono w-fit">
-              <button
-                onClick={() => {
-                  if (containerRef.current) {
-                    const rect = containerRef.current.getBoundingClientRect();
-                    zoomAtScreenPoint(rect.width / 2, rect.height / 2, 1.25);
-                  } else {
-                    setZoom((z) => Math.min(2.8, z * 1.25));
-                  }
-                }}
-                className="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white transition"
-                title="Zoom In (+)"
-              >
-                <ZoomIn className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => {
-                  if (zoom <= 0.085 && onBackToGalaxy) {
-                    handleBackToGalaxyWithTransition();
-                  } else if (containerRef.current) {
-                    const rect = containerRef.current.getBoundingClientRect();
-                    zoomAtScreenPoint(rect.width / 2, rect.height / 2, 0.8);
-                  } else {
-                    setZoom((z) => Math.max(0.06, z * 0.8));
-                  }
-                }}
-                className="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white transition cursor-pointer"
-                title={zoom <= 0.085 && onBackToGalaxy ? 'Zoom out to return to Galaxy Map' : 'Zoom Out (-)'}
-              >
-                <ZoomOut className="w-4 h-4" />
-              </button>
-              <div className="w-[1px] h-3.5 bg-slate-800 mx-0.5" />
-              <button
-                onClick={handleFitToScreen}
-                className="px-2 py-1 hover:bg-slate-800 rounded text-[10.5px] text-cyan-400 hover:text-cyan-300 transition flex items-center gap-1"
-                title="Fit Grid to Screen"
-              >
-                <Maximize2 className="w-3.5 h-3.5" />
-                <span>Fit Sector</span>
-              </button>
-              <div className="w-[1px] h-3.5 bg-slate-800 mx-0.5" />
-              <button
-                onClick={() => setShowHyperlanes((v) => !v)}
-                className={`px-2 py-1 hover:bg-slate-800 rounded text-[10.5px] transition flex items-center gap-1 ${
-                  showHyperlanes
-                    ? 'text-cyan-400 bg-cyan-950/40 border border-cyan-800/60'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-                title="Toggle Procedural Hyperlanes"
-              >
-                <Route className="w-3.5 h-3.5" />
-                <span>Lanes {showHyperlanes ? 'ON' : 'OFF'}</span>
-              </button>
-              <div className="w-[1px] h-3.5 bg-slate-800 mx-0.5" />
-              <button
-                onClick={() => setShowHexBoundaries((v) => !v)}
-                className={`px-2 py-1 hover:bg-slate-800 rounded text-[10.5px] transition flex items-center gap-1 ${
-                  showHexBoundaries
-                    ? 'text-cyan-400 bg-cyan-950/40 border border-cyan-800/60'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-                title="Toggle System Influence Boundaries"
-              >
-                <Hexagon className="w-3.5 h-3.5" />
-                <span>Boundaries</span>
-              </button>
-              <button
-                onClick={() => setShowLabels((v) => !v)}
-                className={`px-2 py-1 hover:bg-slate-800 rounded text-[10.5px] transition flex items-center gap-1 ${
-                  showLabels
-                    ? 'text-cyan-400 bg-cyan-950/40 border border-cyan-800/60'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-                title="Toggle Star System & Coordinate Labels"
-              >
-                <Tag className="w-3.5 h-3.5" />
-                <span>Labels</span>
-              </button>
-              <button
-                onClick={() => {
-                  if (gridData.hasNebula) {
-                    setShowNebulae((v) => !v);
-                  } else {
-                    setConfig((prev) => ({ ...prev, hasNebula: true }));
-                    setShowNebulae(true);
-                  }
-                }}
-                className={`px-2 py-1 hover:bg-slate-800 rounded text-[10.5px] transition flex items-center gap-1 ${
-                  gridData.hasNebula && showNebulae
-                    ? 'text-fuchsia-400 bg-fuchsia-950/40 border border-fuchsia-800/60'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-                title={
-                  gridData.hasNebula
-                    ? (showNebulae ? 'Toggle Noise Clouds Off' : 'Toggle Noise Clouds On')
-                    : 'Plain Black Background (Click to enable Noise Clouds)'
-                }
-              >
-                <Cloud className="w-3.5 h-3.5" />
-                <span>{gridData.hasNebula ? (showNebulae ? 'Noise Clouds' : 'Clouds Hidden') : 'Plain Black'}</span>
-              </button>
-              <span className="text-[10px] text-slate-500 pl-1">
-                {Math.round(zoom * 100)}%
-              </span>
-              {sectorCachedCount > 0 && (
-                <div
-                  className="px-2 py-0.5 rounded-full text-[10px] font-mono flex items-center gap-1.5 text-emerald-400 bg-emerald-950/70 border border-emerald-800/80 ml-1"
-                  title={`${sectorCachedCount} star system${sectorCachedCount === 1 ? '' : 's'} in this sector explored and cached in universe storage`}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>{sectorCachedCount} Cached</span>
-                </div>
-              )}
-            </div>
-          </div>
-          )}
+          <SectorFilterOverlayBar
+            showUI={showUI}
+            hasActiveFilters={hasActiveFilters}
+            activeFilterCats={activeFilterCats}
+            onToggleFilterCat={toggleFilterCat}
+            massBracket={massBracket}
+            onSelectMassBracket={setMassBracket}
+            customMinMass={customMinMass}
+            onChangeCustomMinMass={setCustomMinMass}
+            customMaxMass={customMaxMass}
+            onChangeCustomMaxMass={setCustomMaxMass}
+            showMassMenu={showMassMenu}
+            setShowMassMenu={setShowMassMenu}
+            massFilterButtonLabel={getMassFilterButtonLabel()}
+            onResetFilters={() => {
+              setActiveFilterCats(new Set());
+              setMassBracket('all');
+            }}
+            matchingStarsCount={matchingStarsCount}
+            totalSystemsCount={gridData.systems.length}
+            zoom={zoom}
+            onZoomIn={() => {
+              if (containerRef.current) {
+                const rect = containerRef.current.getBoundingClientRect();
+                zoomAtScreenPoint(rect.width / 2, rect.height / 2, 1.25);
+              } else {
+                setZoom((z) => Math.min(2.8, z * 1.25));
+              }
+            }}
+            onZoomOut={() => {
+              if (zoom <= 0.085 && onBackToGalaxy) {
+                handleBackToGalaxyWithTransition();
+              } else if (containerRef.current) {
+                const rect = containerRef.current.getBoundingClientRect();
+                zoomAtScreenPoint(rect.width / 2, rect.height / 2, 0.8);
+              } else {
+                setZoom((z) => Math.max(0.06, z * 0.8));
+              }
+            }}
+            onFitToScreen={handleFitToScreen}
+            showHyperlanes={showHyperlanes}
+            onToggleHyperlanes={() => setShowHyperlanes((v) => !v)}
+            showHexBoundaries={showHexBoundaries}
+            onToggleHexBoundaries={() => setShowHexBoundaries((v) => !v)}
+            showLabels={showLabels}
+            onToggleLabels={() => setShowLabels((v) => !v)}
+            hasNebula={gridData.hasNebula}
+            showNebulae={showNebulae}
+            onToggleNebulae={() => {
+              if (gridData.hasNebula) {
+                setShowNebulae((v) => !v);
+              } else {
+                setConfig((prev) => ({ ...prev, hasNebula: true }));
+                setShowNebulae(true);
+              }
+            }}
+            sectorCachedCount={sectorCachedCount}
+          />
 
           {/* High Zoom Threshold Indicator Pill to Enter System */}
           {zoom >= 1.5 && selectedSystem && !isEnteringSystem && (
@@ -3476,649 +2531,32 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
         {/* ============================================================================ */}
         {/* RIGHT SIDEBAR: DEEP HEX SYSTEM INSPECTOR & TUPLET LAUNCHER                   */}
         {/* ============================================================================ */}
-        {showUI && (
-          <div
-            className="w-[380px] h-full flex flex-col bg-slate-950/95 border-l border-slate-800 flex-shrink-0 z-10 overflow-y-auto contain-layout-panel"
-            style={{ containIntrinsicSize: 'auto 380px auto 800px' }}
-          >
-          {selectedSystem ? (
-            <div className="p-4 flex flex-col gap-4">
-              {/* Header: System Name & Hex Coordinate */}
-              <div className="flex items-start justify-between gap-2 border-b border-slate-800/80 pb-3">
-                <div className="flex items-center gap-3">
-                  <div
-                    className="w-12 h-12 rounded-xl flex items-center justify-center border shadow-lg relative"
-                    style={{
-                      backgroundColor: `${selectedSystem.colorHex}18`,
-                      borderColor: selectedSystem.colorHex,
-                    }}
-                  >
-                    {isBlackHoleStar({ category: selectedSystem.remnantType || '', spectralType: selectedSystem.primaryClass }) ? (
-                      <BlackHoleIcon
-                        isSupermassive={selectedSystem.mass > 999999}
-                        size={32}
-                      />
-                    ) : (
-                      <img
-                        src={getProceduralStarSpriteDataUrl(
-                          selectedSystem.sysResult?.hierarchy?.stars?.[0] || {
-                            spectralType: selectedSystem.primaryClass,
-                            mass: selectedSystem.primaryMass,
-                            Teff: selectedSystem.teff,
-                            colorHex: selectedSystem.colorHex,
-                          },
-                          96
-                        )}
-                        alt={selectedSystem.name}
-                        className="w-9 h-9 select-none"
-                      />
-                    )}
-                    {selectedSystem.candidateHabitable && (
-                      <div
-                        className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-500 border border-slate-950 flex items-center justify-center text-[9px] text-white font-bold"
-                        title={
-                          selectedSystem.habitableTypes && selectedSystem.habitableTypes.length > 0
-                            ? `Candidate Habitable World / Biosphere (${selectedSystem.habitableTypes.join(', ')})`
-                            : 'Candidate Habitable World / Biosphere'
-                        }
-                      >
-                        ✓
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <h3 className="text-base font-bold text-white tracking-wide">
-                        {selectedSystem.name}
-                      </h3>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-xs font-mono text-slate-400 mt-0.5">
-                      <span className="px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[10.5px]">
-                        Sector {selectedSystem.coord} &bull; {selectedSystem.parsecX} pc, {selectedSystem.parsecY} pc
-                      </span>
-                      <span className="text-slate-600">&bull;</span>
-                      <span className="font-semibold text-slate-300">
-                        {selectedSystem.primaryClass}
-                      </span>
-                      {selectedSystem.nStars > 1 && (
-                        <span className="text-[10px] text-blue-300 bg-blue-950/80 px-1.5 py-0.2 rounded border border-blue-800">
-                          {selectedSystem.nStars} Stars
-                        </span>
-                      )}
-                      {selectedSystem.mass > 999999 && (
-                        <span className="text-[10px] text-purple-300 bg-purple-950/80 px-1.5 py-0.2 rounded border border-purple-800 font-bold flex items-center gap-1">
-                          <span>🌀</span>
-                          <span>Supermassive Black Hole {selectedSystem.mass.toLocaleString()} M☉</span>
-                        </span>
-                      )}
-                      {isNonMainSequenceSystem(selectedSystem) && (
-                        <span className="text-[10px] text-fuchsia-300 bg-fuchsia-950/80 px-1.5 py-0.2 rounded border border-fuchsia-800 font-bold">
-                          Non-MS
-                        </span>
-                      )}
-                      {universeCache.hasCachedSystem(selectedSystem.id) && (
-                        <span className="text-[10px] text-emerald-300 bg-emerald-950/90 px-1.5 py-0.2 rounded border border-emerald-500/70 font-bold flex items-center gap-1 shadow-sm">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                          <span>Explored & Cached</span>
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* ============================================================================ */}
-              {/* SYSTEM STATS CARD                                                            */}
-              {/* ============================================================================ */}
-              <div className="p-3.5 rounded-xl bg-gradient-to-br from-indigo-950/50 via-slate-900 to-slate-950 border border-cyan-500/40 shadow-xl relative overflow-hidden">
-                <div className="flex items-center justify-between pb-2 border-b border-cyan-900/40 mb-3">
-                  <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-cyan-400 uppercase tracking-wider">
-                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>System Stats</span>
-                  </div>
-                </div>
-
-                {/* 2x2 Grid of the 4 Values */}
-                <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                  {/* Mass */}
-                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
-                    <div className="text-[10px] text-slate-400 uppercase">Mass</div>
-                    <div className="text-sm font-bold text-amber-300 mt-0.5">
-                      {selectedSystem.mass >= 100000 ? selectedSystem.mass.toLocaleString() : selectedSystem.mass.toFixed(3)} <span className="text-xs text-slate-400">M☉</span>
-                    </div>
-                    <div className="text-[9.5px] text-slate-400 mt-0.5">
-                      Star A: <span className="text-amber-200 font-semibold">{selectedSystem.primaryMass >= 100000 ? selectedSystem.primaryMass.toLocaleString() : selectedSystem.primaryMass.toFixed(3)} M☉</span>
-                    </div>
-                  </div>
-
-                  {/* Age */}
-                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
-                    <div className="text-[10px] text-slate-400 uppercase">Age</div>
-                    <div className="text-sm font-bold text-cyan-300 mt-0.5">
-                      {selectedSystem.age.toFixed(2)} <span className="text-xs text-slate-400">Gyr</span>
-                    </div>
-                  </div>
-
-                  {/* Metallicity */}
-                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
-                    <div className="text-[10px] text-slate-400 uppercase">Metallicity</div>
-                    <div className="text-sm font-bold text-emerald-300 mt-0.5">
-                      {selectedSystem.metallicity > 0
-                        ? `+${selectedSystem.metallicity.toFixed(2)}`
-                        : selectedSystem.metallicity.toFixed(2)}{' '}
-                      <span className="text-xs text-slate-400">dex</span>
-                    </div>
-                  </div>
-
-                  {/* ID / Seed */}
-                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 relative group">
-                    <div className="text-[10px] text-slate-400 uppercase flex items-center justify-between">
-                      <span>ID</span>
-                      <button
-                        onClick={() => handleCopyId(selectedSystem.id)}
-                        className="text-slate-400 hover:text-white transition"
-                        title="Copy deterministic seed ID"
-                      >
-                        {copiedId ? (
-                          <Check className="w-3 h-3 text-emerald-400" />
-                        ) : (
-                          <Copy className="w-3 h-3" />
-                        )}
-                      </button>
-                    </div>
-                    <div className="text-xs font-bold text-fuchsia-300 mt-0.5 truncate" title={selectedSystem.id}>
-                      {selectedSystem.id}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Primary Action Button: Launch into System Map */}
-                <button
-                  onClick={() => handleLaunchSystemGenerator(selectedSystem)}
-                  className="w-full mt-3 py-2.5 px-3 rounded-lg bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-mono font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 border border-emerald-400/40 transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
-                  title="System Map (Hotkey: Page Down)"
-                >
-                  <Atom className="w-4 h-4 animate-spin-slow" />
-                  <span>System Map &rarr;</span>
-                  <kbd className="px-1.5 py-0.5 text-[9px] bg-slate-950/70 border border-emerald-400/50 rounded text-emerald-200 font-sans font-normal ml-1">
-                    PgDn
-                  </kbd>
-                </button>
-
-                {/* Edit System & Planets & Delete Action Buttons */}
-                <div className="flex gap-2 mt-2">
-                  <button
-                    onClick={() => {
-                      setSystemToEdit(selectedSystem);
-                      setIsSystemEditorOpen(true);
-                    }}
-                    className="flex-1 py-2 px-3 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 text-cyan-200 font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
-                    title="Open Comprehensive System & Planet Architect"
-                  >
-                    <Edit3 className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Edit System & Planets</span>
-                  </button>
-                  <button
-                    onClick={() => handleDeleteSystem(selectedSystem)}
-                    className="py-2 px-2.5 rounded-lg bg-red-950/70 hover:bg-red-900/80 border border-red-800/60 text-red-300 font-mono text-xs flex items-center justify-center transition cursor-pointer"
-                    title="Delete this star system from sector"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* ============================================================================ */}
-              {/* ALIEN EMPIRE & SOVEREIGNTY TERRITORY CARD                                    */}
-              {/* ============================================================================ */}
-              {(() => {
-                const systemEmpire = empireMap.get(selectedSystem.id);
-                const isCapital = systemEmpire != null && systemEmpire.homeworldSystemId === selectedSystem.id;
-
-                if (systemEmpire) {
-                  return (
-                    <div
-                      className="p-3.5 rounded-xl border font-mono text-xs space-y-2.5 transition shadow-lg relative overflow-hidden"
-                      style={{
-                        backgroundColor: `${systemEmpire.color}18`,
-                        borderColor: `${systemEmpire.color}60`,
-                      }}
-                    >
-                      <div className="flex items-center justify-between pb-2 border-b" style={{ borderColor: `${systemEmpire.color}35` }}>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl leading-none">{systemEmpire.phenotype.icon}</span>
-                          <div>
-                            <div className="font-bold text-white tracking-wide flex items-center gap-1.5">
-                              <span>{systemEmpire.name}</span>
-                            </div>
-                            <div className="text-[10px] text-slate-400">
-                              {systemEmpire.phenotype.name} Civilization
-                            </div>
-                          </div>
-                        </div>
-                        <div
-                          className="px-2 py-0.5 rounded text-[10px] font-bold border"
-                          style={{
-                            color: systemEmpire.color,
-                            borderColor: `${systemEmpire.color}60`,
-                            backgroundColor: `${systemEmpire.color}25`,
-                          }}
-                        >
-                          {isCapital ? '👑 Capital' : 'Outpost'}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 text-[11px]">
-                        <div className="p-2 rounded bg-slate-950/60 border border-slate-800/80">
-                          <span className="text-slate-400 block text-[9.5px] uppercase">Empire Realm</span>
-                          <span className="text-white font-bold">{systemEmpire.claimedSystemIds.length} Stars</span>
-                        </div>
-                        <div className="p-2 rounded bg-slate-950/60 border border-slate-800/80">
-                          <span className="text-slate-400 block text-[9.5px] uppercase">Homeworld</span>
-                          <span className="text-cyan-300 font-bold truncate block">{systemEmpire.homeworldName}</span>
-                        </div>
-                      </div>
-
-                      {/* Government & Ethics Badges */}
-                      {systemEmpire.government && (
-                        <div className="space-y-1.5 pt-0.5">
-                          <div className="flex items-center gap-1.5 text-[11px] text-slate-300">
-                            <span className="text-sm">{systemEmpire.government.icon}</span>
-                            <span className="font-semibold text-white">{systemEmpire.government.name}</span>
-                          </div>
-                          {systemEmpire.ethics && systemEmpire.ethics.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {systemEmpire.ethics.map((eth) => (
-                                <span
-                                  key={eth.id}
-                                  className="px-1.5 py-0.5 rounded bg-slate-900/90 border border-slate-700/80 text-[10px] text-slate-300 flex items-center gap-1"
-                                  title={eth.description}
-                                >
-                                  <span>{eth.icon}</span>
-                                  <span>{eth.name}</span>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Claimed Planets in this Star System */}
-                      {(() => {
-                        const systemPlanetKeys = (systemEmpire.claimedPlanetKeys || []).filter((k) =>
-                          k.startsWith(`${selectedSystem.id}_`)
-                        );
-                        if (systemPlanetKeys.length === 0) return null;
-                        return (
-                          <div className="p-2 rounded bg-slate-950/70 border border-slate-800/80 space-y-1">
-                            <span className="text-slate-400 block text-[9.5px] uppercase font-bold tracking-wider">
-                              Imperial Colonies ({systemPlanetKeys.length})
-                            </span>
-                            <div className="space-y-1">
-                              {systemPlanetKeys.map((k) => {
-                                const parsed = parsePlanetKey(k);
-                                const des = systemEmpire.planetDesignations?.[k] || 'Colony';
-                                return (
-                                  <div
-                                    key={k}
-                                    className="flex items-center justify-between text-[10.5px] px-1.5 py-0.5 rounded bg-slate-900/60 border border-slate-800"
-                                  >
-                                    <span className="text-slate-200 font-mono">
-                                      🪐 {parsed.label || parsed.planetRole.toUpperCase()}
-                                    </span>
-                                    <span
-                                      className="px-1.5 py-0.2 rounded text-[9px] font-bold"
-                                      style={{
-                                        color: systemEmpire.color,
-                                        backgroundColor: `${systemEmpire.color}20`,
-                                      }}
-                                    >
-                                      {des}
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Action buttons */}
-                      <div className="pt-1 flex items-center gap-2">
-                        {activeEmpire && activeEmpire.id !== systemEmpire.id && (
-                          <button
-                            onClick={() => handleClaimToggle(selectedSystem)}
-                            className="flex-1 py-1.5 px-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5"
-                          >
-                            <Flag className="w-3.5 h-3.5" style={{ color: activeEmpire.color }} />
-                            <span>Claim for {activeEmpire.name}</span>
-                          </button>
-                        )}
-                        {activeEmpire && activeEmpire.id === systemEmpire.id && !isCapital && (
-                          <button
-                            onClick={() => handleClaimToggle(selectedSystem)}
-                            className="flex-1 py-1.5 px-2 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 text-rose-300 text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>Relinquish Claim</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                }
-
-                // If unclaimed:
-                return (
-                  <div className="p-3 rounded-xl bg-slate-900/50 border border-slate-800/80 font-mono text-xs space-y-2">
-                    <div className="flex items-center justify-between text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">
-                      <span className="flex items-center gap-1.5 text-slate-300">
-                        <Shield className="w-3.5 h-3.5 text-slate-500" />
-                        Imperial Sovereignty
-                      </span>
-                      <span className="text-slate-500 font-normal">Unclaimed</span>
-                    </div>
-
-                    {selectedSystem.candidateHabitable ? (
-                      <div className="space-y-2">
-                        <p className="text-[10.5px] text-emerald-300/90 leading-relaxed">
-                          🌱 This system possesses a candidate habitable world or active biosphere{' '}
-                          {selectedSystem.habitableTypes && selectedSystem.habitableTypes.length > 0
-                            ? `(${selectedSystem.habitableTypes.join(', ')}) `
-                            : ''}
-                          capable of giving rise to an interstellar civilization.
-                        </p>
-                        <button
-                          onClick={() => {
-                            setEmpireTargetSystem(selectedSystem);
-                            setIsEmpireModalOpen(true);
-                          }}
-                          className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 transition cursor-pointer"
-                        >
-                          <Crown className="w-3.5 h-3.5" />
-                          <span>Spawn Empire Capital on this World</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="text-[10.5px] text-slate-500 leading-relaxed">
-                        Uninhabited deep space. Can be claimed as an outpost by an established empire via <kbd className="px-1 py-0.5 rounded bg-slate-800 text-slate-300 text-[9.5px]">Shift+Click</kbd>.
-                      </p>
-                    )}
-
-                    {activeEmpire && (
-                      <button
-                        onClick={() => handleClaimToggle(selectedSystem)}
-                        className="w-full mt-1 py-1.5 px-2.5 rounded-lg bg-slate-950/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Flag className="w-3 h-3" style={{ color: activeEmpire.color }} />
-                        <span>Claim for {activeEmpire.name} (Shift+Click)</span>
-                      </button>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* Detailed Stats */}
-              <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs font-mono space-y-2">
-                <div className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                  <span>Detailed Stats</span>
-                  <span className="text-cyan-400 font-semibold">{selectedSystem.archName.replace(/\s*\(.*\)/g, '')}</span>
-                </div>
-
-                {(() => {
-                  const isMultiple = selectedSystem.nStars > 1;
-                  const totalLuminosity = (() => {
-                    if (selectedSystem.sysResult?.hierarchy?.stars && selectedSystem.sysResult.hierarchy.stars.length > 0) {
-                      const sum = selectedSystem.sysResult.hierarchy.stars.reduce(
-                        (acc, st) => acc + (typeof st.lumNum === 'number' ? st.lumNum : 0),
-                        0
-                      );
-                      return +sum.toFixed(3);
-                    }
-                    return selectedSystem.lumLsun;
-                  })();
-
-                  return (
-                    <>
-                      <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                        <span className="text-slate-400">Primary Star</span>
-                        <span className="text-slate-200 font-semibold">
-                          {selectedSystem.primaryClass} {selectedSystem.primaryMass.toFixed(3)} M☉
-                        </span>
-                      </div>
-
-                      {selectedSystem.companionStars.length > 0 && (
-                        <div className="flex items-start justify-between py-1 border-b border-slate-800/60">
-                          <span className="text-slate-400">Companions</span>
-                          <div className="text-right text-slate-300 font-medium space-y-1">
-                            {selectedSystem.companionStars.map((cs) => {
-                              const isBH = isBlackHoleStar({ spectralType: cs.spectralType });
-                              return (
-                                <div key={cs.label} className="flex items-center justify-end gap-1.5 text-xs">
-                                  {isBH ? (
-                                    <BlackHoleIcon isSupermassive={cs.mass > 999999} size={15} />
-                                  ) : (
-                                    <img
-                                      src={getProceduralStarSpriteDataUrl(cs, 40)}
-                                      alt=""
-                                      className="w-4 h-4 shrink-0"
-                                    />
-                                  )}
-                                  <span>
-                                    {cs.label}: {cs.spectralType} {cs.mass.toFixed(3)} M☉
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Luminosity: sum of all star luminosities */}
-                      <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                        <span className="text-slate-400">Luminosity</span>
-                        <span className="text-slate-200 font-semibold">{totalLuminosity} L☉</span>
-                      </div>
-
-                      {/* Effective Temp & Evolutionary State: only for single star systems */}
-                      {!isMultiple && (
-                        <>
-                          <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                            <span className="text-slate-400">Effective Temp</span>
-                            <span className="text-slate-200 font-semibold">{Math.round(selectedSystem.teff)} K</span>
-                          </div>
-
-                          <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                            <span className="text-slate-400">Evolutionary State</span>
-                            <span className={isNonMainSequenceSystem(selectedSystem) ? 'text-purple-300 font-bold' : 'text-cyan-400 font-semibold'}>
-                              {selectedSystem.isRemnant
-                                ? selectedSystem.remnantType || 'Remnant'
-                                : selectedSystem.sysResult?.hierarchy?.stars?.[0]?.category ||
-                                  (isNonMainSequenceSystem(selectedSystem) ? 'Non-Main Sequence' : 'Main Sequence')}
-                            </span>
-                          </div>
-                        </>
-                      )}
-
-                      {/* Astronomical Bodies: placed between Evolutionary State and Biospheres */}
-                      <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                        <span className="text-slate-400">Astronomical Bodies</span>
-                        <span className="text-slate-200 font-semibold">
-                          {selectedSystem.planetCount} Planets &bull; {selectedSystem.beltCount} Belts
-                        </span>
-                      </div>
-
-                      {/* Planetary Biospheres */}
-                      {(() => {
-                        const bioLabel =
-                          systemTraitsMap.get(selectedSystem.id)?.biosphereDisplay ??
-                          getBiosphereDisplay(selectedSystem);
-                        return (
-                          <div className="flex items-center justify-between py-1">
-                            <span className="text-slate-400">Planetary Biospheres:</span>
-                            <span className={bioLabel !== '<none>' ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                              {bioLabel}
-                            </span>
-                          </div>
-                        );
-                      })()}
-                    </>
-                  );
-                })()}
-              </div>
-
-              {/* Hyperlane Connectivity Routes */}
-              <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-800/60 text-xs font-mono space-y-2">
-                <div className="flex items-center justify-between text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">
-                  <span className="flex items-center gap-1.5 text-cyan-400">
-                    <Route className="w-3.5 h-3.5" />
-                    Hyperlanes
-                  </span>
-                </div>
-                {connectedLanes.length === 0 ? (
-                  <div className="text-[11px] text-slate-500 italic py-0.5">
-                    No planar hyperlanes connected to this system.
-                  </div>
-                ) : (
-                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                    {connectedLanes.map((lane) => {
-                      const targetId = lane.sourceId === selectedSystem.id ? lane.targetId : lane.sourceId;
-                      const neighbor = gridData.systems.find((s) => s.id === targetId);
-                      if (!neighbor) return null;
-
-                      return (
-                        <div
-                          key={lane.id}
-                          onClick={() => {
-                            setSelectedSystem(neighbor);
-                            setSelectedCoord(neighbor.coord);
-                          }}
-                          className="flex items-center justify-between p-1.5 rounded-lg bg-slate-950/70 hover:bg-cyan-950/40 border border-slate-800/70 hover:border-cyan-700/60 transition cursor-pointer group text-[11px]"
-                          title={`Jump to ${neighbor.name}`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="w-2.5 h-2.5 rounded-full border border-white/50 group-hover:scale-110 transition-transform flex-shrink-0"
-                              style={{ backgroundColor: neighbor.colorHex }}
-                            />
-                            <span className="text-slate-200 group-hover:text-cyan-300 font-semibold transition truncate max-w-[130px]">
-                              {neighbor.name}
-                            </span>
-                            <span className="text-[9.5px] text-slate-500 font-mono">
-                              {neighbor.coord}
-                            </span>
-                          </div>
-                          <span className="text-[10.5px] text-cyan-400/90 font-mono flex-shrink-0">
-                            {(lane.lengthLy / 3.26156).toFixed(1)} pc
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Sector Context & Grid Stats */}
-              <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-800/60 text-xs font-mono space-y-2">
-                <div className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">
-                  Sector Distribution
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px]">
-                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
-                    <span className="text-slate-500">O/B Stars:</span>{' '}
-                    <span className="text-blue-400 font-bold">{gridData.stats.obCount}</span>
-                  </div>
-                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
-                    <span className="text-slate-500">A/F Stars:</span>{' '}
-                    <span className="text-cyan-300 font-bold">{gridData.stats.afCount}</span>
-                  </div>
-                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
-                    <span className="text-slate-500">G Solar:</span>{' '}
-                    <span className="text-amber-300 font-bold">{gridData.stats.gCount}</span>
-                  </div>
-                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
-                    <span className="text-slate-500">K/M Dwarfs:</span>{' '}
-                    <span className="text-red-400 font-bold">{gridData.stats.kmCount}</span>
-                  </div>
-                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
-                    <span className="text-slate-500">Remnants:</span>{' '}
-                    <span className="text-purple-400 font-bold">{gridData.stats.remnantCount}</span>
-                  </div>
-                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
-                    <span className="text-slate-500">Multi-Stars:</span>{' '}
-                    <span className="text-indigo-300 font-bold">{gridData.stats.multipleSystemCount}</span>
-                  </div>
-                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
-                    <span className="text-slate-500">Heavy Stars &ge;3 M☉:</span>{' '}
-                    <span className="text-amber-300 font-bold">{gridData.stats.heavyMassCount}</span>
-                  </div>
-                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
-                    <span className="text-slate-500">Hyperlanes:</span>{' '}
-                    <span className="text-cyan-400 font-bold">{gridData.stats.hyperlaneCount}</span>
-                  </div>
-                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50">
-                    <span className="text-slate-500">Empires:</span>{' '}
-                    <span className="text-emerald-400 font-bold">{empires.length}</span>
-                  </div>
-                  <div className="p-1.5 rounded bg-slate-950/60 border border-slate-800/50 col-span-2 flex items-center justify-between">
-                    <span className="text-slate-400">Integrated Light:</span>
-                    <span className="flex items-center gap-1.5 font-bold" style={{ color: gridData.integratedColorHex }}>
-                      <span className="w-2.5 h-2.5 rounded-full border border-white/40" style={{ backgroundColor: gridData.integratedColorHex }} />
-                      {gridData.integratedColorHex}
-                    </span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowSectorExportModal(true)}
-                  className="w-full mt-1 py-2 px-3 rounded-lg bg-slate-950/90 hover:bg-slate-800 border border-cyan-700/70 hover:border-cyan-500 text-cyan-300 font-mono font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow"
-                  title="Export or Import this Sector in Stellaris Static Galaxy (.txt), Stargen Sector (.json), or SpaceEngine (.sc) format"
-                >
-                  <Download className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Export / Import Sector</span>
-                </button>
-              </div>
-
-              {/* Instructions Tip */}
-              <div className="p-2.5 rounded-lg bg-cyan-950/30 border border-cyan-800/40 text-[10.5px] text-cyan-300/80 font-mono leading-relaxed flex items-start gap-2">
-                <Info className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
-                <span>
-                  double click or zoom in for system map
-                </span>
-              </div>
-            </div>
-          ) : selectedCoord ? (
-            <div className="p-6 h-full flex flex-col items-center justify-center text-center text-slate-400 font-mono text-xs gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-cyan-950/40 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-950/50">
-                <Hexagon className="w-8 h-8 animate-pulse text-cyan-400" />
-              </div>
-              <div>
-                <div className="text-sm font-bold text-slate-200">Empty Sector Hex</div>
-                <div className="text-cyan-400 text-xs mt-0.5">Quadrant Coordinate: {selectedCoord}</div>
-              </div>
-              <p className="text-slate-500 text-[11px] max-w-[240px] leading-relaxed">
-                This sector cell is currently vacant. You can establish a new star system here.
-              </p>
-              <button
-                onClick={() => {
-                  const c = parseInt(selectedCoord.slice(0, 2), 10);
-                  const r = parseInt(selectedCoord.slice(2, 4), 10);
-                  handlePlaceNewSystem(c, r);
-                }}
-                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-mono font-bold text-xs flex items-center gap-2 shadow-lg shadow-amber-600/25 transition cursor-pointer hover:scale-105 active:scale-95"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Place Star System Here</span>
-              </button>
-            </div>
-          ) : (
-            <div className="p-6 h-full flex flex-col items-center justify-center text-center text-slate-500 font-mono text-xs gap-3">
-              <Hexagon className="w-10 h-10 text-slate-700 animate-pulse" />
-              <p>Select any hex with a star system to inspect its stats or open the system map.</p>
-            </div>
-          )}
-        </div>
-        )}
+        <SectorSystemInspector
+          showUI={showUI}
+          selectedSystem={selectedSystem}
+          selectedCoord={selectedCoord}
+          gridData={gridData}
+          empires={empires}
+          activeEmpire={activeEmpire}
+          systemTraitsMap={systemTraitsMap}
+          onLaunchSystemGenerator={handleLaunchSystemGenerator}
+          onOpenSystemEditor={(sys) => {
+            setSystemToEdit(sys);
+            setIsSystemEditorOpen(true);
+          }}
+          onDeleteSystem={handleDeleteSystem}
+          onOpenSpawnEmpireModal={(sys) => {
+            setEmpireTargetSystem(sys);
+            setIsEmpireModalOpen(true);
+          }}
+          onClaimToggle={handleClaimToggle}
+          onSelectSystem={(sys) => {
+            setSelectedSystem(sys);
+            setSelectedCoord(sys.coord);
+          }}
+          onOpenSectorExportModal={() => setShowSectorExportModal(true)}
+          onPlaceNewSystem={handlePlaceNewSystem}
+        />
       </div>
 
       {/* Spawn Alien Empire Dialog Modal */}
