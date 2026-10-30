@@ -1471,6 +1471,30 @@ export type SurfaceMapLayerType =
 const surfaceModelCache = new Map<string, PlanetarySurfaceModel>();
 const iconSurfaceModelCache = new Map<string, PlanetarySurfaceModel>();
 
+export function computeSurfaceModelCacheKey(
+  planet: RealisticPlanetBody,
+  moon?: RealisticMoon | null,
+  zone?: RealisticPlanetaryZone | null,
+  stars?: RealisticStarNode[] | null
+): string {
+  const isMoon = Boolean(moon);
+  const resolved = resolveHostStarForBody(planet, zone, stars);
+  const starTeff = resolved.star?.Teff ?? resolved.starTeff;
+  return isMoon
+    ? `moon_${moon?.id || moon?.name}_${moon?.moonClass}_${moon?.radiusKm}_${moon?.gravityG}_${moon?.rockFrac}_${moon?.iceFrac}_${moon?.densityGcm3}_${moon?.surfaceTempK}_${moon?.pressureBar}_${moon?.hydrosphere?.coveragePct}_${starTeff}`
+    : `planet_${planet.a}_${planet.massEarth}_${planet.radiusEarth}_${planet.gravityG}_${planet.planetClass}_${planet.rockFrac}_${planet.iceFrac}_${planet.densityGcm3}_${planet.surfaceTempK}_${planet.pressureBar}_${planet.hydrosphere?.coveragePct}_${starTeff}`;
+}
+
+export function getCachedPlanetarySurfaceModel(
+  planet: RealisticPlanetBody,
+  moon?: RealisticMoon | null,
+  zone?: RealisticPlanetaryZone | null,
+  stars?: RealisticStarNode[] | null
+): PlanetarySurfaceModel | null {
+  const key = computeSurfaceModelCacheKey(planet, moon, zone, stars);
+  return surfaceModelCache.get(key) || null;
+}
+
 /**
  * Builds (or retrieves from cache) the complete planetary surface model including topography,
  * biomes, climate grid, volcanoes, cloud/atmosphere layer, and sky horizon parameters.
@@ -1500,9 +1524,7 @@ export function generatePlanetarySurfaceModel(
     spectralType: planet.hostStarSpectralType || 'G2V',
     colorHex: resolved.starColorHex,
   };
-  const cacheKey = isMoon
-    ? `moon_${moon?.id || moon?.name}_${moon?.moonClass}_${moon?.radiusKm}_${moon?.gravityG}_${moon?.rockFrac}_${moon?.iceFrac}_${moon?.densityGcm3}_${moon?.surfaceTempK}_${moon?.pressureBar}_${moon?.hydrosphere?.coveragePct}_${star.Teff}`
-    : `planet_${planet.a}_${planet.massEarth}_${planet.radiusEarth}_${planet.gravityG}_${planet.planetClass}_${planet.rockFrac}_${planet.iceFrac}_${planet.densityGcm3}_${planet.surfaceTempK}_${planet.pressureBar}_${planet.hydrosphere?.coveragePct}_${star.Teff}`;
+  const cacheKey = computeSurfaceModelCacheKey(planet, moon, zone, stars);
 
   const cached = surfaceModelCache.get(cacheKey);
   if (cached) return cached;

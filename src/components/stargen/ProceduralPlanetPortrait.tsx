@@ -9,6 +9,7 @@ import { formatSolventName } from '../../core/astrophysics/classifier';
 import {
   generatePlanetarySurfaceModel,
   renderSurfaceProjectedGlobeToCanvas,
+  PlanetarySurfaceModel,
 } from './surface/surfaceGenMath';
 import { clamp, lerp, smoothstep, hash3 } from '../../core/math/mathUtils';
 import { hexToRgb } from '../../core/math/colorUtils';
@@ -100,23 +101,26 @@ function renderPlanetGlobeToCanvas(
   rotYaw = 0,
   rotPitch = 0,
   _interactiveFast = false,
-  includeSpriteRings = true
-): void {
+  includeSpriteRings = true,
+  cachedModel?: PlanetarySurfaceModel | null
+): PlanetarySurfaceModel {
   const isSmallIcon = _interactiveFast || gCanvas.width <= 72;
-  const surfaceModel = generatePlanetarySurfaceModel(
-    planet,
-    moon,
-    null,
-    [
-      {
-        Teff: starTeff || 5778,
-        colorHex: starColorHex || '#fff4e6',
-        radius: 1.0,
-        lumNum: 1.0,
-      } as RealisticStarNode,
-    ],
-    isSmallIcon
-  );
+  const surfaceModel =
+    cachedModel ||
+    generatePlanetarySurfaceModel(
+      planet,
+      moon,
+      null,
+      [
+        {
+          Teff: starTeff || 5778,
+          colorHex: starColorHex || '#fff4e6',
+          radius: 1.0,
+          lumNum: 1.0,
+        } as RealisticStarNode,
+      ],
+      isSmallIcon
+    );
 
   renderSurfaceProjectedGlobeToCanvas(gCanvas, surfaceModel, planet, moon, {
     activeLayer: 'satellite',
@@ -128,6 +132,29 @@ function renderPlanetGlobeToCanvas(
     includeRings: includeSpriteRings && !moon,
     selectedCoords: null,
   });
+
+  return surfaceModel;
+}
+
+/**
+ * Draws an instant (<1ms) lightweight spherical globe preview with base color,
+ * specular 3D limb gradient, atmosphere, and rings before the full surface model is drawn live.
+ */
+function renderFastGlobePreview(
+  gCanvas: HTMLCanvasElement,
+  planet: RealisticPlanetBody,
+  moon: RealisticMoon | null | undefined,
+  starColorHex: string,
+  moonIndex = 0
+): void {
+  renderFastPlanetIconToCanvas(
+    gCanvas,
+    planet,
+    moon,
+    starColorHex,
+    moonIndex,
+    !moon
+  );
 }
 
 /**
@@ -449,6 +476,12 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
   const vistaCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [expandedMode, setExpandedMode] = useState<'split' | 'globe' | 'interior' | 'vista'>('split');
 
+  // Progressive live surface drawing state: loads UI first, draws surface after/live
+  const [isSurfaceReady, setIsSurfaceReady] = useState<boolean>(false);
+  const [isDrawingLive, setIsDrawingLive] = useState<boolean>(true);
+  const surfaceModelRef = useRef<PlanetarySurfaceModel | null>(null);
+  const renderSeqRef = useRef<number>(0);
+
   // Interactive 3D Globe Rotation State (Yaw & Pitch in radians)
   const [rotYaw, setRotYaw] = useState<number>(0);
   const [rotPitch, setRotPitch] = useState<number>(0);
@@ -508,10 +541,13 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
       ? 100
       : 0;
 
-  // Reset 3D rotation when switching between planets/moons
+  // Reset 3D rotation and live drawing state when switching between planets/moons
   useEffect(() => {
     setRotYaw(0);
     setRotPitch(0);
+    surfaceModelRef.current = null;
+    setIsSurfaceReady(false);
+    setIsDrawingLive(true);
   }, [worldSeed]);
 
   // Auto-spin animation loop
@@ -526,23 +562,76 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
     return () => cancelAnimationFrame(rafId);
   }, [autoSpin, isDraggingGlobe]);
 
-  // 1. Render Interactive 3D Orbital Globe whenever 3D rotation or world changes
+  // 1. Render Interactive 3D Orbital Globe: loads UI first, draws surface after/live
   useEffect(() => {
     const gCanvas = globeCanvasRef.current;
-    if (gCanvas && expandedMode !== 'vista') {
+    if (!gCanvas || expandedMode === 'vista') return;
+
+    const starColor = primaryStar?.colorHex || '#fff4e6';
+    const starT = primaryStar?.Teff || 5778;
+
+    // If surface model is already ready in memory, re-project immediately for rotation/spin
+    if (surfaceModelRef.current) {
       renderPlanetGlobeToCanvas(
         gCanvas,
         planet,
         moon,
-        primaryStar?.colorHex || '#fff4e6',
-        primaryStar?.Teff || 5778,
+        starColor,
+        starT,
         moonIndex,
         false,
         rotYaw,
         rotPitch,
-        isDraggingGlobe || autoSpin
+        isDraggingGlobe || autoSpin,
+        true,
+        surfaceModelRef.current
       );
+      return;
     }
+
+    // Stage 1: Render instant lightweight preview (<1ms) so the UI paints to screen first
+    renderFastGlobePreview(
+      gCanvas,
+      planet,
+      moon,
+      starColor,
+      moonIndex
+    );
+
+    // Stage 2: Defer full procedural surface model generation and projected live draw to subsequent animation frame
+    const curSeq = ++renderSeqRef.current;
+    setIsDrawingLive(true);
+
+    const timer = setTimeout(() => {
+      if (curSeq !== renderSeqRef.current) return;
+      requestAnimationFrame(() => {
+        if (curSeq !== renderSeqRef.current) return;
+        const targetCanvas = globeCanvasRef.current;
+        if (targetCanvas) {
+          const model = renderPlanetGlobeToCanvas(
+            targetCanvas,
+            planet,
+            moon,
+            starColor,
+            starT,
+            moonIndex,
+            false,
+            rotYaw,
+            rotPitch,
+            false,
+            true,
+            null
+          );
+          surfaceModelRef.current = model;
+        }
+        setIsSurfaceReady(true);
+        setIsDrawingLive(false);
+      });
+    }, 25);
+
+    return () => {
+      clearTimeout(timer);
+    };
   }, [
     planet,
     moon,
@@ -553,6 +642,7 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
     rotPitch,
     isDraggingGlobe,
     autoSpin,
+    worldSeed,
   ]);
 
   // 2. Render Surface Horizon Vista only when world or expandedMode changes
@@ -1147,13 +1237,36 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
               </div>
             </div>
 
+            {/* Live Drawing Telemetry Overlay */}
+            {isDrawingLive && (
+              <div className="absolute inset-0 bg-[#050810]/35 backdrop-blur-[1px] flex flex-col items-center justify-center gap-1.5 pointer-events-none z-20 transition-opacity duration-300">
+                <div className="relative w-8 h-8 flex items-center justify-center">
+                  <div className="absolute inset-0 rounded-full border border-sky-500/30 border-t-sky-400 animate-spin" />
+                  <Globe className="w-4 h-4 text-sky-400 animate-pulse" />
+                </div>
+                <span className="text-[9px] font-mono font-bold text-sky-300 tracking-wider uppercase animate-pulse">
+                  Drawing Surface &amp; Clouds Live...
+                </span>
+              </div>
+            )}
+
+            {/* Live Surface Telemetry Status Badge */}
+            <div className="absolute bottom-2 left-2 z-10 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[#050810]/85 border border-slate-800 text-[9px] font-mono shadow-sm backdrop-blur-xs pointer-events-none">
+              <span className={`w-1.5 h-1.5 rounded-full ${isSurfaceReady ? 'bg-emerald-400' : 'bg-sky-400 animate-ping'}`} />
+              <span className={isSurfaceReady ? 'text-slate-300' : 'text-sky-300 font-semibold'}>
+                {isSurfaceReady ? 'Surface Live' : 'Drawing Surface...'}
+              </span>
+            </div>
+
             <canvas
               ref={globeCanvasRef}
               width={240}
               height={180}
               className={`${
                 expandedMode === 'globe' ? 'h-64' : 'h-40'
-              } w-auto object-contain rounded pointer-events-none`}
+              } w-auto object-contain rounded pointer-events-none transition-opacity duration-300 ${
+                isDrawingLive && !isSurfaceReady ? 'opacity-85' : 'opacity-100'
+              }`}
             />
           </div>
         )}
@@ -1192,6 +1305,22 @@ export const ProceduralPlanetPortrait: React.FC<ProceduralPlanetPortraitProps> =
               expandedMode === 'split' ? 'md:col-span-5' : 'w-full'
             } relative bg-[#050810] rounded-lg border border-slate-800/90 overflow-hidden flex items-center justify-center cursor-pointer`}
           >
+            {isDrawingLive && (
+              <div className="absolute inset-0 bg-[#050810]/35 backdrop-blur-[1px] flex flex-col items-center justify-center gap-1.5 pointer-events-none z-20">
+                <div className="w-5 h-5 rounded-full border border-amber-500/30 border-t-amber-400 animate-spin" />
+                <span className="text-[9px] font-mono font-bold text-amber-300 tracking-wider uppercase animate-pulse">
+                  Drawing Horizon Vista...
+                </span>
+              </div>
+            )}
+
+            <div className="absolute bottom-2 left-2 z-10 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[#050810]/85 border border-slate-800 text-[9px] font-mono shadow-sm backdrop-blur-xs pointer-events-none">
+              <span className={`w-1.5 h-1.5 rounded-full ${isSurfaceReady ? 'bg-emerald-400' : 'bg-amber-400 animate-ping'}`} />
+              <span className={isSurfaceReady ? 'text-slate-300' : 'text-amber-300 font-semibold'}>
+                {isSurfaceReady ? 'Horizon Vista Live' : 'Drawing Vista...'}
+              </span>
+            </div>
+
             <canvas
               ref={vistaCanvasRef}
               width={380}

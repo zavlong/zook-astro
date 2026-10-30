@@ -21,6 +21,7 @@ import {
 import { RealisticMoon, RealisticStarNode } from '../../../types/astrophysics';
 import {
   generatePlanetarySurfaceModel,
+  getCachedPlanetarySurfaceModel,
   sampleSurfacePoint,
   evaluateSurfaceMapBilinear,
   renderSurfaceProjectedGlobeToCanvas,
@@ -130,17 +131,82 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     };
   }, [isFullscreen]);
 
-  // Generate physics surface model
-  const surfaceModel = useMemo<PlanetarySurfaceModel>(() => {
-    return generatePlanetarySurfaceModel(planet, moon, zone, stars);
-  }, [planet, moon, zone, stars]);
+  // Surface model & Goldberg grid generation (lazy deferred to eliminate tab-switch freeze)
+  const [surfaceModel, setSurfaceModel] = useState<PlanetarySurfaceModel | null>(() => {
+    return getCachedPlanetarySurfaceModel(planet, moon, zone, stars);
+  });
+  const [goldbergGrid, setGoldbergGrid] = useState<PlanetaryGoldbergGrid | null>(() => {
+    const cachedModel = getCachedPlanetarySurfaceModel(planet, moon, zone, stars);
+    if (cachedModel) {
+      return getPlanetaryGoldbergGrid(cachedModel, planet, moon);
+    }
+    return null;
+  });
+  const [isSynthesizing, setIsSynthesizing] = useState<boolean>(() => {
+    const cachedModel = getCachedPlanetarySurfaceModel(planet, moon, zone, stars);
+    return !cachedModel;
+  });
+  const [synthesisStage, setSynthesisStage] = useState<string>('Synthesizing spherical topography...');
+
+  useEffect(() => {
+    const currentCached = getCachedPlanetarySurfaceModel(planet, moon, zone, stars);
+    if (currentCached && surfaceModel === currentCached && goldbergGrid) {
+      setIsSynthesizing(false);
+      return;
+    }
+
+    let isCancelled = false;
+    setIsSynthesizing(true);
+    setSynthesisStage('Synthesizing spherical topography...');
+
+    // Defer heavy calculation by 25ms + rAF so the UI shell & synthesis HUD render immediately
+    const timer = setTimeout(() => {
+      requestAnimationFrame(() => {
+        if (isCancelled) return;
+        setSynthesisStage('Computing plate tectonics & Goldberg tile grid...');
+
+        requestAnimationFrame(() => {
+          if (isCancelled) return;
+          try {
+            const model = currentCached || generatePlanetarySurfaceModel(planet, moon, zone, stars);
+            const grid = getPlanetaryGoldbergGrid(model, planet, moon);
+            if (!isCancelled) {
+              setSurfaceModel(model);
+              setGoldbergGrid(grid);
+              setIsSynthesizing(false);
+            }
+          } catch (e) {
+            console.error('Failed to synthesize planetary surface:', e);
+            if (!isCancelled) setIsSynthesizing(false);
+          }
+        });
+      });
+    }, 25);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [planet, moon, zone, stars, surfaceModel, goldbergGrid]);
 
   const hostStarTeff = useMemo(() => {
-    return surfaceModel.starTeff || resolveHostStarForBody(planet, zone, stars).starTeff;
+    return surfaceModel?.starTeff || resolveHostStarForBody(planet, zone, stars).starTeff;
   }, [surfaceModel, planet, zone, stars]);
 
   // Procedural Plant Ecosystem & Xenoflora
   const ecosystem = useMemo(() => {
+    if (!surfaceModel) {
+      return generatePlantEcosystem({
+        seed: 1,
+        hasBiosphere: false,
+        starTeff: hostStarTeff,
+        gravityG: 1,
+        pressureBar: 1,
+        hasLiquid: false,
+        hasLand: true,
+        coveragePct: 0,
+      });
+    }
     const coveragePct = (moon ? moon.hydrosphere?.coveragePct : planet.hydrosphere?.coveragePct) ?? (surfaceModel.hasLiquid ? 70 : 0);
     const hasLand = surfaceModel.hasLiquid
       ? coveragePct < 100 && !surfaceModel.isNoSurface
@@ -165,6 +231,19 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
   // Procedural Fungi & Mycota Ecosystem
   const fungiEcosystem = useMemo(() => {
+    if (!surfaceModel) {
+      return generateFungiEcosystem({
+        seed: 1,
+        hasBiosphere: false,
+        starTeff: hostStarTeff,
+        gravityG: 1,
+        pressureBar: 1,
+        hasLiquid: false,
+        hasLand: true,
+        coveragePct: 0,
+        plantMulticellular: false,
+      });
+    }
     const coveragePct = (moon ? moon.hydrosphere?.coveragePct : planet.hydrosphere?.coveragePct) ?? (surfaceModel.hasLiquid ? 70 : 0);
     const hasLand = surfaceModel.hasLiquid
       ? coveragePct < 100 && !surfaceModel.isNoSurface
@@ -188,17 +267,13 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     });
   }, [surfaceModel, planet, moon, hostStarTeff, ecosystem.isMulticellular]);
 
-  // Generate Goldberg Polyhedron (480 Hexagons + 12 Pentagons) planetary tile grid
-  const goldbergGrid = useMemo<PlanetaryGoldbergGrid>(() => {
-    return getPlanetaryGoldbergGrid(surfaceModel, planet, moon);
-  }, [surfaceModel, planet, moon]);
-
-  const selectedTile = useMemo<GoldbergPlanetaryTile>(() => {
+  const selectedTile = useMemo<GoldbergPlanetaryTile | null>(() => {
+    if (!goldbergGrid) return null;
     return getGoldbergTileAtLatLon(goldbergGrid, selectedCoords.lat, selectedCoords.lon);
   }, [goldbergGrid, selectedCoords]);
 
   const hoveredTile = useMemo<GoldbergPlanetaryTile | null>(() => {
-    if (!hoverCoords) return null;
+    if (!goldbergGrid || !hoverCoords) return null;
     return getGoldbergTileAtLatLon(goldbergGrid, hoverCoords.lat, hoverCoords.lon);
   }, [goldbergGrid, hoverCoords]);
 
@@ -206,7 +281,23 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
   // Selected telemetry point (snapped to the Goldberg tile when showTileGrid or terrain/horizon mode is active)
   const currentTelemetry = useMemo<SurfacePointTelemetry>(() => {
-    if (showTileGrid || displayMode === 'terrain' || displayMode === 'horizon') {
+    if (!surfaceModel) {
+      const defaultTemp = (moon ? moon.surfaceTempK : planet.surfaceTempK) ?? 288;
+      return {
+        lat: selectedCoords.lat,
+        lon: selectedCoords.lon,
+        elevationKm: 0,
+        elevationMeters: 0,
+        temperatureK: defaultTemp,
+        temperatureC: Math.round(defaultTemp - 273.15),
+        pressureBar: (moon ? moon.pressureBar : planet.pressureBar) ?? 1.0,
+        biome: 'Synthesizing...',
+        biomeColor: '#38bdf8',
+        isOcean: false,
+        featureName: 'Planetary Surface',
+      };
+    }
+    if ((showTileGrid || displayMode === 'terrain' || displayMode === 'horizon') && activeInspectedTile) {
       const t = activeInspectedTile;
       return {
         lat: t.centerLat,
@@ -247,10 +338,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       elevationMeters: currentTelemetry.elevationMeters,
       temperatureK: currentTelemetry.temperatureK,
       pressureBar: currentTelemetry.pressureBar,
-      solventKey: surfaceModel.seaPalette?.solventKey || (moon ? moon.hydrosphere?.solvent : planet.hydrosphere?.solvent) || 'H2O',
-      liquidCoveragePct: surfaceModel.hasLiquid ? 70 : 0,
-      cloudCoveragePct: Math.round((showTileGrid ? selectedTile.cloudCover : surfaceModel.cloudOpacity) * 100),
-      hasBiosphere: surfaceModel.hasBiosphere,
+      solventKey: surfaceModel?.seaPalette?.solventKey || (moon ? moon.hydrosphere?.solvent : planet.hydrosphere?.solvent) || 'H2O',
+      liquidCoveragePct: surfaceModel?.hasLiquid ? 70 : 0,
+      cloudCoveragePct: Math.round((showTileGrid ? (selectedTile?.cloudCover ?? (surfaceModel?.cloudOpacity ?? 0)) : (surfaceModel?.cloudOpacity ?? 0)) * 100),
+      hasBiosphere: Boolean(surfaceModel?.hasBiosphere),
       biosphereSummary: (moon ? moon.hydrosphere?.biosphere : planet.hydrosphere?.biosphere) || undefined,
       hostStarTeff,
       starColorHex: stars[0]?.colorHex || '#fff4e6',
@@ -268,13 +359,14 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       starTeff: hostStarTeff,
       gravityG: moon ? moon.gravityG : planet.gravityG,
       pressureBar: moon ? moon.pressureBar : planet.pressureBar,
-      solventKey: surfaceModel.seaPalette?.solventKey || (moon ? moon.hydrosphere?.solvent : planet.hydrosphere?.solvent) || 'H2O',
+      solventKey: surfaceModel?.seaPalette?.solventKey || (moon ? moon.hydrosphere?.solvent : planet.hydrosphere?.solvent) || 'H2O',
     });
   };
 
-  const isBlankSurfaceLayer =
-    surfaceModel.isNoSurface &&
-    (activeLayer === 'biomes' || activeLayer === 'topography' || activeLayer === 'moisture' || activeLayer === 'plates');
+  const isBlankSurfaceLayer = Boolean(
+    surfaceModel?.isNoSurface &&
+    (activeLayer === 'biomes' || activeLayer === 'topography' || activeLayer === 'moisture' || activeLayer === 'plates')
+  );
 
   // Auto-spin loop for 3D Globe view
   useEffect(() => {
@@ -289,7 +381,8 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
   }, [displayMode, autoSpinGlobe, isDraggingGlobe]);
 
   // Pre-compute and cache the 720x360 base map + static Goldberg borders so mouse hover / tile selection is < 1ms
-  const baseMapPixels = useMemo<Uint8ClampedArray>(() => {
+  const baseMapPixels = useMemo<Uint8ClampedArray | null>(() => {
+    if (!surfaceModel || !goldbergGrid) return null;
     const width = 720;
     const height = 360;
     const buf = new Uint8ClampedArray(width * height * 4);
@@ -328,7 +421,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
   // Render 2D Cartographic Surface Map (fast memcpy from cached baseMapPixels + interactive tile highlight)
   useEffect(() => {
-    if (displayMode !== 'map') return;
+    if (displayMode !== 'map' || !baseMapPixels || !goldbergGrid) return;
     const canvas = mapCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -343,7 +436,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     const data = imgData.data;
     data.set(baseMapPixels);
 
-    if (showTileGrid && !isBlankSurfaceLayer) {
+    if (showTileGrid && !isBlankSurfaceLayer && selectedTile) {
       const topo = goldbergGrid.topology;
       const selTileId = selectedTile.tileId;
       const hovTileId = hoveredTile?.tileId ?? -1;
@@ -426,8 +519,8 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
     }
 
     // Draw Landing Site / Selected Tile Center Marker
-    const markerLon = showTileGrid ? selectedTile.centerLon : selectedCoords.lon;
-    const markerLat = showTileGrid ? selectedTile.centerLat : selectedCoords.lat;
+    const markerLon = (showTileGrid && selectedTile) ? selectedTile.centerLon : selectedCoords.lon;
+    const markerLat = (showTileGrid && selectedTile) ? selectedTile.centerLat : selectedCoords.lat;
     const markerX = ((markerLon + 180) / 360) * width;
     const markerY = ((90 - markerLat) / 180) * height;
 
@@ -455,7 +548,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
 
   // Render 3D Projected Globe View (projecting the exact 360x180 surface map onto a 3D sphere + Goldberg hex overlay)
   useEffect(() => {
-    if (displayMode !== 'globe') return;
+    if (displayMode !== 'globe' || !surfaceModel || !goldbergGrid) return;
     const canvas = globeCanvasRef.current;
     if (!canvas) return;
 
@@ -471,14 +564,14 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       rotPitch: globePitch,
       transparentBg: false,
       includeRings: !moon,
-      selectedCoords: showTileGrid
+      selectedCoords: (showTileGrid && selectedTile)
         ? { lat: selectedTile.centerLat, lon: selectedTile.centerLon }
         : selectedCoords,
       goldbergOverlay: showTileGrid
         ? {
             texelTileId: goldbergGrid.topology.texelTileId,
             cells: goldbergGrid.topology.cells,
-            selectedTileId: selectedTile.tileId,
+            selectedTileId: selectedTile?.tileId ?? -1,
             hoveredTileId: hoveredTile?.tileId ?? null,
           }
         : null,
@@ -699,12 +792,12 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
                       : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  {layer === 'clouds' ? `Atmosphere (${Math.round(surfaceModel.cloudOpacity * 100)}%)` : layer}
+                  {layer === 'clouds' ? `Atmosphere (${Math.round((surfaceModel?.cloudOpacity ?? 0) * 100)}%)` : layer}
                 </button>
               )
             )}
 
-            {activeLayer === 'satellite' && !surfaceModel.isNoSurface && surfaceModel.cloudOpacity > 0.001 && (
+            {activeLayer === 'satellite' && surfaceModel && !surfaceModel.isNoSurface && surfaceModel.cloudOpacity > 0.001 && (
               <button
                 type="button"
                 onClick={() => setShowCloudsOverlay(!showCloudsOverlay)}
@@ -715,7 +808,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
                 }`}
                 title="Toggle Atmospheric & Cloud Deck Overlay on Satellite View"
               >
-                Clouds: {showCloudsOverlay ? `${Math.round(surfaceModel.cloudOpacity * 100)}%` : 'Off'}
+                Clouds: {showCloudsOverlay ? `${Math.round((surfaceModel?.cloudOpacity ?? 0) * 100)}%` : 'Off'}
               </button>
             )}
 
@@ -752,7 +845,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               className={`px-2 py-1 rounded text-[11px] border font-bold flex items-center gap-1.5 cursor-pointer transition ${
                 showEcosystemPanel
                   ? 'bg-emerald-900 border-emerald-400 text-emerald-200 shadow-md shadow-emerald-950/40'
-                  : surfaceModel.hasBiosphere
+                  : surfaceModel?.hasBiosphere
                   ? 'bg-emerald-950/70 border-emerald-500/60 text-emerald-300 hover:bg-emerald-900/50'
                   : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
               }`}
@@ -760,7 +853,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             >
               <Sprout className="w-3.5 h-3.5 text-emerald-400" />
               <span>Ecosystem</span>
-              {surfaceModel.hasBiosphere && (
+              {surfaceModel?.hasBiosphere && (
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
               )}
             </button>
@@ -782,7 +875,41 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       <div className={`w-full flex flex-col items-center justify-center ${
         isFullscreen ? 'flex-1 h-full min-h-0 p-0 m-0 border-0 rounded-none bg-slate-950 overflow-hidden' : 'relative bg-[#0c121d] rounded-xl border border-slate-800 overflow-hidden p-2'
       }`}>
-        {displayMode === 'map' ? (
+        {isSynthesizing || !surfaceModel || !goldbergGrid ? (
+          <div className="w-full min-h-[360px] flex flex-col items-center justify-center p-8 text-center relative overflow-hidden">
+            {/* Ambient scanning background effect */}
+            <div className="absolute inset-0 bg-gradient-to-b from-sky-950/20 via-transparent to-slate-950/40 pointer-events-none" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(56,189,248,0.08),transparent_70%)] pointer-events-none" />
+
+            <div className="relative z-10 flex flex-col items-center gap-3.5 max-w-md">
+              <div className="relative flex items-center justify-center w-16 h-16">
+                <div className="absolute inset-0 rounded-full border-2 border-sky-500/20 animate-ping" />
+                <div className="absolute inset-0 rounded-full border border-sky-400/40 animate-spin [animation-duration:4s]" />
+                <Globe className="w-8 h-8 text-sky-400 animate-pulse" />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
+                  <h3 className="text-sm font-bold text-white tracking-wide uppercase font-mono">
+                    Synthesizing Planetary Topography
+                  </h3>
+                </div>
+                <p className="text-xs text-sky-300 font-mono mt-1">
+                  {synthesisStage}
+                </p>
+                <p className="text-[11px] text-slate-400 font-mono mt-1">
+                  Generating plate tectonics, hypsometric relief, thermal biomes & Goldberg tile mesh
+                </p>
+              </div>
+
+              {/* Shimmer progress bar */}
+              <div className="w-48 h-1.5 rounded-full bg-slate-900 border border-slate-800 overflow-hidden relative">
+                <div className="absolute inset-0 bg-gradient-to-r from-sky-500 via-indigo-400 to-cyan-400 animate-pulse" />
+              </div>
+            </div>
+          </div>
+        ) : displayMode === 'map' ? (
           <div className={`w-full flex flex-col items-center relative ${isFullscreen ? 'flex-1 h-full min-h-0 justify-center' : ''}`}>
             <canvas
               ref={mapCanvasRef}
@@ -976,7 +1103,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
               </div>
             )}
           </div>
-        ) : displayMode === 'terrain' ? (
+        ) : displayMode === 'terrain' && selectedTile ? (
           <LocalTileTerrainView
             surfaceModel={surfaceModel}
             goldbergGrid={goldbergGrid}
@@ -1000,7 +1127,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             isFullscreen={isFullscreen}
             onToggleFullscreen={toggleFullscreen}
           />
-        ) : (
+        ) : displayMode === 'horizon' && selectedTile ? (
           <FirstPersonSurfaceView
             surfaceModel={surfaceModel}
             goldbergGrid={goldbergGrid}
@@ -1023,6 +1150,10 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             isFullscreen={isFullscreen}
             onToggleFullscreen={toggleFullscreen}
           />
+        ) : (
+          <div className="p-8 text-center text-slate-400 font-mono text-xs">
+            Preparing 3D Terrain & Horizon Vista...
+          </div>
         )}
       </div>
 
@@ -1043,26 +1174,26 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
             <span className="text-slate-400 block text-[10px]">AVERAGE ELEVATION</span>
             <b
               className={
-                surfaceModel.isNoSurface
+                surfaceModel?.isNoSurface
                   ? 'text-slate-400'
                   : currentTelemetry.isOcean
-                  ? surfaceModel.isMoltenWorld
+                  ? surfaceModel?.isMoltenWorld
                     ? 'text-amber-400'
                     : 'text-sky-300'
                   : 'text-amber-200'
               }
             >
-              {surfaceModel.isNoSurface
+              {surfaceModel?.isNoSurface
                 ? 'No Solid Surface'
                 : currentTelemetry.elevationMeters > 0
                 ? `+${currentTelemetry.elevationMeters.toLocaleString()} m`
                 : `${currentTelemetry.elevationMeters.toLocaleString()} m`}
             </b>
             <span className="text-[9px] text-slate-400 block">
-              {surfaceModel.isNoSurface
+              {surfaceModel?.isNoSurface
                 ? '100% Cloud Envelope'
                 : currentTelemetry.isOcean
-                ? surfaceModel.isMoltenWorld
+                ? surfaceModel?.isMoltenWorld
                   ? 'Magma Depth'
                   : 'Abyssal Depth'
                 : `${currentTelemetry.elevationKm} km alt`}
@@ -1079,7 +1210,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
           <div>
             <span className="text-slate-400 block text-[10px]">PRESSURE</span>
             <b className="text-white">
-              {surfaceModel.isNoSurface
+              {surfaceModel?.isNoSurface
                 ? 'Opaque Deck'
                 : currentTelemetry.pressureBar > 0
                 ? `${currentTelemetry.pressureBar} bar`
@@ -1090,13 +1221,13 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
           <div>
             <span className="text-slate-400 block text-[10px]">CLOUD COVERAGE</span>
             <b className="text-sky-200">
-              {surfaceModel.isNoSurface
+              {surfaceModel?.isNoSurface
                 ? '100%'
                 : currentTelemetry.pressureBar > 0
                 ? `${Math.round(
                     (showTileGrid || displayMode === 'terrain' || displayMode === 'horizon'
-                      ? activeInspectedTile.cloudCover
-                      : surfaceModel.cloudOpacity) * 100
+                      ? activeInspectedTile?.cloudCover ?? (surfaceModel?.cloudOpacity ?? 0)
+                      : surfaceModel?.cloudOpacity ?? 0) * 100
                   )}%`
                 : '0%'}
             </b>
@@ -1119,7 +1250,7 @@ export const PlanetarySurfaceExplorer: React.FC<PlanetarySurfaceExplorerProps> =
       )}
 
       {/* Surface & Internal Geochemistry Composition Tables (hidden in fullscreen) */}
-      {!isFullscreen && (
+      {!isFullscreen && surfaceModel && (
         <PlanetaryChemistrySection planet={planet} moon={moon} surfaceModel={surfaceModel} />
       )}
 

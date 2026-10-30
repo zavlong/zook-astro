@@ -156,54 +156,70 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
     return resolveHostStarForBody(hostPlanet, zone, systemResult?.hierarchy?.stars).starTeff;
   }, [hostPlanet, zone, systemResult]);
 
-  const planetEcosystem = useMemo(() => {
-    const seed = isMoon && activeMoon
-      ? Math.round(activeMoon.radiusKm * 31 + (activeMoon.surfaceTempK || 200))
-      : Math.round(hostPlanet.a * 1000 + hostPlanet.massEarth * 100);
-    const covPct = hydro?.coveragePct ?? (hostPlanet.planetClass.includes('Ocean') ? 100 : 0);
-    const hasLand = covPct < 100 && !hostPlanet.planetClass.includes('Gas') && !hostPlanet.planetClass.includes('Supercritical');
-    const hasLiquid = covPct > 0;
+  const [ecosystemData, setEcosystemData] = useState<{
+    ecosystem: ReturnType<typeof generatePlantEcosystem>;
+    fungi: ReturnType<typeof generateFungiEcosystem>;
+  } | null>(null);
+  const [isEcosystemLoading, setIsEcosystemLoading] = useState<boolean>(true);
 
-    return generatePlantEcosystem({
-      seed,
-      hasBiosphere: Boolean(hydro?.biosphere),
-      biosphereDescription: hydro?.biosphere || undefined,
-      systemAgeGyr: sysAge,
-      starTeff: hostStarTeff,
-      gravityG: isMoon && activeMoon ? activeMoon.gravityG : hostPlanet.gravityG,
-      pressureBar: pBar,
-      solventKey: hydro?.solvent || 'H2O',
-      hasLiquid,
-      hasLand,
-      coveragePct: covPct,
-      surfaceTempK: Tsurf,
-    });
+  useEffect(() => {
+    let cancelled = false;
+    setIsEcosystemLoading(true);
+
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      const seed = isMoon && activeMoon
+        ? Math.round(activeMoon.radiusKm * 31 + (activeMoon.surfaceTempK || 200))
+        : Math.round(hostPlanet.a * 1000 + hostPlanet.massEarth * 100);
+      const covPct = hydro?.coveragePct ?? (hostPlanet.planetClass.includes('Ocean') ? 100 : 0);
+      const hasLand = covPct < 100 && !hostPlanet.planetClass.includes('Gas') && !hostPlanet.planetClass.includes('Supercritical');
+      const hasLiquid = covPct > 0;
+
+      const eco = generatePlantEcosystem({
+        seed,
+        hasBiosphere: Boolean(hydro?.biosphere),
+        biosphereDescription: hydro?.biosphere || undefined,
+        systemAgeGyr: sysAge,
+        starTeff: hostStarTeff,
+        gravityG: isMoon && activeMoon ? activeMoon.gravityG : hostPlanet.gravityG,
+        pressureBar: pBar,
+        solventKey: hydro?.solvent || 'H2O',
+        hasLiquid,
+        hasLand,
+        coveragePct: covPct,
+        surfaceTempK: Tsurf,
+      });
+
+      const fun = generateFungiEcosystem({
+        seed,
+        hasBiosphere: Boolean(hydro?.biosphere),
+        biosphereDescription: hydro?.biosphere || undefined,
+        systemAgeGyr: sysAge,
+        starTeff: hostStarTeff,
+        gravityG: isMoon && activeMoon ? activeMoon.gravityG : hostPlanet.gravityG,
+        pressureBar: pBar,
+        solventKey: hydro?.solvent || 'H2O',
+        hasLiquid,
+        hasLand,
+        coveragePct: covPct,
+        surfaceTempK: Tsurf,
+        plantMulticellular: eco.isMulticellular,
+      });
+
+      if (!cancelled) {
+        setEcosystemData({ ecosystem: eco, fungi: fun });
+        setIsEcosystemLoading(false);
+      }
+    }, 40);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, hostStarTeff, pBar, Tsurf]);
 
-  const planetFungi = useMemo(() => {
-    const seed = isMoon && activeMoon
-      ? Math.round(activeMoon.radiusKm * 31 + (activeMoon.surfaceTempK || 200))
-      : Math.round(hostPlanet.a * 1000 + hostPlanet.massEarth * 100);
-    const covPct = hydro?.coveragePct ?? (hostPlanet.planetClass.includes('Ocean') ? 100 : 0);
-    const hasLand = covPct < 100 && !hostPlanet.planetClass.includes('Gas') && !hostPlanet.planetClass.includes('Supercritical');
-    const hasLiquid = covPct > 0;
-
-    return generateFungiEcosystem({
-      seed,
-      hasBiosphere: Boolean(hydro?.biosphere),
-      biosphereDescription: hydro?.biosphere || undefined,
-      systemAgeGyr: sysAge,
-      starTeff: hostStarTeff,
-      gravityG: isMoon && activeMoon ? activeMoon.gravityG : hostPlanet.gravityG,
-      pressureBar: pBar,
-      solventKey: hydro?.solvent || 'H2O',
-      hasLiquid,
-      hasLand,
-      coveragePct: covPct,
-      surfaceTempK: Tsurf,
-      plantMulticellular: planetEcosystem.isMulticellular,
-    });
-  }, [isMoon, activeMoon, hostPlanet, hydro, sysAge, hostStarTeff, pBar, Tsurf, planetEcosystem.isMulticellular]);
+  const planetEcosystem = ecosystemData?.ecosystem ?? null;
+  const planetFungi = ecosystemData?.fungi ?? null;
 
   const tauIR =
     ghK > 0 && Tatm > 10 ? Math.max(0.01, (4 / 3) * (Math.pow(Tsurf / Tatm, 4) - 1)) : 0;
@@ -384,7 +400,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
       type: 'surface',
       planetName: isMoon && activeMoon ? `Planet #${selectedEntity.bodyIdx + 1} Moon ${activeMoon.name}` : `Planet #${selectedEntity.bodyIdx + 1}`,
       planetClass: isMoon && activeMoon ? cleanMoonClass : cleanPlanetClass,
-      biomeName: planetEcosystem.speciesList[0]?.nativeBiomeNames[0] || 'Alien Lowlands',
+      biomeName: planetEcosystem?.speciesList[0]?.nativeBiomeNames[0] || 'Alien Lowlands',
       elevationMeters: 50,
       temperatureK: Tsurf,
       pressureBar: pBar,
@@ -392,7 +408,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
       liquidCoveragePct: hydro?.coveragePct ?? 70,
       cloudCoveragePct: 45,
       hasBiosphere: true,
-      biosphereSummary: `${hydro?.biosphere || ''} Dominant vegetation: ${planetEcosystem.speciesList.map(s => s.commonName).slice(0, 3).join(', ')}.`,
+      biosphereSummary: `${hydro?.biosphere || ''} Dominant vegetation: ${planetEcosystem?.speciesList.map(s => s.commonName).slice(0, 3).join(', ') || 'Indigenous Flora'}.`,
       hostStarTeff,
       starColorHex: inspectorStar?.colorHex || '#fff4e6',
       timeOfDay: 'afternoon',
@@ -949,7 +965,12 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
             </div>
 
             {/* Brief Indigenous Plant & Fungal Life Summary (No individual species listing in planet view) */}
-            {(planetEcosystem.hasPlantLife || planetFungi.hasFungi) && (
+            {isEcosystemLoading ? (
+              <div className="bg-[#0c121d] p-3 rounded-lg border border-slate-800 flex items-center gap-2.5 font-mono text-xs text-slate-400">
+                <div className="w-3.5 h-3.5 rounded-full border border-emerald-400 border-t-transparent animate-spin" />
+                <span>Synthesizing native xenobiology &amp; flora profile...</span>
+              </div>
+            ) : planetEcosystem && planetFungi && (planetEcosystem.hasPlantLife || planetFungi.hasFungi) ? (
               <div className="bg-[#0c121d] p-3 rounded-lg border border-slate-800 space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
@@ -1019,7 +1040,7 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                   </button>
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
         )}
 
