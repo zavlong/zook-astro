@@ -9,13 +9,8 @@ import {
   Globe,
   Compass,
   Layers,
-  Activity,
-  Copy,
   Check,
-  Disc,
-  Wind,
-  Droplets,
-  Orbit,
+  Copy,
 } from 'lucide-react';
 import {
   RealisticStarSystemResult,
@@ -31,6 +26,31 @@ import {
 } from '../../core/generation/realisticStarGen';
 import { SectorHexSystem } from '../../core/generation/sectorHex';
 import { teffToHex } from '../../core/astrophysics/colors';
+import {
+  autoFillBlankStarFields,
+  ensureNormalizedGasRecord,
+  PLANET_CLASSES,
+  MOON_CLASSES,
+  ATMOSPHERE_TYPES,
+  OCEAN_SOLVENTS,
+  BIOSPHERE_TYPES,
+} from '../../core/generation/systemEditorPhysics';
+import {
+  EditorStarsTab,
+  STAR_LABELS,
+  EVOLUTIONARY_CATEGORIES,
+} from './editor/EditorStarsTab';
+import { EditorPlanetInspector } from './editor/EditorPlanetInspector';
+
+export {
+  PLANET_CLASSES,
+  MOON_CLASSES,
+  ATMOSPHERE_TYPES,
+  OCEAN_SOLVENTS,
+  BIOSPHERE_TYPES,
+  STAR_LABELS,
+  EVOLUTIONARY_CATEGORIES,
+};
 
 interface SystemEditorModalProps {
   isOpen: boolean;
@@ -48,82 +68,6 @@ interface SystemEditorModalProps {
   ) => void;
   onClose: () => void;
 }
-
-export const PLANET_CLASSES = [
-  'Terrestrial World',
-  'Sub-Earth World',
-  'Super-Earth World',
-  'Desert World',
-  'Ocean World',
-  'Ice World',
-  'Cryo-Ammonia World',
-  'Sub-Neptune',
-  'Gas Dwarf',
-  'Gas Giant Class I (Ammonia Clouds)',
-  'Gas Giant Class II (Water Clouds)',
-  'Gas Giant Class III (Cloudless)',
-  'Gas Giant Class IV (Alkali Metals)',
-  'Gas Giant Class V (Silicate Clouds)',
-  'Hot Jupiter',
-  'Lava World',
-  'Carbon World',
-  'Iron Core World',
-];
-
-export const MOON_CLASSES = [
-  'Silicate Rocky Moon',
-  'Ice Moon',
-  'Cryo-Ammonia Moon',
-  'Sub-Moon',
-  'Captured Asteroid',
-  'Supercritical Water Moon',
-  'Molten Moon',
-];
-
-export const ATMOSPHERE_TYPES = [
-  'Nitrogen-Oxygen (Earth-like)',
-  'Dense Carbon Dioxide (Venusian)',
-  'Thin Carbon Dioxide (Martian)',
-  'Hydrogen-Helium (Jovian)',
-  'Methane-Nitrogen (Cryogenic Titan-like)',
-  'Ammonia-Water (Reducing)',
-  'Sulfur Dioxide & Volcanic',
-  'Trace / Exosphere',
-  'Airless Vacuum',
-];
-
-export const OCEAN_SOLVENTS = [
-  'Water (H2O)',
-  'Ammonia (NH3)',
-  'Methane (CH4)',
-  'Supercritical CO2',
-  'Sulfuric Acid (H2SO4)',
-  'Hydrocarbons',
-  'Acidic Heavy Brine',
-];
-
-export const BIOSPHERE_TYPES = [
-  'Barren / Sterile',
-  'Prebiotic Organic Soup',
-  'Chemotrophic Archaea',
-  'Extremophile Microbes',
-  'Photosynthetic Microcellular',
-  'Multicellular Marine Ecosystem',
-  'Terrestrial Flora & Fauna',
-  'Complex Sentient Biosphere',
-];
-
-export const STAR_LABELS = ['A', 'B', 'C', 'D'] as const;
-
-export const EVOLUTIONARY_CATEGORIES = [
-  'Main Sequence',
-  'Subgiant Branch',
-  'Red Giant Branch',
-  'Brown Dwarf',
-  'White Dwarf',
-  'Neutron Star',
-  'Stellar Black Hole',
-];
 
 /**
  * Computes Holman & Wiegert (1999) astronomical stability limits and regime
@@ -223,7 +167,7 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
       ? planetBody.moons[selectedMoonIdx]
       : null;
 
-  // Primary Star luminosity for Keplerian orbits & equilibrium temp
+  // Primary Star luminosity & mass
   const hostStarLum = useMemo(() => {
     const sA = draftResult.hierarchy.stars[0];
     if (typeof sA?.lumNum === 'number' && sA.lumNum > 0) return sA.lumNum;
@@ -253,6 +197,16 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
     });
   };
 
+  const handleReplacePlanet = (updatedPlanet: RealisticPlanetBody) => {
+    setDraftResult((prev) => {
+      const copy = JSON.parse(JSON.stringify(prev)) as RealisticStarSystemResult;
+      if (copy.zones[selectedZoneIdx]?.bodies[selectedBodyIdx]?.kind === 'planet') {
+        copy.zones[selectedZoneIdx].bodies[selectedBodyIdx] = updatedPlanet;
+      }
+      return copy;
+    });
+  };
+
   const updateBeltField = <K extends keyof RealisticBeltBody>(
     field: K,
     value: RealisticBeltBody[K]
@@ -274,11 +228,18 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
       const target = copy.hierarchy.stars[starIdx];
       if (target) {
         (target as any)[field] = value;
-        // Auto-update color hex if Teff changed
         if (field === 'Teff' && typeof value === 'number') {
           target.colorHex = teffToHex(value);
         }
       }
+      return copy;
+    });
+  };
+
+  const handleReplaceStar = (starIdx: number, updatedStar: RealisticStarNode) => {
+    setDraftResult((prev) => {
+      const copy = JSON.parse(JSON.stringify(prev)) as RealisticStarSystemResult;
+      copy.hierarchy.stars[starIdx] = updatedStar;
       return copy;
     });
   };
@@ -296,7 +257,6 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
       const newStar = getStarStats(defaultMass, sysAge, sysFeh, label);
       copy.hierarchy.stars.push(newStar);
 
-      // Add corresponding binary split
       if (newIdx === 1) {
         const lim = calculateSplitLimits(30.0, 0.15, primaryMass, newStar.mass);
         copy.hierarchy.splits = [
@@ -345,7 +305,7 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
   };
 
   const handleDeleteStar = (starIdx: number) => {
-    if (starIdx === 0) return; // Cannot delete primary star A
+    if (starIdx === 0) return;
     setDraftResult((prev) => {
       const copy = JSON.parse(JSON.stringify(prev)) as RealisticStarSystemResult;
       if (starIdx >= copy.hierarchy.stars.length) return copy;
@@ -383,7 +343,6 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
         copy.hierarchy.archName = 'Trinary ((A+B) + C)';
       }
 
-      // Reassign any zones referencing the removed star label to primary star A
       copy.zones.forEach((z) => {
         if (z.starLabel === removedLabel) {
           z.starLabel = 'A';
@@ -477,25 +436,6 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
     });
   };
 
-  const handleAutoCalculateStar = (starIdx: number) => {
-    setDraftResult((prev) => {
-      const copy = JSON.parse(JSON.stringify(prev)) as RealisticStarSystemResult;
-      const target = copy.hierarchy.stars[starIdx];
-      if (!target) return copy;
-      const currentMass = Math.max(0.08, target.mass || 1.0);
-      const computed = getStarStats(currentMass, sysAge, sysFeh, target.label);
-      target.radius = computed.radius;
-      target.Teff = computed.Teff;
-      target.lum = computed.lum;
-      target.lumNum = computed.lumNum;
-      target.logg = computed.logg;
-      target.spectralType = computed.spectralType;
-      target.category = computed.category;
-      target.colorHex = computed.colorHex;
-      return copy;
-    });
-  };
-
   const updateSplitField = (splitIdx: number, field: 'a_AU' | 'e', value: number) => {
     setDraftResult((prev) => {
       const copy = JSON.parse(JSON.stringify(prev)) as RealisticStarSystemResult;
@@ -541,39 +481,13 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
     });
   };
 
-  // --------------------------------------------------------------------------
-  // Auto-Calculate Physics Helpers
-  // --------------------------------------------------------------------------
-  const handleAutoCalculateBodyPhysics = () => {
-    if (!planetBody) return;
-    const a = Math.max(0.01, planetBody.a || 1.0);
-    const mEarth = Math.max(0.001, planetBody.massEarth || 1.0);
-    const rEarth = Math.max(0.01, planetBody.radiusEarth || 1.0);
-
-    // Surface gravity g = M / R^2
-    const gravityG = +(mEarth / (rEarth * rEarth)).toFixed(3);
-    // Density g/cm3 = 5.515 * (M / R^3)
-    const densityGcm3 = +(5.515 * (mEarth / Math.pow(rEarth, 3))).toFixed(2);
-    // Orbital period days = 365.25 * sqrt(a^3 / M_star)
-    const periodDays = +(365.25 * Math.sqrt(Math.pow(a, 3) / hostStarMass)).toFixed(1);
-
-    // Equilibrium temperature Teq = Teff * sqrt(Rstar / 2a) * (1 - albedo)^0.25
-    // Simplified standard: Teq = 278.5 * (L^0.25) / sqrt(a) * (1 - albedo)^0.25
-    const albedo = planetBody.albedo ?? 0.3;
-    const Teq = Math.round(278.5 * (Math.pow(hostStarLum, 0.25) / Math.sqrt(a)) * Math.pow(1 - albedo, 0.25));
-    const greenhouse = planetBody.greenhouseK ?? (planetBody.pressureBar ? Math.round(planetBody.pressureBar * 12) : 0);
-    const Tsurf = Math.max(3, Teq + greenhouse);
-
+  const handleReplaceMoon = (moonIdx: number, updatedMoon: RealisticMoon) => {
+    if (!currentZone || !planetBody) return;
     setDraftResult((prev) => {
       const copy = JSON.parse(JSON.stringify(prev)) as RealisticStarSystemResult;
-      const target = copy.zones[selectedZoneIdx]?.bodies[selectedBodyIdx] as RealisticPlanetBody;
-      if (target && target.kind === 'planet') {
-        target.gravityG = gravityG;
-        target.densityGcm3 = densityGcm3;
-        target.orbitalPeriodDays = periodDays;
-        target.T_eq = Teq;
-        target.surfaceTempK = Tsurf;
-        target.greenhouseK = greenhouse;
+      const targetP = copy.zones[selectedZoneIdx]?.bodies[selectedBodyIdx] as RealisticPlanetBody;
+      if (targetP && targetP.kind === 'planet' && targetP.moons && targetP.moons[moonIdx]) {
+        targetP.moons[moonIdx] = updatedMoon;
       }
       return copy;
     });
@@ -616,7 +530,7 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
       sudarskyClass: null,
       planetClass: 'Terrestrial World',
       atmosphereType: 'Nitrogen-Oxygen (Earth-like)',
-      gases: { N2: 78.08, O2: 20.95, Ar: 0.93, CO2: 0.04 },
+      gases: { N2: 0.7808, O2: 0.2095, Ar: 0.0093, CO2: 0.0004 },
       hydrosphere: {
         state: 'Liquid Oceans',
         solvent: 'Water (H2O)',
@@ -768,25 +682,69 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
   // Save All Changes
   // --------------------------------------------------------------------------
   const handleSaveAll = () => {
+    const copy = JSON.parse(JSON.stringify(draftResult)) as RealisticStarSystemResult;
+
+    // 1. Auto-fill blank star fields on any star that has missing/zero fields
+    if (copy.hierarchy && copy.hierarchy.stars) {
+      copy.hierarchy.stars = copy.hierarchy.stars.map((star) => {
+        const isMissing =
+          !star.spectralType ||
+          star.spectralType.trim() === '' ||
+          !star.mass ||
+          star.mass <= 0 ||
+          !star.radius ||
+          star.radius <= 0 ||
+          !star.Teff ||
+          star.Teff <= 0 ||
+          star.lumNum === undefined ||
+          star.lumNum === null ||
+          star.lumNum <= 0;
+
+        if (isMissing) {
+          return autoFillBlankStarFields(star, sysAge, sysFeh);
+        }
+        return star;
+      });
+    }
+
+    // 2. Ensure normalized gas records on all planets and moons
+    if (copy.zones) {
+      copy.zones.forEach((zone) => {
+        if (zone.bodies) {
+          zone.bodies.forEach((body) => {
+            if (body.kind === 'planet') {
+              const p = body as RealisticPlanetBody;
+              p.gases = ensureNormalizedGasRecord(p.gases);
+              if (p.moons) {
+                p.moons.forEach((m) => {
+                  m.gases = ensureNormalizedGasRecord(m.gases);
+                });
+              }
+            }
+          });
+        }
+      });
+    }
+
     // Recompute total system stellar mass from stars
-    const totalMass = draftResult.hierarchy?.stars?.reduce((sum, s) => sum + (s.mass || 0), 0) || 0;
+    const totalMass = copy.hierarchy?.stars?.reduce((sum, s) => sum + (s.mass || 0), 0) || 0;
     const resolvedMass = totalMass > 0 ? +totalMass.toFixed(2) : sysMass;
 
     // Sync step1 header
-    if (!draftResult.step1) {
-      draftResult.step1 = {
+    if (!copy.step1) {
+      copy.step1 = {
         sysMass: resolvedMass,
         age: sysAge,
         feh: sysFeh,
         forcedMult: 'auto',
       };
     }
-    draftResult.step1.name = sysName;
-    draftResult.step1.age = sysAge;
-    draftResult.step1.sysMass = resolvedMass;
-    draftResult.step1.feh = sysFeh;
+    copy.step1.name = sysName;
+    copy.step1.age = sysAge;
+    copy.step1.sysMass = resolvedMass;
+    copy.step1.feh = sysFeh;
 
-    onSave(draftResult, {
+    onSave(copy, {
       name: sysName,
       coord: sysCoord,
       age: sysAge,
@@ -794,6 +752,7 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
       metallicity: sysFeh,
     });
 
+    setDraftResult(copy);
     setSaveSuccess(true);
     setTimeout(() => {
       setSaveSuccess(false);
@@ -902,9 +861,7 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
 
         {/* Modal Main Body */}
         <div className="flex-1 min-h-0 flex flex-row overflow-hidden bg-slate-950/70">
-          {/* ================================================================= */}
-          {/* TAB 1: PLANETS & ORBITS                                           */}
-          {/* ================================================================= */}
+          {/* TAB 1: PLANETS & ORBITS */}
           {activeTab === 'planets' && (
             <>
               {/* Left Column: List of bodies in current zone */}
@@ -1009,881 +966,47 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
                 </div>
               </div>
 
-              {/* Center / Right Column: Deep Body Inspector & Editor */}
-              <div className="flex-1 flex flex-col min-w-0 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-slate-950/50">
-                {currentBody && isPlanet && planetBody && (
-                  <>
-                    {/* Header Card */}
-                    <div className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-slate-900/80 via-slate-950 to-slate-900/80 border border-slate-800/80">
-                      <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 rounded-2xl bg-cyan-950/60 border border-cyan-500/40 flex items-center justify-center text-3xl shadow-inner">
-                          🪐
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="text"
-                              value={planetBody.role || ''}
-                              onChange={(e) => updatePlanetField('role', e.target.value)}
-                              className="text-lg font-bold font-mono text-white bg-transparent border-b border-dashed border-cyan-500/40 hover:border-cyan-400 focus:border-cyan-400 focus:outline-none transition px-0.5"
-                              placeholder="Planet Name"
-                            />
-                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950 border border-cyan-700/60 text-cyan-300">
-                              Orbit #{selectedBodyIdx + 1}
-                            </span>
-                          </div>
-                          <div className="text-xs font-mono text-slate-400 mt-1">
-                            {planetBody.a} AU &bull; {planetBody.orbitalPeriodDays} Days &bull; {planetBody.surfaceTempK} K
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={handleAutoCalculateBodyPhysics}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-950/80 border border-indigo-700/60 hover:bg-indigo-900 text-indigo-200 text-xs font-mono font-semibold transition"
-                          title="Auto-calculate gravity, density, period and equilibrium temperature from physics"
-                        >
-                          <Activity className="w-3.5 h-3.5" />
-                          <span>Auto Physics</span>
-                        </button>
-                        <button
-                          onClick={handleAddMoon}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-950/80 border border-teal-700/60 hover:bg-teal-900 text-teal-200 text-xs font-mono font-semibold transition"
-                          title="Add Moon to this planet"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>Add Moon</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Section: Orbital Mechanics */}
-                    <div className="p-4 rounded-2xl bg-slate-900/40 border border-slate-800/80 space-y-3">
-                      <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">
-                        <Orbit className="w-4 h-4" />
-                        <span>Orbital Mechanics</span>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Semi-Major Axis (AU)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0.01"
-                            max="250"
-                            value={planetBody.a}
-                            onChange={(e) => updatePlanetField('a', parseFloat(e.target.value) || 0.1)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Eccentricity (e)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            max="0.95"
-                            value={planetBody.e}
-                            onChange={(e) => updatePlanetField('e', parseFloat(e.target.value) || 0)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Orbital Period (Days)</label>
-                          <input
-                            type="number"
-                            step="0.1"
-                            min="0.1"
-                            value={planetBody.orbitalPeriodDays}
-                            onChange={(e) => updatePlanetField('orbitalPeriodDays', parseFloat(e.target.value) || 1)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Inclination (Deg)</label>
-                          <input
-                            type="number"
-                            step="0.1"
-                            min="0"
-                            max="90"
-                            value={planetBody.incDeg}
-                            onChange={(e) => updatePlanetField('incDeg', parseFloat(e.target.value) || 0)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Rotation (Hours)</label>
-                          <input
-                            type="number"
-                            step="0.1"
-                            min="1"
-                            value={planetBody.rotationHours}
-                            onChange={(e) => updatePlanetField('rotationHours', parseFloat(e.target.value) || 24)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Axial Tilt (Deg)</label>
-                          <input
-                            type="number"
-                            step="0.1"
-                            min="0"
-                            max="180"
-                            value={planetBody.axialTiltDeg}
-                            onChange={(e) => updatePlanetField('axialTiltDeg', parseFloat(e.target.value) || 0)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Spin State</label>
-                          <select
-                            value={planetBody.spinState || 'Prograde'}
-                            onChange={(e) => updatePlanetField('spinState', e.target.value)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          >
-                            <option value="Prograde">Normal Prograde</option>
-                            <option value="Retrograde">Retrograde</option>
-                            <option value="Tidally Locked">Tidally Locked</option>
-                            <option value="3:2 Spin-Orbit">3:2 Spin-Orbit Resonance</option>
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Section: Physical Size & Mass */}
-                    <div className="p-4 rounded-2xl bg-slate-900/40 border border-slate-800/80 space-y-3">
-                      <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider text-blue-400">
-                        <Globe className="w-4 h-4" />
-                        <span>Mass, Size & Classification</span>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div className="col-span-2">
-                          <label className="text-[11px] font-mono text-slate-400">Planetary Class</label>
-                          <select
-                            value={planetBody.planetClass}
-                            onChange={(e) => updatePlanetField('planetClass', e.target.value)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          >
-                            {PLANET_CLASSES.map((cls) => (
-                              <option key={cls} value={cls}>
-                                {cls}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Mass (M⊕)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0.001"
-                            max="5000"
-                            value={planetBody.massEarth}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 1.0;
-                              updatePlanetField('massEarth', val);
-                              updatePlanetField('massJup', +(val / 317.83).toFixed(5));
-                            }}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Radius (R⊕)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0.05"
-                            max="30"
-                            value={planetBody.radiusEarth}
-                            onChange={(e) => updatePlanetField('radiusEarth', parseFloat(e.target.value) || 1.0)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Surface Gravity (g)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0.01"
-                            value={planetBody.gravityG}
-                            onChange={(e) => updatePlanetField('gravityG', parseFloat(e.target.value) || 1.0)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Density (g/cm³)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0.1"
-                            value={planetBody.densityGcm3}
-                            onChange={(e) => updatePlanetField('densityGcm3', parseFloat(e.target.value) || 5.5)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Rock Fraction (0-1)</label>
-                          <input
-                            type="number"
-                            step="0.05"
-                            min="0"
-                            max="1"
-                            value={planetBody.rockFrac}
-                            onChange={(e) => updatePlanetField('rockFrac', parseFloat(e.target.value) || 0)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Ice Fraction (0-1)</label>
-                          <input
-                            type="number"
-                            step="0.05"
-                            min="0"
-                            max="1"
-                            value={planetBody.iceFrac}
-                            onChange={(e) => updatePlanetField('iceFrac', parseFloat(e.target.value) || 0)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Section: Atmosphere & Climate */}
-                    <div className="p-4 rounded-2xl bg-slate-900/40 border border-slate-800/80 space-y-3">
-                      <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider text-teal-400">
-                        <Wind className="w-4 h-4" />
-                        <span>Atmosphere & Climate</span>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div className="col-span-2">
-                          <label className="text-[11px] font-mono text-slate-400">Atmosphere Type</label>
-                          <select
-                            value={planetBody.atmosphereType}
-                            onChange={(e) => updatePlanetField('atmosphereType', e.target.value)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          >
-                            {ATMOSPHERE_TYPES.map((atm) => (
-                              <option key={atm} value={atm}>
-                                {atm}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Surface Pressure (bar)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={planetBody.pressureBar ?? 0}
-                            onChange={(e) => updatePlanetField('pressureBar', parseFloat(e.target.value) || 0)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Albedo (0-1)</label>
-                          <input
-                            type="number"
-                            step="0.05"
-                            min="0"
-                            max="0.95"
-                            value={planetBody.albedo}
-                            onChange={(e) => updatePlanetField('albedo', parseFloat(e.target.value) || 0.3)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Surface Temp (K)</label>
-                          <input
-                            type="number"
-                            step="1"
-                            min="10"
-                            max="3000"
-                            value={planetBody.surfaceTempK}
-                            onChange={(e) => updatePlanetField('surfaceTempK', parseFloat(e.target.value) || 288)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Equilibrium Temp (K)</label>
-                          <input
-                            type="number"
-                            step="1"
-                            min="10"
-                            max="3000"
-                            value={planetBody.T_eq}
-                            onChange={(e) => updatePlanetField('T_eq', parseFloat(e.target.value) || 250)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Greenhouse Warming (K)</label>
-                          <input
-                            type="number"
-                            step="1"
-                            min="0"
-                            value={planetBody.greenhouseK}
-                            onChange={(e) => updatePlanetField('greenhouseK', parseFloat(e.target.value) || 0)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Section: Hydrosphere & Biosphere */}
-                    <div className="p-4 rounded-2xl bg-slate-900/40 border border-slate-800/80 space-y-3">
-                      <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">
-                        <Droplets className="w-4 h-4" />
-                        <span>Hydrosphere & Biosphere (Xenobiology)</span>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Ocean Solvent</label>
-                          <select
-                            value={planetBody.hydrosphere?.solvent || 'Water (H2O)'}
-                            onChange={(e) => {
-                              const solvent = e.target.value;
-                              const cur = planetBody.hydrosphere || {
-                                state: 'Liquid Oceans',
-                                coveragePct: 50,
-                                liqKm: 2,
-                                scKm: 0,
-                                iceKm: 0,
-                                siKm: 0,
-                              };
-                              updatePlanetField('hydrosphere', { ...cur, solvent });
-                            }}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          >
-                            {OCEAN_SOLVENTS.map((sol) => (
-                              <option key={sol} value={sol}>
-                                {sol}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Liquid Coverage (%)</label>
-                          <input
-                            type="number"
-                            step="1"
-                            min="0"
-                            max="100"
-                            value={planetBody.hydrosphere?.coveragePct ?? 0}
-                            onChange={(e) => {
-                              const cov = parseFloat(e.target.value) || 0;
-                              const cur = planetBody.hydrosphere || {
-                                state: 'Liquid Oceans',
-                                solvent: 'Water (H2O)',
-                                liqKm: 2,
-                                scKm: 0,
-                                iceKm: 0,
-                                siKm: 0,
-                              };
-                              updatePlanetField('hydrosphere', { ...cur, coveragePct: cov });
-                            }}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          />
-                        </div>
-                        <div className="col-span-2">
-                          <label className="text-[11px] font-mono text-slate-400">Biosphere Archetype</label>
-                          <select
-                            value={planetBody.hydrosphere?.biosphere || 'Barren / Sterile'}
-                            onChange={(e) => {
-                              const bio = e.target.value;
-                              const cur = planetBody.hydrosphere || {
-                                state: 'Liquid Oceans',
-                                solvent: 'Water (H2O)',
-                                coveragePct: 50,
-                                liqKm: 2,
-                                scKm: 0,
-                                iceKm: 0,
-                                siKm: 0,
-                              };
-                              updatePlanetField('hydrosphere', { ...cur, biosphere: bio });
-                            }}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                          >
-                            {BIOSPHERE_TYPES.map((b) => (
-                              <option key={b} value={b}>
-                                {b}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Section: Moons List & Inspector */}
-                    <div className="p-4 rounded-2xl bg-slate-900/40 border border-slate-800/80 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider text-amber-400">
-                          <Disc className="w-4 h-4" />
-                          <span>Natural Satellites & Moons ({planetBody.moons?.length || 0})</span>
-                        </div>
-                        <button
-                          onClick={handleAddMoon}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded bg-amber-950/80 border border-amber-700/60 hover:bg-amber-900 text-amber-200 text-[10px] font-mono font-semibold transition"
-                        >
-                          <Plus className="w-3 h-3" />
-                          <span>Add Moon</span>
-                        </button>
-                      </div>
-
-                      {planetBody.moons && planetBody.moons.length > 0 ? (
-                        <div className="space-y-2">
-                          <div className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
-                            {planetBody.moons.map((m, mIdx) => (
-                              <button
-                                key={`m-tab-${mIdx}`}
-                                onClick={() => setSelectedMoonIdx(mIdx)}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition flex-shrink-0 flex items-center gap-1.5 border ${
-                                  selectedMoonIdx === mIdx
-                                    ? 'bg-amber-600 border-amber-400 text-white shadow-md shadow-amber-600/30'
-                                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
-                                }`}
-                              >
-                                <span>🌙</span>
-                                <span>{m.name || `Moon ${mIdx + 1}`}</span>
-                              </button>
-                            ))}
-                          </div>
-
-                          {currentMoon && (
-                            <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/90 space-y-3">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="text"
-                                    value={currentMoon.name}
-                                    onChange={(e) => updateMoonField('name', e.target.value)}
-                                    className="text-sm font-bold font-mono text-white bg-transparent border-b border-dashed border-amber-500/40 hover:border-amber-400 focus:outline-none px-0.5"
-                                  />
-                                  <span className="text-[10px] font-mono text-slate-400">
-                                    {currentMoon.a_Rp} Rp &bull; {currentMoon.periodDays} Days
-                                  </span>
-                                </div>
-                                <button
-                                  onClick={() => handleDeleteMoon(selectedMoonIdx)}
-                                  className="p-1 rounded text-red-400 hover:bg-red-950/50 transition text-xs font-mono flex items-center gap-1"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  <span>Remove Moon</span>
-                                </button>
-                              </div>
-
-                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                <div>
-                                  <label className="text-[10px] font-mono text-slate-400">Moon Class</label>
-                                  <select
-                                    value={currentMoon.moonClass}
-                                    onChange={(e) => updateMoonField('moonClass', e.target.value)}
-                                    className="w-full mt-1 px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-xs font-mono focus:outline-none"
-                                  >
-                                    {MOON_CLASSES.map((mc) => (
-                                      <option key={mc} value={mc}>
-                                        {mc}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                                <div>
-                                  <label className="text-[10px] font-mono text-slate-400">Orbit Radius (Rp)</label>
-                                  <input
-                                    type="number"
-                                    step="0.5"
-                                    min="1.5"
-                                    value={currentMoon.a_Rp}
-                                    onChange={(e) => updateMoonField('a_Rp', parseFloat(e.target.value) || 10)}
-                                    className="w-full mt-1 px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-xs font-mono focus:outline-none"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="text-[10px] font-mono text-slate-400">Mass (M_Moon)</label>
-                                  <input
-                                    type="number"
-                                    step="0.05"
-                                    min="0.001"
-                                    value={currentMoon.massLunar}
-                                    onChange={(e) => {
-                                      const mL = parseFloat(e.target.value) || 1.0;
-                                      updateMoonField('massLunar', mL);
-                                      updateMoonField('massEarth', +(mL * 0.0123).toFixed(5));
-                                    }}
-                                    className="w-full mt-1 px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-xs font-mono focus:outline-none"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="text-[10px] font-mono text-slate-400">Surface Temp (K)</label>
-                                  <input
-                                    type="number"
-                                    step="1"
-                                    min="5"
-                                    value={currentMoon.surfaceTempK}
-                                    onChange={(e) => updateMoonField('surfaceTempK', parseFloat(e.target.value) || 100)}
-                                    className="w-full mt-1 px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-xs font-mono focus:outline-none"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="p-4 rounded-xl bg-slate-950/40 border border-dashed border-slate-800 text-center text-xs font-mono text-slate-500">
-                          No natural satellites orbiting this world. Click &ldquo;Add Moon&rdquo; to place one.
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                {/* Belt Body Inspector */}
-                {currentBody && !isPlanet && beltBody && (
-                  <div className="p-4 rounded-2xl bg-slate-900/40 border border-slate-800/80 space-y-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center text-2xl">
-                        🪨
-                      </div>
-                      <div>
-                        <input
-                          type="text"
-                          value={beltBody.role || 'Asteroid Belt'}
-                          onChange={(e) => updateBeltField('role', e.target.value)}
-                          className="text-base font-bold font-mono text-white bg-transparent border-b border-dashed border-slate-600 focus:outline-none px-0.5"
-                        />
-                        <div className="text-xs font-mono text-slate-400 mt-1">
-                          Circumstellar Debris Belt
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div>
-                        <label className="text-[11px] font-mono text-slate-400">Semi-Major Axis (AU)</label>
-                        <input
-                          type="number"
-                          step="0.05"
-                          min="0.1"
-                          value={beltBody.a}
-                          onChange={(e) => updateBeltField('a', parseFloat(e.target.value) || 2.5)}
-                          className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-mono text-slate-400">Belt Width (AU)</label>
-                        <input
-                          type="number"
-                          step="0.05"
-                          min="0.01"
-                          value={beltBody.beltWidth}
-                          onChange={(e) => updateBeltField('beltWidth', parseFloat(e.target.value) || 0.5)}
-                          className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-mono text-slate-400">Total Mass (M⊕)</label>
-                        <input
-                          type="number"
-                          step="0.0005"
-                          min="0.00001"
-                          value={beltBody.massEarth}
-                          onChange={(e) => updateBeltField('massEarth', parseFloat(e.target.value) || 0.001)}
-                          className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-mono text-slate-400">Inclination (Deg)</label>
-                        <input
-                          type="number"
-                          step="0.5"
-                          min="0"
-                          max="90"
-                          value={beltBody.incDeg}
-                          onChange={(e) => updateBeltField('incDeg', parseFloat(e.target.value) || 0)}
-                          className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:outline-none"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              {/* Right Column: Deep Body Inspector */}
+              <EditorPlanetInspector
+                currentBody={currentBody}
+                isPlanet={isPlanet}
+                planetBody={planetBody}
+                beltBody={beltBody}
+                selectedBodyIdx={selectedBodyIdx}
+                selectedMoonIdx={selectedMoonIdx}
+                currentMoon={currentMoon}
+                hostStarMass={hostStarMass}
+                hostStarLum={hostStarLum}
+                onUpdatePlanetField={updatePlanetField}
+                onReplacePlanet={handleReplacePlanet}
+                onUpdateBeltField={updateBeltField}
+                onUpdateMoonField={updateMoonField}
+                onReplaceMoon={handleReplaceMoon}
+                onAddMoon={handleAddMoon}
+                onDeleteMoon={handleDeleteMoon}
+                onSelectMoonIdx={setSelectedMoonIdx}
+              />
             </>
           )}
 
-          {/* ================================================================= */}
-          {/* TAB 2: STARS (SPECTRAL CLASSES, MASSES & MULTIPLES)                */}
-          {/* ================================================================= */}
+          {/* TAB 2: STARS */}
           {activeTab === 'stars' && (
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
-              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
-                <div>
-                  <h3 className="text-sm font-mono font-bold uppercase tracking-wider text-amber-400">
-                    Host Stars & Multi-Star Hierarchy
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Add or remove stars (1-4), adjust masses, calculate stellar parameters, and edit orbital separations.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  {/* Star count selector */}
-                  <div className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
-                    <span className="text-[10px] font-mono text-slate-400 px-2 uppercase font-semibold">Stars:</span>
-                    {([1, 2, 3, 4] as const).map((cnt) => (
-                      <button
-                        key={`star-cnt-${cnt}`}
-                        onClick={() => handleSetStarCount(cnt)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition ${
-                          draftResult.hierarchy.stars.length === cnt
-                            ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30'
-                            : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                        }`}
-                      >
-                        {cnt}★ {cnt === 1 ? 'Single' : cnt === 2 ? 'Binary' : cnt === 3 ? 'Trinary' : 'Quad'}
-                      </button>
-                    ))}
-                  </div>
-
-                  {draftResult.hierarchy.stars.length < 4 && (
-                    <button
-                      onClick={handleAddStar}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-mono text-xs font-semibold transition hover:scale-105 active:scale-95 shadow-md shadow-amber-950/40"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add Companion Star</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {draftResult.hierarchy.stars.map((star, sIdx) => {
-                  return (
-                    <div
-                      key={`star-${sIdx}`}
-                      className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/90 shadow-lg space-y-4 relative group"
-                    >
-                      <div className="flex items-center justify-between border-b border-slate-800/70 pb-3">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="w-10 h-10 rounded-xl border border-white/40 flex items-center justify-center font-bold text-sm shadow-md"
-                            style={{
-                              backgroundColor: star.colorHex || '#ffd2a1',
-                              color: '#000000',
-                            }}
-                          >
-                            {star.label}
-                          </div>
-                          <div>
-                            <div className="font-bold font-mono text-sm text-white flex items-center gap-2">
-                              <span>Star {star.label} &bull; {star.spectralType}</span>
-                              {sIdx === 0 ? (
-                                <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono">
-                                  Primary Host
-                                </span>
-                              ) : (
-                                <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 font-mono">
-                                  Companion
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-xs font-mono text-slate-400">
-                              {star.category} &bull; {star.Teff} K
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleAutoCalculateStar(sIdx)}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 font-mono text-xs font-semibold transition"
-                            title="Auto-calculate radius, Teff, luminosity, logg, and spectral class from mass and age"
-                          >
-                            <Sparkles className="w-3.5 h-3.5" />
-                            <span>Auto-Calc</span>
-                          </button>
-
-                          <input
-                            type="color"
-                            value={star.colorHex || '#ffd2a1'}
-                            onChange={(e) => updateStarField(sIdx, 'colorHex', e.target.value)}
-                            className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
-                            title="Star Color"
-                          />
-
-                          {sIdx > 0 && (
-                            <button
-                              onClick={() => handleDeleteStar(sIdx)}
-                              className="p-1.5 rounded-lg text-rose-400 hover:text-rose-200 hover:bg-rose-950/50 border border-rose-800/40 transition"
-                              title={`Remove Star ${star.label}`}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Spectral Class</label>
-                          <input
-                            type="text"
-                            value={star.spectralType}
-                            onChange={(e) => updateStarField(sIdx, 'spectralType', e.target.value)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-amber-400 focus:outline-none"
-                            placeholder="e.g. G2V, M4V, O9V"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Category</label>
-                          <select
-                            value={star.category}
-                            onChange={(e) => updateStarField(sIdx, 'category', e.target.value)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-amber-400 focus:outline-none"
-                          >
-                            {EVOLUTIONARY_CATEGORIES.map((cat) => (
-                              <option key={cat} value={cat}>
-                                {cat}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Mass (M☉)</label>
-                          <input
-                            type="number"
-                            step="0.05"
-                            min="0.08"
-                            max="80"
-                            value={star.mass}
-                            onChange={(e) => updateStarField(sIdx, 'mass', parseFloat(e.target.value) || 1.0)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-amber-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Radius (R☉)</label>
-                          <input
-                            type="number"
-                            step="0.05"
-                            min="0.01"
-                            max="1000"
-                            value={star.radius}
-                            onChange={(e) => updateStarField(sIdx, 'radius', parseFloat(e.target.value) || 1.0)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-amber-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Teff (K)</label>
-                          <input
-                            type="number"
-                            step="50"
-                            min="1500"
-                            max="60000"
-                            value={star.Teff}
-                            onChange={(e) => updateStarField(sIdx, 'Teff', parseFloat(e.target.value) || 5778)}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-amber-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-400">Luminosity (L☉)</label>
-                          <input
-                            type="number"
-                            step="0.05"
-                            min="0.0001"
-                            value={typeof star.lumNum === 'number' ? star.lumNum : 1.0}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 1.0;
-                              updateStarField(sIdx, 'lumNum', val);
-                              updateStarField(sIdx, 'lum', val);
-                            }}
-                            className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono focus:border-amber-400 focus:outline-none"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {draftResult.hierarchy.splits && draftResult.hierarchy.splits.length > 0 && (
-                <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/90 shadow-lg space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800/70 pb-3">
-                    <div className="flex items-center gap-2">
-                      <Orbit className="w-4 h-4 text-cyan-400" />
-                      <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-cyan-300">
-                        Binary & Multiple Star Orbital Separations
-                      </h4>
-                    </div>
-                    <span className="text-[11px] font-mono text-slate-400">
-                      Architecture: <span className="text-amber-300 font-semibold">{draftResult.hierarchy.archName}</span>
-                    </span>
-                  </div>
-
-                  <div className="space-y-3">
-                    {draftResult.hierarchy.splits.map((split, spIdx) => (
-                      <div
-                        key={`split-${spIdx}`}
-                        className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-4"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="px-2.5 py-1 rounded-lg bg-cyan-950/80 border border-cyan-700/60 text-cyan-300 font-mono text-xs font-bold">
-                            Pair: {split.pair}
-                          </span>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">
-                            Regime: {split.regime}
-                          </span>
-                        </div>
-
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-center">
-                          <div>
-                            <label className="text-[10px] font-mono text-slate-400">Semi-Major Axis (AU)</label>
-                            <input
-                              type="number"
-                              step="0.5"
-                              min="0.05"
-                              max="10000"
-                              value={split.a_AU}
-                              onChange={(e) => updateSplitField(spIdx, 'a_AU', parseFloat(e.target.value) || 1.0)}
-                              className="w-full mt-1 px-2.5 py-1 rounded bg-slate-900 border border-slate-700 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-mono text-slate-400">Eccentricity (e)</label>
-                            <input
-                              type="number"
-                              step="0.02"
-                              min="0"
-                              max="0.95"
-                              value={split.e}
-                              onChange={(e) => updateSplitField(spIdx, 'e', parseFloat(e.target.value) || 0)}
-                              className="w-full mt-1 px-2.5 py-1 rounded bg-slate-900 border border-slate-700 text-xs font-mono focus:border-cyan-400 focus:outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-mono text-slate-400">Stable Limit S_max (AU)</label>
-                            <div className="mt-1 px-2 py-1 rounded bg-slate-900/60 border border-slate-800 text-xs font-mono text-slate-300">
-                              A: {split.sMaxA} | B: {split.sMaxB}
-                            </div>
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-mono text-slate-400">Circum Critical P_min (AU)</label>
-                            <div className="mt-1 px-2 py-1 rounded bg-slate-900/60 border border-slate-800 text-xs font-mono text-emerald-400">
-                              {split.pMin} AU
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            <EditorStarsTab
+              stars={draftResult.hierarchy.stars}
+              splits={draftResult.hierarchy.splits}
+              archName={draftResult.hierarchy.archName}
+              sysAge={sysAge}
+              sysFeh={sysFeh}
+              onUpdateStarField={updateStarField}
+              onReplaceStar={handleReplaceStar}
+              onAddStar={handleAddStar}
+              onDeleteStar={handleDeleteStar}
+              onSetStarCount={handleSetStarCount}
+              onUpdateSplitField={updateSplitField}
+            />
           )}
 
-          {/* ================================================================= */}
-          {/* TAB 3: SYSTEM PARAMETERS & METADATA                               */}
-          {/* ================================================================= */}
+          {/* TAB 3: SYSTEM PARAMETERS & METADATA */}
           {activeTab === 'system' && (
             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
               <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/90 shadow-lg space-y-4">
@@ -2020,9 +1143,7 @@ export const SystemEditorModal: React.FC<SystemEditorModalProps> = ({
             </div>
           )}
 
-          {/* ================================================================= */}
-          {/* TAB 4: JSON RAW EXPORT / IMPORT                                   */}
-          {/* ================================================================= */}
+          {/* TAB 4: JSON RAW EXPORT / IMPORT */}
           {activeTab === 'json' && (
             <div className="flex-1 flex flex-col p-6 space-y-4">
               <div className="flex items-center justify-between">

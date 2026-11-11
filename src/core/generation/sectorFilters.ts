@@ -63,6 +63,10 @@ export function isWaterWorldBody(
   }
 
   const cov = hydro?.coveragePct ?? 0;
+  if (solv.startsWith('none') || solv.includes('no ocean') || (hydro && cov <= 0)) {
+    return false;
+  }
+
   const hasAqueousSolvent =
     solv === 'h2o' ||
     solv.includes('h2o') ||
@@ -154,8 +158,9 @@ export function hasTerrestrialBiosphere(
     surfaceTempK?: number;
   } | null
 ): boolean {
-  if (!hydro?.biosphere || hydro.biosphere === 'none') return false;
+  if (!hydro?.biosphere) return false;
   const bio = hydro.biosphere.toLowerCase();
+  if (bio === 'none' || bio.includes('barren') || bio.includes('sterile')) return false;
   const pClass = (planetOrMoonClass || '').toLowerCase();
   const state = (hydro.state || '').toLowerCase();
   const covPct = hydro.coveragePct;

@@ -864,14 +864,17 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
                 <span className="text-slate-500 italic">Vacuum</span>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
-                  {Object.entries(gases).map(([gas, frac]) => (
-                    <span
-                      key={gas}
-                      className="px-2 py-0.5 rounded bg-[#0d131f] border border-slate-700 text-slate-200 text-[11px]"
-                    >
-                      <b>{gas}:</b> {(frac * 100).toFixed(1)}%
-                    </span>
-                  ))}
+                  {Object.entries(gases).map(([gas, frac]) => {
+                    const pct = frac > 1.001 ? frac : frac * 100;
+                    return (
+                      <span
+                        key={gas}
+                        className="px-2 py-0.5 rounded bg-[#0d131f] border border-slate-700 text-slate-200 text-[11px]"
+                      >
+                        <b>{gas}:</b> {pct >= 0.1 ? pct.toFixed(1) : pct.toFixed(2)}%
+                      </span>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -881,7 +884,10 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
             <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider">
               Hydrosphere
             </span>
-            {hydro ? (
+            {hydro &&
+            hydro.solvent &&
+            !hydro.solvent.toLowerCase().startsWith('none') &&
+            ((hydro.coveragePct ?? 100) > 0 || hydro.liqKm > 0 || hydro.scKm > 0) ? (
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <span className="text-slate-400 block text-[10px]">LIQUID COVERAGE</span>
@@ -916,7 +922,9 @@ export const PlanetDossierModal: React.FC<PlanetDossierModalProps> = ({
         <PlanetaryChemistrySection planet={hostPlanet} moon={activeMoon} />
 
         {/* Dedicated Biosphere Section for bodies with life */}
-        {hydro?.biosphere && (
+        {hydro?.biosphere &&
+          hydro.biosphere !== 'Barren / Sterile' &&
+          hydro.biosphere !== 'None' && (
           <div className="bg-[#151d2c] p-3.5 rounded-xl border border-emerald-500/50 flex flex-col gap-2.5 font-mono text-xs shadow-lg shadow-emerald-950/20">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">

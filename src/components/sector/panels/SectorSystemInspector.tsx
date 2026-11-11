@@ -40,7 +40,12 @@ export const getBiosphereDisplay = (sys: SectorHexSystem): string => {
     for (const zone of zones) {
       for (const body of zone.bodies) {
         if (body.kind === 'planet') {
-          if (body.hydrosphere?.biosphere) {
+          if (
+            body.hydrosphere?.biosphere &&
+            !body.hydrosphere.biosphere.toLowerCase().includes('barren') &&
+            !body.hydrosphere.biosphere.toLowerCase().includes('sterile') &&
+            body.hydrosphere.biosphere.toLowerCase() !== 'none'
+          ) {
             bioCount++;
             const solv = (body.hydrosphere.solvent || '').toLowerCase();
             const bio = body.hydrosphere.biosphere.toLowerCase();
@@ -58,7 +63,12 @@ export const getBiosphereDisplay = (sys: SectorHexSystem): string => {
           }
           if (body.moons) {
             for (const moon of body.moons) {
-              if (moon.hydrosphere?.biosphere) {
+              if (
+                moon.hydrosphere?.biosphere &&
+                !moon.hydrosphere.biosphere.toLowerCase().includes('barren') &&
+                !moon.hydrosphere.biosphere.toLowerCase().includes('sterile') &&
+                moon.hydrosphere.biosphere.toLowerCase() !== 'none'
+              ) {
                 bioCount++;
                 const solv = (moon.hydrosphere.solvent || '').toLowerCase();
                 const bio = moon.hydrosphere.biosphere.toLowerCase();
