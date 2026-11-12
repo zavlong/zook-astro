@@ -27,7 +27,6 @@ import { SavedGalaxiesModal } from './SavedGalaxiesModal';
 import { SectorExportImportModal } from '../sector/SectorExportImportModal';
 import {
   SectorHexGridData,
-  generateSectorHexGrid,
   DEFAULT_SECTOR_CONFIG,
 } from '../../core/generation/sectorHex';
 import { loadEmpiresForSector, saveEmpiresForSector } from '../../core/generation/empireGen';
@@ -778,7 +777,7 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     setIsGeneratingGalaxy(false);
   };
 
-  // Quick generate & place sector in galaxy from Inspector
+  // Quick generate & place sector in galaxy from Inspector (uses 0ms lightweight descriptor instead of synthesizing all 50x50 star systems upfront)
   const handleQuickGenerateSector = useCallback(
     (
       sector: GalaxySectorHex,
@@ -790,51 +789,58 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
         name?: string;
       }
     ) => {
-      const grid = generateSectorHexGrid({
-        columns: 50,
-        rows: 50,
-        density: opts.density,
-        meanAge: opts.meanAge,
-        ageRange: sector.ageRange || 4.0,
-        ageDistribution: sector.ageDistribution || 'normal',
-        ageSigma: +((sector.ageRange || 4.0) / 2.2).toFixed(2),
-        metallicityMean: opts.metallicityMean,
-        metallicitySigma: 0.22,
-        seed: Math.floor(Math.random() * 90000) + 1000,
-        coord: sector.coord,
-        name: opts.name || sector.name,
-        hasNebula: opts.hasNebula,
-      });
-      universeCache.placeSectorAtCoord(sector.coord, grid, sector.seed, opts.name);
+      const newSeed = Math.floor(Math.random() * 90000) + 1000;
+      const finalName = opts.name || sector.name || `Sector ${sector.coord}`;
+      universeCache.setSectorDescriptorAtCoord(
+        sector.coord,
+        {
+          columns: 50,
+          rows: 50,
+          density: opts.density,
+          meanAge: opts.meanAge,
+          ageRange: sector.ageRange || 4.0,
+          ageDistribution: sector.ageDistribution || 'normal',
+          ageSigma: +((sector.ageRange || 4.0) / 2.2).toFixed(2),
+          metallicityMean: opts.metallicityMean,
+          metallicitySigma: 0.22,
+          seed: newSeed,
+          coord: sector.coord,
+          name: finalName,
+          hasNebula: opts.hasNebula,
+        },
+        sector.seed
+      );
       if (opts.name) {
         setCustomSectorNames((prev) => ({ ...prev, [sector.coord]: opts.name! }));
       }
       setSaveCatalogVersion((v) => v + 1);
+      const estStars =
+        opts.density <= 1.0
+          ? Math.round(2500 * opts.density)
+          : Math.round(2500 * (1.0 + (opts.density - 1.0) * 1.4));
       setSaveBanner(
-        `✨ Generated & placed "${grid.config.name}" (${grid.systems.length} systems) in Sector ${sector.coord}!`
+        `✨ Populated "${finalName}" (~${estStars} systems, ${Math.round(opts.density * 100)}% density) in Sector ${sector.coord}!`
       );
       setTimeout(() => setSaveBanner(null), 4500);
     },
     []
   );
 
-  // Clear sector to an empty sector (0 systems)
+  // Clear sector to an empty sector (0 systems, 0ms instant descriptor)
   const handleClearSector = useCallback((sector: GalaxySectorHex) => {
-    const emptyGrid = generateSectorHexGrid({
-      ...DEFAULT_SECTOR_CONFIG,
-      columns: 50,
-      rows: 50,
-      density: 0,
-      seed: sector.seed,
-      coord: sector.coord,
-      name: `Sector ${sector.coord} (Empty)`,
-      hasNebula: false,
-    });
-    universeCache.placeSectorAtCoord(
+    universeCache.setSectorDescriptorAtCoord(
       sector.coord,
-      emptyGrid,
-      sector.seed,
-      `Sector ${sector.coord} (Empty)`
+      {
+        ...DEFAULT_SECTOR_CONFIG,
+        columns: 50,
+        rows: 50,
+        density: 0,
+        seed: sector.seed,
+        coord: sector.coord,
+        name: `Sector ${sector.coord} (Empty)`,
+        hasNebula: false,
+      },
+      sector.seed
     );
     setCustomSectorNames((prev) => ({
       ...prev,

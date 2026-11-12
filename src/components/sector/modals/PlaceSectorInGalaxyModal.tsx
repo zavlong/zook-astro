@@ -21,8 +21,6 @@ export const PlaceSectorInGalaxyModal: React.FC<PlaceSectorInGalaxyModalProps> =
   gridData,
   onPlaceInGalaxy,
 }) => {
-  if (!isOpen) return null;
-
   const initialCoord = useMemo(() => {
     return gridData.config.coord ? gridData.config.coord.padStart(4, '0') : '2525';
   }, [gridData.config.coord]);
@@ -41,14 +39,18 @@ export const PlaceSectorInGalaxyModal: React.FC<PlaceSectorInGalaxyModalProps> =
     return `${String(col).padStart(2, '0')}${String(row).padStart(2, '0')}`;
   }, [col, row]);
 
-  // Load active galaxy configuration and sectors
-  const galConfig = useMemo(() => universeCache.getActiveGalaxyConfig(), []);
-  const baseGrid = useMemo(() => generateGalaxyGrid(galConfig), [galConfig]);
+  // Load active galaxy configuration and sectors only when modal is open
+  const galConfig = useMemo(() => universeCache.getActiveGalaxyConfig(), [isOpen]);
+  const baseGrid = useMemo(
+    () => (isOpen ? generateGalaxyGrid(galConfig) : { config: galConfig, sectors: [], stats: { totalSectors: 0, activeSectors: 0, avgDensity: 0, avgAge: 0, avgMetallicity: 0, totalEstimatedStars: 0, nebulaCount: 0 } }),
+    [galConfig, isOpen]
+  );
   const galaxyGrid = useMemo(() => {
+    if (!isOpen) return baseGrid;
     return applyCachedSectorsToGalaxyGrid(baseGrid, (c, s) =>
       universeCache.getCachedSectorByCoord(c, s)
     );
-  }, [baseGrid]);
+  }, [baseGrid, isOpen]);
 
   // Fast coordinate lookup
   const sectorMap = useMemo(() => {
@@ -58,6 +60,8 @@ export const PlaceSectorInGalaxyModal: React.FC<PlaceSectorInGalaxyModalProps> =
     }
     return map;
   }, [galaxyGrid.sectors]);
+
+  if (!isOpen) return null;
 
   const selectedHexInfo = sectorMap.get(targetCoord);
 

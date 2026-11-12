@@ -253,10 +253,6 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       await yieldToMainThread();
       if (cancelled) return;
       const fresh = generateSectorHexGrid(config);
-      universeCache.cacheLoadedSector(sectorCacheKey, fresh);
-      if (config.coord) {
-        universeCache.placeSectorAtCoord(config.coord, fresh);
-      }
       if (!cancelled) {
         setIsFromCache(false);
         setGridData(fresh);

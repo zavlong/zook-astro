@@ -804,12 +804,13 @@ export function applyCachedSectorToGalaxyHex(
 ): GalaxySectorHex {
   if (!cachedGrid || !cachedGrid.config) return hex;
 
-  const systems = Array.isArray(cachedGrid.systems) ? cachedGrid.systems : [];
+  const hasExplicitSystems = Array.isArray(cachedGrid.systems);
+  const systems = hasExplicitSystems ? cachedGrid.systems : [];
   const cfg = cachedGrid.config;
   const seed = Number(cfg.seed) || hex.seed;
 
   // If the cached sector is explicitly empty (0 systems and 0 density)
-  if (systems.length === 0 && (cfg.density ?? 0) <= 0.001) {
+  if ((!hasExplicitSystems || systems.length === 0) && (cfg.density ?? 0) <= 0.001) {
     return {
       ...hex,
       name: cfg.name || `Sector ${hex.coord} (Empty)`,
@@ -827,7 +828,7 @@ export function applyCachedSectorToGalaxyHex(
 
   const totalCells = Math.max(1, (cfg.columns || 50) * (cfg.rows || 50));
   const derivedDensity =
-    systems.length > 0
+    hasExplicitSystems && systems.length > 0
       ? +(systems.length / (totalCells * 0.5)).toFixed(2)
       : +(cfg.density || 0.05).toFixed(2);
   const density = Math.max(0.02, Math.min(3.5, derivedDensity));
@@ -841,8 +842,8 @@ export function applyCachedSectorToGalaxyHex(
     cachedGrid.integratedColorHex ||
     computeSectorConstituentColor(seed, meanAge, ageRange, ageDistribution, metallicityMean, density);
   const opacity = getSectorOpacityByDensity(density);
-  const hasNebula = Boolean(cachedGrid.hasNebula);
-  const nebulaName = cachedGrid.nebula?.name || hex.nebulaName;
+  const hasNebula = Boolean(cachedGrid.hasNebula ?? cfg.hasNebula);
+  const nebulaName = cachedGrid.nebula?.name || hex.nebulaName || (hasNebula ? 'Ionized Starburst Cloud' : undefined);
 
   // Map actual giant star systems from the cached sector into galaxy hex coordinates
   const secCenterX = cachedGrid.hexCenterX || 1200;
@@ -850,9 +851,9 @@ export function applyCachedSectorToGalaxyHex(
   const secRadius = Math.max(100, cachedGrid.hexRadius || 1120);
   const scale = (hexRadius * 0.8) / secRadius;
 
-  const giantSystems = systems.filter(
-    (s: any) => s && (s.isGiantSystem || (s.mass >= 10 && s.mass < 500000))
-  );
+  const giantSystems = hasExplicitSystems
+    ? systems.filter((s: any) => s && (s.isGiantSystem || (s.mass >= 10 && s.mass < 500000)))
+    : [];
   const giantStars: GalaxyGiantStar[] =
     giantSystems.length > 0
       ? giantSystems.slice(0, 25).map((s: any, idx: number) => ({
@@ -873,6 +874,12 @@ export function applyCachedSectorToGalaxyHex(
       ? getRegionName('spiral', hex.rNorm, density, density >= 0.45)
       : hex.region;
 
+  const estimatedStars50x50 = hasExplicitSystems
+    ? systems.length
+    : density <= 1.0
+    ? Math.round(2500 * density)
+    : Math.round(2500 * (1.0 + (density - 1.0) * 1.4));
+
   return {
     ...hex,
     name: cfg.name || `Sector ${hex.coord} (${region.split(' ')[0]})`,
@@ -887,7 +894,7 @@ export function applyCachedSectorToGalaxyHex(
     colorHex,
     opacity,
     region,
-    estimatedStars50x50: systems.length,
+    estimatedStars50x50,
     giantStars,
     hasNebula,
     nebulaName,

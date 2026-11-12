@@ -32,7 +32,7 @@ const STORAGE_ACTIVE_GALAXY = 'zook_active_galaxy_config';
 const STORAGE_SAVED_GALAXIES = 'zook_saved_galaxies_catalog';
 
 const IDB_NAME = 'zook_universe_db';
-const IDB_VERSION = 2;
+const IDB_VERSION = 3;
 const IDB_STORE_SECTORS = 'sectors';
 const IDB_STORE_SYSTEMS = 'systems';
 const IDB_STORE_GALAXIES = 'galaxies';
@@ -51,13 +51,18 @@ function getIDB(): Promise<IDBDatabase | null> {
     idbPromise = new Promise((resolve) => {
       try {
         const req = window.indexedDB.open(IDB_NAME, IDB_VERSION);
-        req.onupgradeneeded = () => {
+        req.onupgradeneeded = (e) => {
           const db = req.result;
+          const tx = req.transaction;
           if (!db.objectStoreNames.contains(IDB_STORE_SECTORS)) {
             db.createObjectStore(IDB_STORE_SECTORS);
+          } else if (tx && e.oldVersion < 3) {
+            tx.objectStore(IDB_STORE_SECTORS).clear();
           }
           if (!db.objectStoreNames.contains(IDB_STORE_SYSTEMS)) {
             db.createObjectStore(IDB_STORE_SYSTEMS);
+          } else if (tx && e.oldVersion < 3) {
+            tx.objectStore(IDB_STORE_SYSTEMS).clear();
           }
           if (!db.objectStoreNames.contains(IDB_STORE_GALAXIES)) {
             db.createObjectStore(IDB_STORE_GALAXIES);
@@ -159,32 +164,11 @@ class UniverseCacheManager {
     if (this.isInitialized || typeof window === 'undefined') return;
     this.isInitialized = true;
 
-    // Load recent sectors, systems, and saved galaxies from IndexedDB in the background
+    // Only hydrate explicitly saved galaxies from IndexedDB on startup.
+    // Transient sector/system caches remain fast in-memory Maps during the session.
     getIDB().then((db) => {
       if (!db) return;
       try {
-        const txSec = db.transaction(IDB_STORE_SECTORS, 'readonly');
-        const storeSec = txSec.objectStore(IDB_STORE_SECTORS);
-        const reqSec = storeSec.openCursor();
-        reqSec.onsuccess = (e) => {
-          const cursor = (e.target as any).result;
-          if (cursor) {
-            this.sectorCache.set(cursor.key as string, cursor.value);
-            cursor.continue();
-          }
-        };
-
-        const txSys = db.transaction(IDB_STORE_SYSTEMS, 'readonly');
-        const storeSys = txSys.objectStore(IDB_STORE_SYSTEMS);
-        const reqSys = storeSys.openCursor();
-        reqSys.onsuccess = (e) => {
-          const cursor = (e.target as any).result;
-          if (cursor) {
-            this.systemCache.set(cursor.key as string, sanitizeRealisticSystem(cursor.value) || cursor.value);
-            cursor.continue();
-          }
-        };
-
         if (db.objectStoreNames.contains(IDB_STORE_GALAXIES)) {
           const txGal = db.transaction(IDB_STORE_GALAXIES, 'readonly');
           const storeGal = txGal.objectStore(IDB_STORE_GALAXIES);
@@ -308,9 +292,10 @@ class UniverseCacheManager {
     const current = this.getSavedGalaxies();
     const existingIdx = current.findIndex((g) => g.id === galaxy.id);
 
-    // Create a compact catalog item to avoid hitting 5MB localStorage limits
+    // Create a lightweight catalog item for localStorage (never serialize full sector/system payloads into localStorage)
+    const { cachedSectors: _cs, cachedSystems: _csys, ...lightweightMeta } = galaxy;
     const catalogItem: SavedGalaxy = {
-      ...galaxy,
+      ...lightweightMeta,
       cachedSectorCount:
         galaxy.cachedSectorCount ??
         (galaxy.cachedSectors ? Object.keys(galaxy.cachedSectors).length : 0),
@@ -328,15 +313,10 @@ class UniverseCacheManager {
     }
 
     try {
-      localStorage.setItem(STORAGE_SAVED_GALAXIES, JSON.stringify(updated));
-    } catch (e) {
-      // If quota exceeded, strip raw cached payload from localStorage catalog
-      try {
-        const lightweight = updated.map(({ cachedSectors, cachedSystems, ...meta }) => meta);
-        localStorage.setItem(STORAGE_SAVED_GALAXIES, JSON.stringify(lightweight));
-      } catch (inner) {
-        console.warn('Failed to write saved galaxy catalog to localStorage:', inner);
-      }
+      const lightweight = updated.map(({ cachedSectors, cachedSystems, ...meta }) => meta);
+      localStorage.setItem(STORAGE_SAVED_GALAXIES, JSON.stringify(lightweight));
+    } catch (inner) {
+      console.warn('Failed to write saved galaxy catalog to localStorage:', inner);
     }
   }
 
@@ -436,11 +416,16 @@ class UniverseCacheManager {
   }
 
   public getCachedSector(key: string): SectorHexGridData | null {
-    return this.sectorCache.get(key) || null;
+    const entry = this.sectorCache.get(key) || null;
+    // Only return full SectorHexGridData (with generated systems array), not lightweight galaxy descriptors
+    if (entry && Array.isArray(entry.systems)) {
+      return entry;
+    }
+    return null;
   }
 
   /**
-   * Look up a cached sector by its 4-digit galaxy coordinate (e.g. "2525").
+   * Look up a cached sector or lightweight sector descriptor by its 4-digit galaxy coordinate (e.g. "2525").
    * Checks the exact (fallbackSeed, coord) key first, then any cached sector at that coord.
    */
   public getCachedSectorByCoord(coord: string, fallbackSeed?: number | string): SectorHexGridData | null {
@@ -460,8 +445,44 @@ class UniverseCacheManager {
   }
 
   /**
+   * Stores a lightweight galaxy sector descriptor (~200 bytes, 0 star systems generated upfront)
+   * at coordinate `coord` ("0101"-"5050"). Used when populating or clearing hexes on the Galaxy Map
+   * so there is zero sector-generation or caching lag.
+   */
+  public setSectorDescriptorAtCoord(
+    coord: string,
+    config: SectorHexGridData['config'],
+    galaxySectorSeed?: number
+  ): void {
+    const cleanCoord = coord.trim().padStart(4, '0');
+    for (const k of Array.from(this.sectorCache.keys())) {
+      if (k.endsWith(`_${cleanCoord}`)) {
+        this.sectorCache.delete(k);
+      }
+    }
+
+    const finalName = config.name?.trim() || `Sector ${cleanCoord}`;
+    const descriptor = {
+      config: {
+        ...config,
+        coord: cleanCoord,
+        name: finalName,
+      },
+      hasNebula: Boolean(config.hasNebula),
+    } as unknown as SectorHexGridData;
+
+    const primaryKey = this.getSectorCacheKey(config.seed, cleanCoord);
+    this.sectorCache.set(primaryKey, descriptor);
+
+    if (galaxySectorSeed !== undefined && galaxySectorSeed !== config.seed) {
+      const galKey = this.getSectorCacheKey(galaxySectorSeed, cleanCoord);
+      this.sectorCache.set(galKey, descriptor);
+    }
+  }
+
+  /**
    * Places a generated/edited SectorHexGridData into the galaxy at coordinate `coord` ("0101"-"5050").
-   * Replaces any previous sector cached at that coordinate and binds it to the coordinate.
+   * Uses fast O(1) in-memory Map storage without cloning or spamming per-system IndexedDB transactions.
    */
   public placeSectorAtCoord(
     coord: string,
@@ -474,7 +495,6 @@ class UniverseCacheManager {
     for (const k of Array.from(this.sectorCache.keys())) {
       if (k.endsWith(`_${cleanCoord}`)) {
         this.sectorCache.delete(k);
-        idbDelete(IDB_STORE_SECTORS, k);
       }
     }
 
@@ -493,20 +513,11 @@ class UniverseCacheManager {
     };
 
     const primaryKey = this.getSectorCacheKey(updatedData.config.seed, cleanCoord);
-    this.cacheLoadedSector(primaryKey, updatedData);
+    this.sectorCache.set(primaryKey, updatedData);
 
     if (galaxySectorSeed !== undefined && galaxySectorSeed !== updatedData.config.seed) {
       const galKey = this.getSectorCacheKey(galaxySectorSeed, cleanCoord);
-      this.cacheLoadedSector(galKey, updatedData);
-    }
-
-    // Also cache all constituent star systems
-    if (Array.isArray(updatedData.systems)) {
-      for (const s of updatedData.systems) {
-        if (s.sysResult) {
-          this.cacheLoadedSystem(s.id, s.sysResult);
-        }
-      }
+      this.sectorCache.set(galKey, updatedData);
     }
 
     // Update custom sector names map for active galaxy
@@ -534,13 +545,13 @@ class UniverseCacheManager {
     for (const k of Array.from(this.sectorCache.keys())) {
       if (k.endsWith(`_${cleanCoord}`)) {
         this.sectorCache.delete(k);
-        idbDelete(IDB_STORE_SECTORS, k);
       }
     }
   }
 
   public hasCachedSector(key: string): boolean {
-    return this.sectorCache.has(key);
+    const entry = this.sectorCache.get(key);
+    return Boolean(entry && Array.isArray(entry.systems));
   }
 
   public isSectorCached(seed: number | string, coord?: string): boolean {
@@ -563,9 +574,9 @@ class UniverseCacheManager {
   }
 
   public cacheLoadedSector(key: string, data: SectorHexGridData): void {
+    // Store in fast in-memory Map (0ms, zero structured-clone overhead).
+    // Full persistence to IndexedDB only occurs when explicitly saving a galaxy.
     this.sectorCache.set(key, data);
-    // Asynchronously persist into IndexedDB
-    idbSet(IDB_STORE_SECTORS, key, data);
   }
 
   public getLoadedSectorCount(): number {
@@ -600,8 +611,6 @@ class UniverseCacheManager {
     const sysId = sanitized?.step1?.id || 'STARGEN_ACTIVE_SYSTEM';
     this.systemCache.set(sysId, sanitized);
     this.systemCache.set('STARGEN_ACTIVE_SYSTEM', sanitized);
-    idbSet(IDB_STORE_SYSTEMS, sysId, sanitized);
-    idbSet(IDB_STORE_SYSTEMS, 'STARGEN_ACTIVE_SYSTEM', sanitized);
   }
 
   public hasCachedSystem(systemId: string): boolean {
@@ -617,9 +626,6 @@ class UniverseCacheManager {
     this.lastActiveSystem = sanitized;
     this.systemCache.set(systemId, sanitized);
     this.systemCache.set('STARGEN_ACTIVE_SYSTEM', sanitized);
-    // Asynchronously persist into IndexedDB
-    idbSet(IDB_STORE_SYSTEMS, systemId, sanitized);
-    idbSet(IDB_STORE_SYSTEMS, 'STARGEN_ACTIVE_SYSTEM', sanitized);
   }
 
   public getLoadedSystemCount(): number {
