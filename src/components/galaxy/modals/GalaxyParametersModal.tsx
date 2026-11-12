@@ -64,6 +64,17 @@ export const GalaxyParametersModal: React.FC<GalaxyParametersModalProps> = React
                 </button>
               ))}
             </div>
+            {draftConfig.morphology === 'empty' && (
+              <div className="mt-2.5 p-3 rounded-xl bg-blue-950/40 border border-blue-500/40 text-blue-200 text-xs font-mono space-y-1">
+                <div className="font-bold text-blue-300 flex items-center gap-1.5">
+                  <span>⬛</span>
+                  <span>Empty Galaxy Canvas Active</span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  All 2,500 sectors start completely empty (0 stars). The 50×50 sector grid boundary is displayed so you can select and populate individual hexes using the Galaxy Sector Inspector, or design sectors in Sector View and place them directly into the galaxy map.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Galaxy Seed */}

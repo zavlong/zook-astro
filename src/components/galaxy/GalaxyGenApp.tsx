@@ -18,13 +18,18 @@ import {
   generateGalaxyGrid,
   GalaxyGridData,
   generateBlurredGalaxyBackground,
+  applyCachedSectorsToGalaxyGrid,
 } from '../../core/generation/galaxyGen';
 import { getHexGridOverlayUrl } from '../../core/generation/hexGridOverlay';
 import { getStarAssetPath } from '../../core/generation/starAssets';
 import { ImageQuantizerModal } from './ImageQuantizerModal';
 import { SavedGalaxiesModal } from './SavedGalaxiesModal';
 import { SectorExportImportModal } from '../sector/SectorExportImportModal';
-import { SectorHexGridData } from '../../core/generation/sectorHex';
+import {
+  SectorHexGridData,
+  generateSectorHexGrid,
+  DEFAULT_SECTOR_CONFIG,
+} from '../../core/generation/sectorHex';
 import { loadEmpiresForSector, saveEmpiresForSector } from '../../core/generation/empireGen';
 import { ParsedSectorImportResult } from '../../core/export/sectorFormatExporters';
 import { universeCache, SavedGalaxy } from '../../core/storage/universeCache';
@@ -82,8 +87,8 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
   // Search input
   const [searchCoord, setSearchCoord] = useState<string>('');
 
-  // Viewport visibility toggles (default false for maximum performance)
-  const [showHexBoundaries, setShowHexBoundaries] = useState<boolean>(false);
+  // Viewport visibility toggles (default false for maximum performance, true if empty morphology)
+  const [showHexBoundaries, setShowHexBoundaries] = useState<boolean>(config.morphology === 'empty');
   const [showLabels, setShowLabels] = useState<boolean>(false);
 
   // Sync draft and persist active galaxy config when config changes
@@ -92,10 +97,17 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     universeCache.saveActiveGalaxyConfig(config);
   }, [config]);
 
-  // Generate full 50x50 Galaxy Grid (2,500 sectors) or use custom quantized image data
-  const galaxyData = useMemo(
+  // Generate full 50x50 Galaxy Grid (2,500 sectors) or use custom quantized image data, hydrated with cached/placed sectors
+  const baseGalaxyData = useMemo(
     () => customGalaxyData || generateGalaxyGrid(config),
     [customGalaxyData, config]
+  );
+  const galaxyData = useMemo(
+    () =>
+      applyCachedSectorsToGalaxyGrid(baseGalaxyData, (coord, seed) =>
+        universeCache.getCachedSectorByCoord(coord, seed)
+      ),
+    [baseGalaxyData, saveCatalogVersion]
   );
 
   // Pre-index sectors by coordinate for O(1) lookup during hover, wheel zoom, and search
@@ -701,6 +713,9 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
     setBgImageUrl(null);
     universeCache.clearSectorCache();
     universeCache.clearSystemCache();
+    if (morph === 'empty') {
+      setShowHexBoundaries(true);
+    }
     setConfig((prev) => ({
       ...prev,
       morphology: morph,
@@ -755,10 +770,80 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
       universeCache.clearSectorCache();
       universeCache.clearSystemCache();
     }
+    if (draftConfig.morphology === 'empty') {
+      setShowHexBoundaries(true);
+    }
     setConfig({ ...draftConfig });
     await yieldToMainThread();
     setIsGeneratingGalaxy(false);
   };
+
+  // Quick generate & place sector in galaxy from Inspector
+  const handleQuickGenerateSector = useCallback(
+    (
+      sector: GalaxySectorHex,
+      opts: {
+        density: number;
+        meanAge: number;
+        metallicityMean: number;
+        hasNebula: boolean;
+        name?: string;
+      }
+    ) => {
+      const grid = generateSectorHexGrid({
+        columns: 50,
+        rows: 50,
+        density: opts.density,
+        meanAge: opts.meanAge,
+        ageRange: sector.ageRange || 4.0,
+        ageDistribution: sector.ageDistribution || 'normal',
+        ageSigma: +((sector.ageRange || 4.0) / 2.2).toFixed(2),
+        metallicityMean: opts.metallicityMean,
+        metallicitySigma: 0.22,
+        seed: Math.floor(Math.random() * 90000) + 1000,
+        coord: sector.coord,
+        name: opts.name || sector.name,
+        hasNebula: opts.hasNebula,
+      });
+      universeCache.placeSectorAtCoord(sector.coord, grid, sector.seed, opts.name);
+      if (opts.name) {
+        setCustomSectorNames((prev) => ({ ...prev, [sector.coord]: opts.name! }));
+      }
+      setSaveCatalogVersion((v) => v + 1);
+      setSaveBanner(
+        `✨ Generated & placed "${grid.config.name}" (${grid.systems.length} systems) in Sector ${sector.coord}!`
+      );
+      setTimeout(() => setSaveBanner(null), 4500);
+    },
+    []
+  );
+
+  // Clear sector to an empty sector (0 systems)
+  const handleClearSector = useCallback((sector: GalaxySectorHex) => {
+    const emptyGrid = generateSectorHexGrid({
+      ...DEFAULT_SECTOR_CONFIG,
+      columns: 50,
+      rows: 50,
+      density: 0,
+      seed: sector.seed,
+      coord: sector.coord,
+      name: `Sector ${sector.coord} (Empty)`,
+      hasNebula: false,
+    });
+    universeCache.placeSectorAtCoord(
+      sector.coord,
+      emptyGrid,
+      sector.seed,
+      `Sector ${sector.coord} (Empty)`
+    );
+    setCustomSectorNames((prev) => ({
+      ...prev,
+      [sector.coord]: `Sector ${sector.coord} (Empty)`,
+    }));
+    setSaveCatalogVersion((v) => v + 1);
+    setSaveBanner(`🧹 Cleared Sector ${sector.coord} to an empty sector (0 systems).`);
+    setTimeout(() => setSaveBanner(null), 4500);
+  }, []);
 
   return (
     <div className="w-full h-full flex flex-col bg-[#030611] text-slate-100 overflow-hidden font-sans select-none relative">
@@ -938,9 +1023,27 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
                     {/* Hexagon polygon with age-based color and density-based opacity scaled by sectorOpacity */}
                     <polygon
                       points={hexPoints}
-                      fill={sector.colorHex}
-                      fillOpacity={sector.opacity * sectorOpacity}
-                      stroke="none"
+                      fill={
+                        sector.density === 0 && (config.morphology === 'empty' || showHexBoundaries)
+                          ? '#1e293b'
+                          : sector.colorHex
+                      }
+                      fillOpacity={
+                        sector.density === 0 && (config.morphology === 'empty' || showHexBoundaries)
+                          ? Math.max(sector.opacity * sectorOpacity, 0.4)
+                          : sector.opacity * sectorOpacity
+                      }
+                      stroke={
+                        sector.density === 0 && (config.morphology === 'empty' || showHexBoundaries)
+                          ? 'rgba(71, 85, 105, 0.45)'
+                          : 'none'
+                      }
+                      strokeWidth={
+                        sector.density === 0 && (config.morphology === 'empty' || showHexBoundaries)
+                          ? 0.75
+                          : 0
+                      }
+                      pointerEvents="all"
                     />
 
                     {/* Explored / Cached Sector Highlight Indicator */}
@@ -1356,6 +1459,8 @@ export const GalaxyGenApp: React.FC<GalaxyGenAppProps> = ({
           handleTriggerEnterSector={handleTriggerEnterSector}
           setExportSectorGridData={setExportSectorGridData}
           setShowSectorExportModal={setShowSectorExportModal}
+          onQuickGenerateSector={handleQuickGenerateSector}
+          onClearSector={handleClearSector}
         />
       </div>
 

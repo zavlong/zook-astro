@@ -32,6 +32,7 @@ export const MORPHOLOGY_OPTIONS: MorphologyOption[] = [
   { id: 'lenticular', label: 'Lenticular (S0)', desc: 'Dense spheroidal core with a smooth, gas-depleted stellar disk', icon: '💿' },
   { id: 'ring', label: 'Collisional Ring', desc: 'Ring galaxy formed by bullet collision with blue starburst rim', icon: '🪐' },
   { id: 'irregular', label: 'Irregular Clump', desc: 'Chaotic starburst knots and turbulent gas streams (Magellanic type)', icon: '✨' },
+  { id: 'empty', label: 'Empty Canvas', desc: 'Completely empty 50×50 sector grid to build and place sectors from scratch', icon: '⬛' },
 ];
 
 export interface GalaxyTopToolbarProps {

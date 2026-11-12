@@ -6,7 +6,8 @@ export type GalaxyMorphology =
   | 'elliptical'
   | 'lenticular'
   | 'ring'
-  | 'irregular';
+  | 'irregular'
+  | 'empty';
 
 export interface GalaxyConfig {
   seed: number;
@@ -271,6 +272,8 @@ function getRegionName(
   density: number,
   isArm: boolean
 ): string {
+  if (morphology === 'empty' && density <= 0.005) return 'Uncharted Empty Void';
+  if (density <= 0.005) return 'Empty Sector Slot';
   if (density >= 2.0) return 'Hyper-Dense Stellar Nexus';
   if (density >= 1.15) return 'Massive Starburst Overdensity';
   if (rNorm > 1.25 && density < 0.04) return 'Intergalactic Void';
@@ -641,6 +644,13 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
           baseFeh = -0.10 - 0.5 * rNorm;
         }
 
+      } else if (config.morphology === 'empty') {
+        // Blank canvas galaxy: all sectors start completely empty (0 stars, 0% density)
+        baseDensity = 0;
+        baseAge = 4.6;
+        ageRange = 4.0;
+        ageDistribution = 'normal';
+        baseFeh = 0.0;
       } else {
         // Irregular galaxy with chaotic starburst knots
         const clump1 = Math.exp(-(Math.pow(dx - diskRadiusCells * 0.25, 2) + Math.pow(dy - diskRadiusCells * 0.15, 2)) / (diskRadiusCells * 1.5));
@@ -665,8 +675,10 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
         }
       }
 
+      const isEmptyMorph = config.morphology === 'empty' || baseDensity <= 0;
+
       // Final numerical bounds
-      const density = +Math.max(0.01, Math.min(3.5, baseDensity)).toFixed(2);
+      const density = isEmptyMorph ? 0 : +Math.max(0.01, Math.min(3.5, baseDensity)).toFixed(2);
       const meanAge = +Math.max(0.2, Math.min(12.8, baseAge)).toFixed(2);
       const metallicityMean = +Math.max(-1.7, Math.min(0.52, baseFeh)).toFixed(2);
       const ageRangeClamped = +Math.max(0.5, Math.min(12.5, ageRange)).toFixed(2);
@@ -674,27 +686,33 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
       const ageMax = +Math.min(13.5, meanAge + ageRangeClamped / 2).toFixed(1);
 
       // Color based on luminosity-weighted average of constituent stars:
-      const colorHex = computeSectorConstituentColor(
-        sectorSeedNum,
-        meanAge,
-        ageRangeClamped,
-        ageDistribution,
-        metallicityMean,
-        density
-      );
+      const colorHex = isEmptyMorph
+        ? '#0f172a'
+        : computeSectorConstituentColor(
+            sectorSeedNum,
+            meanAge,
+            ageRangeClamped,
+            ageDistribution,
+            metallicityMean,
+            density
+          );
 
       // Opacity based on density: denser = more opaque, sparser = more transparent
-      const opacity = getSectorOpacityByDensity(density);
+      const opacity = isEmptyMorph ? 0.04 : getSectorOpacityByDensity(density);
 
       // Region name
       const region = getRegionName(config.morphology, rNorm, density, isArmSector);
 
       // Estimated star systems inside a 50x50 sector (50x50 = 2,500 hexes)
-      const estimatedStars50x50 = density <= 1.0
+      const estimatedStars50x50 = isEmptyMorph
+        ? 0
+        : density <= 1.0
         ? Math.round(2500 * density)
         : Math.round(2500 * (1.0 + (density - 1.0) * 1.4));
 
-      const sectorName = `Sector ${coord} (${region.split(' ')[0]})`;
+      const sectorName = isEmptyMorph
+        ? `Sector ${coord} (Empty)`
+        : `Sector ${coord} (${region.split(' ')[0]})`;
 
       if (density >= 0.05) {
         activeCount++;
@@ -704,10 +722,10 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
         totalEstimatedStars += estimatedStars50x50;
       }
 
-      const giantStars = generateGalaxyGiantStars(density, meanAge, sectorSeedNum, 26);
+      const giantStars = isEmptyMorph ? [] : generateGalaxyGiantStars(density, meanAge, sectorSeedNum, 26);
 
       // Nebulae can ONLY generate in young sectors (< 1.0 Gyr) with sufficient density
-      const hasNebula = meanAge < 1.0 && density >= 0.08 && secRng.next() < 0.55;
+      const hasNebula = !isEmptyMorph && meanAge < 1.0 && density >= 0.08 && secRng.next() < 0.55;
       let nebulaName: string | undefined = undefined;
       if (hasNebula) {
         nebulaCount++;
@@ -765,6 +783,162 @@ export function generateGalaxyGrid(config: GalaxyConfig = DEFAULT_GALAXY_CONFIG)
     sectors,
     stats: {
       totalSectors: config.columns * config.rows,
+      activeSectors: activeCount,
+      avgDensity,
+      avgAge,
+      avgMetallicity,
+      totalEstimatedStars,
+      nebulaCount,
+    },
+  };
+}
+
+/**
+ * Overlays a cached/placed SectorHexGridData onto a GalaxySectorHex so that sectors
+ * generated or placed in Sector View (or cleared to empty) immediately reflect on the Galaxy Map.
+ */
+export function applyCachedSectorToGalaxyHex(
+  hex: GalaxySectorHex,
+  cachedGrid: any,
+  hexRadius: number = 26
+): GalaxySectorHex {
+  if (!cachedGrid || !cachedGrid.config) return hex;
+
+  const systems = Array.isArray(cachedGrid.systems) ? cachedGrid.systems : [];
+  const cfg = cachedGrid.config;
+  const seed = Number(cfg.seed) || hex.seed;
+
+  // If the cached sector is explicitly empty (0 systems and 0 density)
+  if (systems.length === 0 && (cfg.density ?? 0) <= 0.001) {
+    return {
+      ...hex,
+      name: cfg.name || `Sector ${hex.coord} (Empty)`,
+      seed,
+      density: 0,
+      estimatedStars50x50: 0,
+      colorHex: '#0f172a',
+      opacity: 0.04,
+      region: 'Empty Sector Slot',
+      giantStars: [],
+      hasNebula: false,
+      nebulaName: undefined,
+    };
+  }
+
+  const totalCells = Math.max(1, (cfg.columns || 50) * (cfg.rows || 50));
+  const derivedDensity =
+    systems.length > 0
+      ? +(systems.length / (totalCells * 0.5)).toFixed(2)
+      : +(cfg.density || 0.05).toFixed(2);
+  const density = Math.max(0.02, Math.min(3.5, derivedDensity));
+  const meanAge = +(cfg.meanAge ?? hex.meanAge).toFixed(2);
+  const ageRange = +(cfg.ageRange ?? hex.ageRange).toFixed(2);
+  const ageDistribution: 'normal' | 'uniform' = cfg.ageDistribution ?? hex.ageDistribution;
+  const ageMin = +Math.max(0.1, meanAge - ageRange / 2).toFixed(1);
+  const ageMax = +Math.min(13.5, meanAge + ageRange / 2).toFixed(1);
+  const metallicityMean = +(cfg.metallicityMean ?? hex.metallicityMean).toFixed(2);
+  const colorHex =
+    cachedGrid.integratedColorHex ||
+    computeSectorConstituentColor(seed, meanAge, ageRange, ageDistribution, metallicityMean, density);
+  const opacity = getSectorOpacityByDensity(density);
+  const hasNebula = Boolean(cachedGrid.hasNebula);
+  const nebulaName = cachedGrid.nebula?.name || hex.nebulaName;
+
+  // Map actual giant star systems from the cached sector into galaxy hex coordinates
+  const secCenterX = cachedGrid.hexCenterX || 1200;
+  const secCenterY = cachedGrid.hexCenterY || 1200;
+  const secRadius = Math.max(100, cachedGrid.hexRadius || 1120);
+  const scale = (hexRadius * 0.8) / secRadius;
+
+  const giantSystems = systems.filter(
+    (s: any) => s && (s.isGiantSystem || (s.mass >= 10 && s.mass < 500000))
+  );
+  const giantStars: GalaxyGiantStar[] =
+    giantSystems.length > 0
+      ? giantSystems.slice(0, 25).map((s: any, idx: number) => ({
+          id: s.id || `GIANT-${seed}-${idx}`,
+          relX: +((s.x - secCenterX) * scale).toFixed(1),
+          relY: +((s.y - secCenterY) * scale).toFixed(1),
+          mass: s.mass || 15,
+          spectralType: s.primaryClass || 'B0V',
+          spectralCat: s.spectralCat || 'ob',
+          colorHex: s.colorHex || '#60a5fa',
+          glowColor: s.glowColor || s.colorHex || '#38bdf8',
+          size: +(1.6 + Math.min(1.6, ((s.mass || 15) - 10) / 28)).toFixed(2),
+        }))
+      : generateGalaxyGiantStars(density, meanAge, seed, hexRadius);
+
+  const region =
+    hex.region === 'Uncharted Empty Void' || hex.region === 'Empty Sector Slot'
+      ? getRegionName('spiral', hex.rNorm, density, density >= 0.45)
+      : hex.region;
+
+  return {
+    ...hex,
+    name: cfg.name || `Sector ${hex.coord} (${region.split(' ')[0]})`,
+    seed,
+    density,
+    meanAge,
+    ageRange,
+    ageDistribution,
+    ageMin,
+    ageMax,
+    metallicityMean,
+    colorHex,
+    opacity,
+    region,
+    estimatedStars50x50: systems.length,
+    giantStars,
+    hasNebula,
+    nebulaName,
+  };
+}
+
+/**
+ * Hydrates a GalaxyGridData with all cached/placed sectors from UniverseCache
+ * and recomputes galaxy summary statistics.
+ */
+export function applyCachedSectorsToGalaxyGrid(
+  baseData: GalaxyGridData,
+  getCachedByCoord: (coord: string, seed?: number) => any | null
+): GalaxyGridData {
+  let hasAnyOverlay = false;
+  let activeCount = 0;
+  let totalDensity = 0;
+  let totalAge = 0;
+  let totalFeh = 0;
+  let totalEstimatedStars = 0;
+  let nebulaCount = 0;
+
+  const updatedSectors = baseData.sectors.map((sec) => {
+    const cached = getCachedByCoord(sec.coord, sec.seed);
+    const finalSec = cached ? applyCachedSectorToGalaxyHex(sec, cached, 26) : sec;
+    if (cached) hasAnyOverlay = true;
+
+    if (finalSec.density >= 0.05 || finalSec.estimatedStars50x50 > 0) {
+      activeCount++;
+      totalDensity += finalSec.density;
+      totalAge += finalSec.meanAge;
+      totalFeh += finalSec.metallicityMean;
+      totalEstimatedStars += finalSec.estimatedStars50x50;
+    }
+    if (finalSec.hasNebula) {
+      nebulaCount++;
+    }
+    return finalSec;
+  });
+
+  if (!hasAnyOverlay) return baseData;
+
+  const avgDensity = activeCount > 0 ? +(totalDensity / activeCount).toFixed(2) : 0;
+  const avgAge = activeCount > 0 ? +(totalAge / activeCount).toFixed(2) : 0;
+  const avgMetallicity = activeCount > 0 ? +(totalFeh / activeCount).toFixed(2) : 0;
+
+  return {
+    config: baseData.config,
+    sectors: updatedSectors,
+    stats: {
+      totalSectors: baseData.stats.totalSectors,
       activeSectors: activeCount,
       avgDensity,
       avgAge,

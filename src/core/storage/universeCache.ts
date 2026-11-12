@@ -439,6 +439,106 @@ class UniverseCacheManager {
     return this.sectorCache.get(key) || null;
   }
 
+  /**
+   * Look up a cached sector by its 4-digit galaxy coordinate (e.g. "2525").
+   * Checks the exact (fallbackSeed, coord) key first, then any cached sector at that coord.
+   */
+  public getCachedSectorByCoord(coord: string, fallbackSeed?: number | string): SectorHexGridData | null {
+    if (!coord) return null;
+    if (fallbackSeed !== undefined) {
+      const exactKey = this.getSectorCacheKey(fallbackSeed, coord);
+      const exact = this.sectorCache.get(exactKey);
+      if (exact) return exact;
+    }
+    let matched: SectorHexGridData | null = null;
+    for (const [k, v] of this.sectorCache.entries()) {
+      if (k.endsWith(`_${coord}`) || v?.config?.coord === coord) {
+        matched = v;
+      }
+    }
+    return matched;
+  }
+
+  /**
+   * Places a generated/edited SectorHexGridData into the galaxy at coordinate `coord` ("0101"-"5050").
+   * Replaces any previous sector cached at that coordinate and binds it to the coordinate.
+   */
+  public placeSectorAtCoord(
+    coord: string,
+    data: SectorHexGridData,
+    galaxySectorSeed?: number,
+    customSectorName?: string
+  ): SectorHexGridData {
+    const cleanCoord = coord.trim().padStart(4, '0');
+    // Remove any older cache entries for this galaxy coordinate so there is no ambiguity
+    for (const k of Array.from(this.sectorCache.keys())) {
+      if (k.endsWith(`_${cleanCoord}`)) {
+        this.sectorCache.delete(k);
+        idbDelete(IDB_STORE_SECTORS, k);
+      }
+    }
+
+    const finalName =
+      customSectorName?.trim() ||
+      data.config.name ||
+      `Sector ${cleanCoord}`;
+
+    const updatedData: SectorHexGridData = {
+      ...data,
+      config: {
+        ...data.config,
+        coord: cleanCoord,
+        name: finalName,
+      },
+    };
+
+    const primaryKey = this.getSectorCacheKey(updatedData.config.seed, cleanCoord);
+    this.cacheLoadedSector(primaryKey, updatedData);
+
+    if (galaxySectorSeed !== undefined && galaxySectorSeed !== updatedData.config.seed) {
+      const galKey = this.getSectorCacheKey(galaxySectorSeed, cleanCoord);
+      this.cacheLoadedSector(galKey, updatedData);
+    }
+
+    // Also cache all constituent star systems
+    if (Array.isArray(updatedData.systems)) {
+      for (const s of updatedData.systems) {
+        if (s.sysResult) {
+          this.cacheLoadedSystem(s.id, s.sysResult);
+        }
+      }
+    }
+
+    // Update custom sector names map for active galaxy
+    if (typeof window !== 'undefined' && finalName) {
+      try {
+        const galCfg = this.getActiveGalaxyConfig();
+        const storageKey = `zook_sector_names_${galCfg.seed}`;
+        const raw = localStorage.getItem(storageKey);
+        const map = raw ? JSON.parse(raw) : {};
+        map[cleanCoord] = finalName;
+        localStorage.setItem(storageKey, JSON.stringify(map));
+      } catch (e) {
+        console.warn('Failed to persist custom sector name on placement:', e);
+      }
+    }
+
+    return updatedData;
+  }
+
+  /**
+   * Removes any cached sector override at coordinate `coord` ("0101"-"5050").
+   */
+  public removeSectorAtCoord(coord: string): void {
+    const cleanCoord = coord.trim().padStart(4, '0');
+    for (const k of Array.from(this.sectorCache.keys())) {
+      if (k.endsWith(`_${cleanCoord}`)) {
+        this.sectorCache.delete(k);
+        idbDelete(IDB_STORE_SECTORS, k);
+      }
+    }
+  }
+
   public hasCachedSector(key: string): boolean {
     return this.sectorCache.has(key);
   }

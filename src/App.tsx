@@ -135,7 +135,38 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleBackToGalaxy = () => {
+  const handleBackToGalaxy = (targetCoord?: string) => {
+    if (targetCoord) {
+      const clean = targetCoord.padStart(4, '0');
+      const c = parseInt(clean.slice(0, 2), 10) || 25;
+      const r = parseInt(clean.slice(2, 4), 10) || 25;
+      setLastGalaxySector((prev) => ({
+        ...(prev || {
+          name: `Sector ${clean}`,
+          seed: 4289,
+          seedString: `SEC-${clean}`,
+          rNorm: 0.5,
+          rKpc: 15,
+          thetaRad: 0,
+          density: 0.5,
+          meanAge: 4.5,
+          ageRange: 4.0,
+          ageDistribution: 'normal',
+          ageMin: 2.5,
+          ageMax: 6.5,
+          metallicityMean: 0.0,
+          colorHex: '#38bdf8',
+          opacity: 0.7,
+          region: 'Galactic Disk',
+          estimatedStars50x50: 100,
+          giantStars: [],
+          hasNebula: false,
+        }),
+        coord: clean,
+        col: c,
+        row: r,
+      }));
+    }
     setReturnToGalaxyTransition(true);
     if (typeof document !== 'undefined' && 'startViewTransition' in document) {
       (document as unknown as { startViewTransition: (cb: () => void) => void }).startViewTransition(() => {

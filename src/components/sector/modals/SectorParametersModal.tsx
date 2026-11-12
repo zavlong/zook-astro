@@ -162,16 +162,24 @@ export const SectorParametersModal: React.FC<SectorParametersModalProps> = React
               <span className="text-slate-400">Stellar Occupancy Density:</span>
               <span
                 className={`font-bold ${
-                  draftDensity > 1.0 ? 'text-amber-300' : 'text-emerald-300'
+                  draftDensity > 1.0
+                    ? 'text-amber-300'
+                    : draftDensity <= 0.001
+                    ? 'text-slate-400'
+                    : 'text-emerald-300'
                 }`}
               >
                 {Math.round(draftDensity * 100)}%
-                {draftDensity > 1.0 ? ' (Overdensity Overflow)' : ''}
+                {draftDensity > 1.0
+                  ? ' (Overdensity Overflow)'
+                  : draftDensity <= 0.001
+                  ? ' (Empty Sector)'
+                  : ''}
               </span>
             </div>
             <input
               type="range"
-              min={0.05}
+              min={0}
               max={3.5}
               step={0.05}
               value={draftDensity}
@@ -184,6 +192,11 @@ export const SectorParametersModal: React.FC<SectorParametersModalProps> = React
                 excess density overflows onto mass, spawning heavy O/B stars, multiple-star
                 hierarchies (binaries, trinaries, quadruples), and collapsed stellar remnants
                 (black holes, neutron stars, white dwarfs)!
+              </div>
+            ) : draftDensity <= 0.001 ? (
+              <div className="text-[10px] text-slate-400 flex items-center justify-between mt-2 pt-1 border-t border-slate-800/80">
+                <span>Estimated Systems:</span>
+                <span className="text-cyan-400 font-bold">0 star systems (Empty Canvas)</span>
               </div>
             ) : (
               <div className="text-[10px] text-slate-400 flex items-center justify-between mt-2 pt-1 border-t border-slate-800/80">

@@ -55,6 +55,7 @@ import {
   type SectorPreset,
 } from './panels/SectorTopToolbar';
 import { SectorParametersModal } from './modals/SectorParametersModal';
+import { PlaceSectorInGalaxyModal } from './modals/PlaceSectorInGalaxyModal';
 import { SectorFilterOverlayBar } from './panels/SectorFilterOverlayBar';
 import {
   SectorSystemInspector,
@@ -63,7 +64,7 @@ import {
 
 interface SectorHexAppProps {
   onLaunchStarGen: (params: StarGenParams, coord?: string) => void;
-  onBackToGalaxy?: () => void;
+  onBackToGalaxy?: (targetCoord?: string) => void;
   initialConfig?: Partial<SectorHexConfig> | null;
   initialSelectedCoord?: string | null;
   returnTransition?: boolean;
@@ -253,6 +254,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       if (cancelled) return;
       const fresh = generateSectorHexGrid(config);
       universeCache.cacheLoadedSector(sectorCacheKey, fresh);
+      if (config.coord) {
+        universeCache.placeSectorAtCoord(config.coord, fresh);
+      }
       if (!cancelled) {
         setIsFromCache(false);
         setGridData(fresh);
@@ -818,6 +822,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       setGridData(updatedGrid);
       universeCache.cacheLoadedSystem(newSystem.id, sysResult);
       universeCache.cacheLoadedSector(sectorCacheKey, updatedGrid);
+      if (config.coord) {
+        universeCache.placeSectorAtCoord(config.coord, updatedGrid);
+      }
 
       setSelectedSystem(newSystem);
       setSelectedCoord(newSystem.coord);
@@ -843,6 +850,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
 
       setGridData(updatedGrid);
       universeCache.cacheLoadedSector(sectorCacheKey, updatedGrid);
+      if (config.coord) {
+        universeCache.placeSectorAtCoord(config.coord, updatedGrid);
+      }
 
       setSelectedSystem(newSystems[0] || null);
       setSelectedCoord(newSystems[0]?.coord || null);
@@ -889,6 +899,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
 
       setGridData(updatedGrid);
       universeCache.cacheLoadedSector(sectorCacheKey, updatedGrid);
+      if (config.coord) {
+        universeCache.placeSectorAtCoord(config.coord, updatedGrid);
+      }
 
       setSelectedSystem(movedSystem);
       setSelectedCoord(movedSystem.coord);
@@ -963,6 +976,9 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       setGridData(updatedGrid);
       universeCache.cacheLoadedSystem(updatedSystem.id, updatedSysResult);
       universeCache.cacheLoadedSector(sectorCacheKey, updatedGrid);
+      if (config.coord) {
+        universeCache.placeSectorAtCoord(config.coord, updatedGrid);
+      }
 
       setSelectedSystem(updatedSystem);
       setSelectedCoord(updatedSystem.coord);
@@ -1032,26 +1048,58 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
     };
   }, []);
 
-  const handleBackToGalaxyWithTransition = useCallback(() => {
-    if (!onBackToGalaxy || isExitingToGalaxy || isEnteringSystem) return;
+  const handleBackToGalaxyWithTransition = useCallback(
+    (targetCoord?: string) => {
+      if (!onBackToGalaxy || isExitingToGalaxy || isEnteringSystem) return;
 
-    const prefersReducedMotion =
-      typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const prefersReducedMotion =
+        typeof window !== 'undefined' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    if (prefersReducedMotion) {
-      onBackToGalaxy();
-      return;
-    }
+      if (prefersReducedMotion) {
+        onBackToGalaxy(targetCoord || config.coord);
+        return;
+      }
 
-    setIsExitingToGalaxy(true);
-    if (exitTimerRef.current) {
-      clearTimeout(exitTimerRef.current);
-    }
-    exitTimerRef.current = setTimeout(() => {
-      onBackToGalaxy();
-    }, 350);
-  }, [onBackToGalaxy, isExitingToGalaxy, isEnteringSystem]);
+      setIsExitingToGalaxy(true);
+      if (exitTimerRef.current) {
+        clearTimeout(exitTimerRef.current);
+      }
+      exitTimerRef.current = setTimeout(() => {
+        onBackToGalaxy(targetCoord || config.coord);
+      }, 350);
+    },
+    [onBackToGalaxy, isExitingToGalaxy, isEnteringSystem, config.coord]
+  );
+
+  // Place Sector in Galaxy Modal state & handler
+  const [showPlaceInGalaxyModal, setShowPlaceInGalaxyModal] = useState<boolean>(false);
+
+  const handlePlaceSectorInGalaxy = useCallback(
+    (targetCoord: string, targetName: string, shouldNavigateToGalaxy: boolean) => {
+      const updatedData = universeCache.placeSectorAtCoord(
+        targetCoord,
+        gridData,
+        undefined,
+        targetName
+      );
+      setConfig((prev) => ({
+        ...prev,
+        coord: targetCoord,
+        name: targetName,
+      }));
+      setGridData(updatedData);
+      setIsFromCache(true);
+      setShowPlaceInGalaxyModal(false);
+      setBannerNotice(
+        `📍 Successfully placed "${targetName}" into Galaxy Sector ${targetCoord}!`
+      );
+      if (shouldNavigateToGalaxy && onBackToGalaxy) {
+        handleBackToGalaxyWithTransition(targetCoord);
+      }
+    },
+    [gridData, onBackToGalaxy, handleBackToGalaxyWithTransition]
+  );
 
   // Zoom towards a specific screen coordinate (cursor or center)
   const zoomAtScreenPoint = useCallback(
@@ -1125,7 +1173,12 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
       coord: preset.coord,
       columns: preset.coord === '2525' ? Math.max(50, prev.columns) : prev.columns,
       rows: preset.coord === '2525' ? Math.max(50, prev.rows) : prev.rows,
-      name: preset.coord === '2525' ? 'Sector 2525 (Galactic Nucleus)' : prev.name,
+      name:
+        preset.id === 'empty'
+          ? `Sector ${prev.coord || 'Empty'} (Empty Canvas)`
+          : preset.coord === '2525'
+          ? 'Sector 2525 (Galactic Nucleus)'
+          : prev.name,
     }));
   };
 
@@ -1149,7 +1202,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
   ) => {
     const clampedCols = Math.max(4, Math.min(100, Math.round(newCols)));
     const clampedRows = Math.max(4, Math.min(100, Math.round(newRows)));
-    const clampedDensity = Math.max(0.05, Math.min(3.5, +newDensity.toFixed(2)));
+    const clampedDensity = Math.max(0, Math.min(3.5, +newDensity.toFixed(2)));
     const clampedAge = Math.max(0.2, Math.min(12.8, +newAge.toFixed(2)));
     const clampedAgeRange = Math.max(0.5, Math.min(12.5, +newAgeRange.toFixed(2)));
     const clampedFeh = Math.max(-1.7, Math.min(0.5, +newFeh.toFixed(2)));
@@ -1585,6 +1638,7 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
         }}
         onRollNewSector={handleRollNewSector}
         onOpenSectorExportModal={() => setShowSectorExportModal(true)}
+        onOpenPlaceInGalaxyModal={() => setShowPlaceInGalaxyModal(true)}
         setBannerNotice={setBannerNotice}
         isMovingSystem={isMovingSystem}
         onToggleMovingSystem={() => setIsMovingSystem((prev) => !prev)}
@@ -2579,6 +2633,14 @@ export const SectorHexApp: React.FC<SectorHexAppProps> = ({
         empires={empires}
         activeEmpireId={activeEmpireId}
         onImportSector={handleImportSector}
+      />
+
+      {/* Place Sector in Galaxy Modal */}
+      <PlaceSectorInGalaxyModal
+        isOpen={showPlaceInGalaxyModal}
+        onClose={() => setShowPlaceInGalaxyModal(false)}
+        gridData={gridData}
+        onPlaceInGalaxy={handlePlaceSectorInGalaxy}
       />
 
       {/* Universal Star & Planet Architect Modal */}

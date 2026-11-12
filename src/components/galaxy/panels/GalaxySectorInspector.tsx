@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Check,
   Edit2,
   ArrowRight,
   Download,
+  Zap,
+  Trash2,
 } from 'lucide-react';
 import { GalaxySectorHex } from '../../../core/generation/galaxyGen';
 import {
@@ -24,6 +26,17 @@ export interface GalaxySectorInspectorProps {
   handleTriggerEnterSector: (sector: GalaxySectorHex) => void;
   setExportSectorGridData: (data: SectorHexGridData) => void;
   setShowSectorExportModal: (show: boolean) => void;
+  onQuickGenerateSector?: (
+    sector: GalaxySectorHex,
+    opts: {
+      density: number;
+      meanAge: number;
+      metallicityMean: number;
+      hasNebula: boolean;
+      name?: string;
+    }
+  ) => void;
+  onClearSector?: (sector: GalaxySectorHex) => void;
 }
 
 export const GalaxySectorInspector: React.FC<GalaxySectorInspectorProps> = React.memo(({
@@ -38,8 +51,32 @@ export const GalaxySectorInspector: React.FC<GalaxySectorInspectorProps> = React
   handleTriggerEnterSector,
   setExportSectorGridData,
   setShowSectorExportModal,
+  onQuickGenerateSector,
+  onClearSector,
 }) => {
   if (!showUI) return null;
+
+  const [genDensity, setGenDensity] = useState<number>(0.4);
+  const [genAge, setGenAge] = useState<number>(4.8);
+  const [genFeh, setGenFeh] = useState<number>(0.04);
+  const [genNebula, setGenNebula] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (selectedSector) {
+      if (selectedSector.density > 0) {
+        setGenDensity(selectedSector.density);
+        setGenAge(selectedSector.meanAge);
+        setGenFeh(selectedSector.metallicityMean);
+        setGenNebula(selectedSector.hasNebula);
+      } else {
+        setGenDensity(0.4); setGenAge(4.8); setGenFeh(0.04); setGenNebula(false);
+      }
+    }
+  }, [selectedSector?.coord]);
+
+  const applyPreset = (density: number, age: number, feh: number, nebula: boolean) => {
+    setGenDensity(density); setGenAge(age); setGenFeh(feh); setGenNebula(nebula);
+  };
 
   return (
     <aside
@@ -123,7 +160,7 @@ export const GalaxySectorInspector: React.FC<GalaxySectorInspectorProps> = React
             className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-mono text-xs font-bold tracking-wider transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer group"
             title="Sector Map (Hotkey: Page Down)"
           >
-            <span>Sector Map</span>
+            <span>{selectedSector.density === 0 ? 'Enter Empty Sector Canvas' : 'Sector Map'}</span>
             <kbd className="px-1.5 py-0.5 text-[9px] bg-slate-950/70 border border-slate-700/80 rounded text-slate-300 font-sans normal-case tracking-normal">
               PgDn
             </kbd>
@@ -145,10 +182,7 @@ export const GalaxySectorInspector: React.FC<GalaxySectorInspectorProps> = React
                   meanAge: selectedSector.meanAge,
                   ageRange: selectedSector.ageRange,
                   ageDistribution: selectedSector.ageDistribution,
-                  ageSigma:
-                    selectedSector.ageDistribution === 'uniform'
-                      ? +(selectedSector.ageRange / Math.sqrt(12)).toFixed(2)
-                      : +(selectedSector.ageRange / 2.2).toFixed(2),
+                  ageSigma: selectedSector.ageDistribution === 'uniform' ? +(selectedSector.ageRange / Math.sqrt(12)).toFixed(2) : +(selectedSector.ageRange / 2.2).toFixed(2),
                   metallicityMean: selectedSector.metallicityMean,
                   metallicitySigma: 0.22,
                   hasNebula: selectedSector.hasNebula,
@@ -167,6 +201,159 @@ export const GalaxySectorInspector: React.FC<GalaxySectorInspectorProps> = React
           <p className="text-[10px] text-slate-500 font-mono text-center -mt-2">
             Hotkey: <strong className="text-slate-400">Page Down</strong> to zoom in &bull; Double-click hex opens directly
           </p>
+
+          {/* BUILD / POPULATE SECTOR IN HEX CARD */}
+          <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs font-mono space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-white flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                <span>Populate Hex #{selectedSector.coord}</span>
+              </span>
+              {selectedSector.density === 0 ? (
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px]">
+                  Empty Slot
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/80 text-[10px]">
+                  {Math.round(selectedSector.density * 100)}% Occ
+                </span>
+              )}
+            </div>
+
+            {/* Quick Preset Pills */}
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => applyPreset(0.4, 4.8, 0.04, false)}
+                className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 hover:border-cyan-500 text-slate-300 text-[10px] transition text-left cursor-pointer"
+              >
+                🌀 Thin Disk (40%)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset(0.85, 0.6, 0.22, true)}
+                className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 hover:border-fuchsia-500 text-fuchsia-300 text-[10px] transition text-left cursor-pointer"
+              >
+                ✨ Starburst (85%)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset(0.2, 10.5, -0.9, false)}
+                className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 hover:border-amber-500 text-amber-300 text-[10px] transition text-left cursor-pointer"
+              >
+                ⚪ Ancient Halo (20%)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset(1.3, 7.5, 0.22, false)}
+                className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 hover:border-blue-500 text-blue-300 text-[10px] transition text-left cursor-pointer"
+              >
+                🔥 Dense Core (130%)
+              </button>
+            </div>
+
+            {/* Sliders */}
+            <div className="space-y-2 pt-1 border-t border-slate-800/70 text-[11px]">
+              <div>
+                <div className="flex justify-between items-center mb-0.5">
+                  <span className="text-slate-400">Density:</span>
+                  <strong className={genDensity > 1.0 ? 'text-amber-300' : 'text-emerald-300'}>
+                    {Math.round(genDensity * 100)}%
+                  </strong>
+                </div>
+                <input
+                  type="range"
+                  min={0.05}
+                  max={2.0}
+                  step={0.05}
+                  value={genDensity}
+                  onChange={(e) => setGenDensity(parseFloat(e.target.value))}
+                  className="w-full h-1 bg-slate-800 rounded appearance-none accent-emerald-500 cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-0.5">
+                  <span className="text-slate-400">Mean Age:</span>
+                  <strong className="text-cyan-300">{genAge.toFixed(1)} Gyr</strong>
+                </div>
+                <input
+                  type="range"
+                  min={0.2}
+                  max={12.0}
+                  step={0.1}
+                  value={genAge}
+                  onChange={(e) => setGenAge(parseFloat(e.target.value))}
+                  className="w-full h-1 bg-slate-800 rounded appearance-none accent-cyan-500 cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-0.5">
+                  <span className="text-slate-400">Metallicity [Fe/H]:</span>
+                  <strong className={genFeh >= 0 ? 'text-amber-300' : 'text-cyan-300'}>
+                    {genFeh >= 0 ? `+${genFeh.toFixed(2)}` : genFeh.toFixed(2)} dex
+                  </strong>
+                </div>
+                <input
+                  type="range"
+                  min={-1.5}
+                  max={0.5}
+                  step={0.05}
+                  value={genFeh}
+                  onChange={(e) => setGenFeh(parseFloat(e.target.value))}
+                  className="w-full h-1 bg-slate-800 rounded appearance-none accent-amber-500 cursor-pointer"
+                />
+              </div>
+
+              <label className="flex items-center justify-between text-slate-300 cursor-pointer pt-1">
+                <span className="flex items-center gap-1.5">
+                  <span>🌌</span>
+                  <span>Emission Nebula Clouds</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={genNebula}
+                  onChange={(e) => setGenNebula(e.target.checked)}
+                  className="accent-fuchsia-500 rounded cursor-pointer"
+                />
+              </label>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2 pt-1 border-t border-slate-800/70">
+              <button
+                type="button"
+                onClick={() => {
+                  if (onQuickGenerateSector && selectedSector) {
+                    onQuickGenerateSector(selectedSector, {
+                      density: genDensity,
+                      meanAge: genAge,
+                      metallicityMean: genFeh,
+                      hasNebula: genNebula,
+                      name: customSectorNames[selectedSector.coord] || selectedSector.name,
+                    });
+                  }
+                }}
+                className="flex-1 py-1.5 px-2.5 rounded-lg bg-gradient-to-r from-amber-600 via-orange-600 to-amber-500 hover:from-amber-500 hover:to-orange-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
+                title={`Generate star systems and place into Sector ${selectedSector.coord}`}
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>⚡ Generate in Hex {selectedSector.coord}</span>
+              </button>
+              {selectedSector.density > 0 && onClearSector && (
+                <button
+                  type="button"
+                  onClick={() => onClearSector(selectedSector)}
+                  className="py-1.5 px-2.5 rounded-lg bg-slate-950 hover:bg-red-950/80 border border-red-900/60 hover:border-red-600 text-red-300 font-bold text-xs flex items-center justify-center gap-1 transition cursor-pointer"
+                  title={`Clear Sector ${selectedSector.coord} to 0 stars`}
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                  <span>Clear</span>
+                </button>
+              )}
+            </div>
+          </div>
 
           {/* Galactic Position & Region */}
           <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 text-xs font-mono">

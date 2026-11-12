@@ -11,6 +11,7 @@ import {
   Plus,
   Move,
   Trash2,
+  MapPin,
 } from 'lucide-react';
 import {
   SectorHexConfig,
@@ -20,6 +21,7 @@ import {
 import { universeCache } from '../../../core/storage/universeCache';
 
 export type SectorPresetKey =
+  | 'empty'
   | 'disk'
   | 'young-cluster'
   | 'old-halo'
@@ -39,6 +41,16 @@ export interface SectorPreset {
 }
 
 export const SECTOR_PRESETS: SectorPreset[] = [
+  {
+    id: 'empty',
+    label: 'Empty Canvas',
+    description: 'Completely empty sector (0 stars) to place star systems from scratch.',
+    density: 0,
+    meanAge: 4.5,
+    ageSigma: 1.8,
+    metallicityMean: 0.0,
+    metallicitySigma: 0.2,
+  },
   {
     id: 'disk',
     label: 'Galactic Thin Disk',
@@ -113,6 +125,7 @@ export interface SectorTopToolbarProps {
   onToggleSectorEditMode: () => void;
   onRollNewSector: () => void;
   onOpenSectorExportModal: () => void;
+  onOpenPlaceInGalaxyModal?: () => void;
   onSaveUniverse?: () => void;
   setBannerNotice?: (notice: string | null) => void;
   // Edit mode banner & action handlers
@@ -146,6 +159,7 @@ export const SectorTopToolbar: React.FC<SectorTopToolbarProps> = React.memo(
     onToggleSectorEditMode,
     onRollNewSector,
     onOpenSectorExportModal,
+    onOpenPlaceInGalaxyModal,
     onSaveUniverse,
     setBannerNotice,
     isMovingSystem,
@@ -380,6 +394,17 @@ export const SectorTopToolbar: React.FC<SectorTopToolbarProps> = React.memo(
                 <Download className="w-3.5 h-3.5 text-cyan-400" />
                 <span>Export / Import Sector</span>
               </button>
+
+              {onOpenPlaceInGalaxyModal && (
+                <button
+                  onClick={onOpenPlaceInGalaxyModal}
+                  className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg shadow-blue-500/25 transition cursor-pointer"
+                  title="Place this sector into a specific 50×50 galaxy coordinate hex"
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>📍 Place in Galaxy {config.coord ? `(#${config.coord})` : ''}</span>
+                </button>
+              )}
 
               <button
                 onClick={handleSave}

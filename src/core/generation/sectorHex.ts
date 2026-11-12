@@ -297,11 +297,15 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
   const numGiantSystems = Math.floor(densityPct / 10);
 
   // Total stars in sector: baseline density of stars reduced by half (effective density of 50% before overflow at 100%)
+  // If density is 0 (Empty Sector), generate 0 stars so the user can build from scratch.
   const effectiveDensity = config.density * 0.5;
-  const targetStarCount = Math.max(
-    Math.max(1, numGiantSystems),
-    Math.round(config.columns * config.rows * effectiveDensity)
-  );
+  const targetStarCount =
+    config.density <= 0.001
+      ? 0
+      : Math.max(
+          Math.max(1, numGiantSystems),
+          Math.round(config.columns * config.rows * effectiveDensity)
+        );
 
   const padding = 55;
   const usableW = sectorWidth - padding * 2;
@@ -342,7 +346,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
 
   // Compute organic spacing within the hexagon interior
   const hexArea = ((3 * Math.sqrt(3)) / 2) * Math.pow(Math.max(100, hexRadius - 48), 2);
-  const avgArea = hexArea / targetStarCount;
+  const avgArea = hexArea / Math.max(1, targetStarCount);
   const idealDist = Math.sqrt(avgArea);
   const minSpacing = Math.max(26, Math.min(65, idealDist * 0.70));
   const minDistSq = minSpacing * minSpacing;
@@ -685,7 +689,7 @@ export function generateSectorHexGrid(config: SectorHexConfig = DEFAULT_SECTOR_C
 
   // Special System for Sector 2525 (Center of Galaxy Map):
   // "if sector number = 2525, create system with 1000000 solar masses (no effect to the rest of the mass number)"
-  const isSector2525 = config.coord === '2525' || config.name?.includes('2525');
+  const isSector2525 = (config.coord === '2525' || config.name?.includes('2525')) && config.density > 0.001;
   if (isSector2525) {
     const smbhX = Math.round(sectorWidth / 2);
     const smbhY = Math.round(sectorHeight / 2);
